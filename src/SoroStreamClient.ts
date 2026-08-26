@@ -113,6 +113,7 @@ import type {
   BatchCancelResult,
   BatchWithdrawResult,
   BatchWithdrawPartialResult,
+  BatchProgress,
   BulkCreateOptions,
   BulkCreateResult,
   CancelStreamParams,
@@ -2187,6 +2188,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    * @param streamIds - Stream IDs to withdraw from.
    * @param batchSize - Maximum operations per transaction (default 8). Chunks
    *   are still attempted together, but a chunk failure is recorded per-stream.
+   * @param onProgress - Optional callback fired after each chunk completes
+   *   (success or failure), reporting cumulative `{ completed, total,
+   *   processedIds }` so callers can render incremental progress.
    * @returns `{ successes, failures }` — IDs that were successfully withdrawn
    *   and the IDs+errors that were not.
    *
@@ -2197,17 +2201,27 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    *
    * @example
    * ```ts
-   * const { successes, failures } = await client.batchWithdraw(["1", "2", "3"]);
+   * const { successes, failures } = await client.batchWithdraw(
+   *   ["1", "2", "3"],
+   *   2,
+   *   ({ completed, total }) => console.log(`Withdrawn ${completed}/${total}`),
+   * );
    * if (failures.length) {
    *   console.warn("Some withdrawals failed:", failures);
    * }
    * console.log("Withdrawn:", successes);
    * ```
    */
-  async batchWithdraw(streamIds: string[], batchSize = 8): Promise<BatchWithdrawPartialResult> {
+  async batchWithdraw(
+    streamIds: string[],
+    batchSize = 8,
+    onProgress?: (progress: BatchProgress) => void,
+  ): Promise<BatchWithdrawPartialResult> {
     const successes: string[] = [];
     const failures: { id: string; error: Error }[] = [];
     const recipient = await this.requireWalletAdapter().getPublicKey();
+    const total = streamIds.length;
+    let completed = 0;
 
     for (let i = 0; i < streamIds.length; i += batchSize) {
       const chunk = streamIds.slice(i, i + batchSize);
@@ -2236,6 +2250,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
           failures.push({ id, error: err instanceof Error ? err : new Error(String(err)) });
         }
       }
+
+      completed += chunk.length;
+      onProgress?.({ completed, total, processedIds: chunk });
     }
 
     return { successes, failures };
@@ -3431,6 +3448,10 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    * @param options.token - Default SAC token contract address for rows that omit `token`.
    * @param options.autoRenew - Whether created streams auto-renew (default false).
    * @param options.batchSize - Maximum operations per transaction (default 8).
+   * @param options.onProgress - Optional callback fired after each chunk (or
+   *   row, for mixed-token chunks) is submitted, reporting cumulative
+   *   `{ completed, total, processedIds }` so callers can render incremental
+   *   progress. Fires on failures too — a failed row still counts as processed.
    * @returns `{ batches }` — one entry per submitted transaction, each with its `txHash` and the resulting `streamIds`.
    * @throws {BulkCreatePartialError} If one or more rows fail; carries `successfulBatches` and `failedSlots`.
    * @throws {TransactionFailedError} If a submitted transaction is rejected (wrapped into `failedSlots` rather than thrown directly).
@@ -3438,7 +3459,11 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    * @example
    * ```ts
    * try {
-   *   const { batches } = await client.bulkCreateStreams(rows, { token: usdc });
+   *   const { batches } = await client.bulkCreateStreams(rows, {
+   *     token: usdc,
+   *     onProgress: ({ completed, total }) =>
+   *       console.log(`Created ${completed}/${total} streams`),
+   *   });
    * } catch (err) {
    *   if (err instanceof BulkCreatePartialError) {
    *     console.error(`${err.failedSlots.length} stream(s) failed:`, err.failedSlots);
@@ -3455,6 +3480,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       const defaultToken = options.token;
       const autoRenew = options.autoRenew ?? false;
       const batchSize = options.batchSize ?? 8;
+      const onProgress = options.onProgress;
+      const total = rows.length;
+      let completed = 0;
 
       // Validate cliff for all rows before submitting anything
       for (const row of rows) {
@@ -3496,6 +3524,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
             } catch (error) {
               failedSlots.push({ index: i + j, row, error });
             }
+
+            completed += 1;
+            onProgress?.({ completed, total, processedIds: [row.recipient] });
           }
         } else {
           try {
@@ -3523,6 +3554,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
               failedSlots.push({ index: i + j, row, error });
             });
           }
+
+          completed += chunk.length;
+          onProgress?.({ completed, total, processedIds: chunk.map((r) => r.recipient) });
         }
       }
 

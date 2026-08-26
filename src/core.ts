@@ -128,6 +128,7 @@ export type {
   BatchCancelResult,
   BatchWithdrawResult,
   BatchWithdrawPartialResult,
+  BatchProgress,
   TokenAggregate,
   MultisigSigner,
   StreamEvent,
