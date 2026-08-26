@@ -329,3 +329,6 @@ export class RecipientValidationError extends SoroStreamError {
     this.warnings = warnings;
   }
 }
+
+export { InvalidStateTransitionError } from './state-machine.js';
+

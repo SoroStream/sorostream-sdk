@@ -233,6 +233,17 @@ export type {
 } from './types.js';
 
 export { RecipientValidationError } from './errors.js';
+export {
+  StreamStateMachine,
+  InvalidStateTransitionError,
+} from './state-machine.js';
+export type { StreamState, StreamAction } from './state-machine.js';
+export {
+  LobstrWalletAdapter,
+  createLobstrWalletAdapter,
+  createLobstrAdapter,
+} from './wallet.js';
+export type { LobstrWalletAdapterConfig, RequestOptions } from './types.js';
 export { PluginRegistry } from './pluginRegistry.js';
 export { getPortfolioStats } from './portfolioAnalytics.js';
 export { scheduleFeeBumpMonitor } from './feeBump.js';
@@ -240,3 +251,4 @@ export { createFeeRetryMiddleware, FeeRetryError } from './feeRetryMiddleware.js
 export type { FeeRetryMiddlewareOptions } from './feeRetryMiddleware.js';
 export { createFederationPlugin } from './federationPlugin.js';
 export type { FederationPluginOptions } from './federationPlugin.js';
+

@@ -104,6 +104,8 @@ export interface Stream {
    * off-chain only — the contract does not enforce isolation.
    */
   namespace?: string;
+  /** Optional on-chain tag/label for project grouping (issue #433). */
+  tag?: string;
   /** Optional helper method for JSON serialization of BigInt fields. */
   toJSON?(): Record<string, unknown>;
 }
@@ -162,6 +164,8 @@ export interface CreateStreamParams {
    * off-chain only — the contract does not enforce isolation.
    */
   namespace?: string;
+  /** Optional on-chain tag/label for project grouping (issue #433). */
+  tag?: string;
 }
 
 /** Overrides for cloneStream. Any CreateStreamParams field may be changed before submission. */
@@ -654,6 +658,23 @@ export interface WriteOptions {
    * Issue #268.
    */
   explain?: boolean;
+  /**
+   * Optional per-method timeout in milliseconds (issue #434).
+   * Overrides global client `txTimeoutMs` setting for this call.
+   */
+  timeoutMs?: number;
+  /** Alias for `timeoutMs` (issue #434). */
+  timeout?: number;
+}
+
+/** Options for read/query requests (issue #434). */
+export interface RequestOptions {
+  /** Optional AbortSignal to cancel in-flight request. */
+  signal?: AbortSignal;
+  /** Optional per-method timeout in milliseconds (issue #434). */
+  timeoutMs?: number;
+  /** Alias for `timeoutMs` (issue #434). */
+  timeout?: number;
 }
 
 // ── Issue #268: SDK explain mode ─────────────────────────────────────────────
@@ -1094,6 +1115,14 @@ export interface KmsWalletAdapterConfig {
   publicKey: string;
   /** Async function that signs raw payload bytes using KMS. */
   sign: (payload: Uint8Array) => Promise<Uint8Array>;
+}
+
+/** Configuration options for LobstrWalletAdapter (issue #431). */
+export interface LobstrWalletAdapterConfig {
+  /** Optional public key pre-configured for the adapter. */
+  publicKey?: string;
+  /** Optional custom Lobstr provider object or window.lobstr reference. */
+  provider?: any;
 }
 
 /** Result shape returned by SoroStreamClient.healthCheck (issue #308). */

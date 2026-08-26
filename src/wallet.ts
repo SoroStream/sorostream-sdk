@@ -5,6 +5,7 @@ import type {
   MultisigSigner,
   PasskeyAdapterConfig,
   KmsWalletAdapterConfig,
+  LobstrWalletAdapterConfig,
 } from './types.js';
 
 /**
@@ -673,3 +674,109 @@ export function createKmsWalletAdapter(config: KmsWalletAdapterConfig): WalletAd
 
 /** Alias for createKmsWalletAdapter. */
 export const createKmsAdapter = createKmsWalletAdapter;
+
+/**
+ * WalletAdapter implementation for the Lobstr wallet (issue #431).
+ * Supports both extension (`window.lobstr`) and mobile/custom provider instances.
+ */
+export class LobstrWalletAdapter implements WalletAdapter {
+  private publicKey?: string;
+  private provider?: any;
+  private networkListeners: Set<(network: Network) => void> = new Set();
+  private connectionListeners: Set<(connected: boolean) => void> = new Set();
+
+  constructor(config?: LobstrWalletAdapterConfig) {
+    this.publicKey = config?.publicKey;
+    this.provider = config?.provider;
+  }
+
+  private getProvider(): any {
+    if (this.provider) return this.provider;
+    if (typeof window !== 'undefined' && (window as any).lobstr) {
+      return (window as any).lobstr;
+    }
+    return null;
+  }
+
+  async isConnected(): Promise<boolean> {
+    const provider = this.getProvider();
+    if (!provider) return false;
+    if (typeof provider.isConnected === 'function') {
+      return await provider.isConnected();
+    }
+    return true;
+  }
+
+  async getPublicKey(): Promise<string> {
+    if (this.publicKey) return this.publicKey;
+    const provider = this.getProvider();
+    if (!provider) {
+      throw new Error('Lobstr wallet provider is not available');
+    }
+    if (typeof provider.getPublicKey === 'function') {
+      const key = await provider.getPublicKey();
+      if (typeof key === 'string' && key) {
+        this.publicKey = key;
+        return key;
+      }
+      if (key?.publicKey) {
+        this.publicKey = key.publicKey;
+        return key.publicKey;
+      }
+    }
+    if (typeof provider.getAccount === 'function') {
+      const acc = await provider.getAccount();
+      const key = typeof acc === 'string' ? acc : acc?.address ?? acc?.publicKey;
+      if (key) {
+        this.publicKey = key;
+        return key;
+      }
+    }
+    throw new Error('Lobstr wallet provider did not return a valid public key');
+  }
+
+  async signTransaction(xdrStr: string, network: Network): Promise<string> {
+    const provider = this.getProvider();
+    if (!provider) {
+      throw new Error('Lobstr wallet provider is not available');
+    }
+    const networkPassphrase = NETWORK_PASSPHRASES[network] ?? network;
+
+    if (typeof provider.signTransaction === 'function') {
+      const res = await provider.signTransaction(xdrStr, {
+        networkPassphrase,
+        network,
+      });
+      if (typeof res === 'string') return res;
+      if (res?.signedTxXdr) return res.signedTxXdr;
+      if (res?.xdr) return res.xdr;
+    }
+    if (typeof provider.sign === 'function') {
+      const res = await provider.sign(xdrStr, { networkPassphrase });
+      if (typeof res === 'string') return res;
+      if (res?.signedTxXdr) return res.signedTxXdr;
+    }
+    throw new Error('Lobstr wallet failed to sign transaction');
+  }
+
+  onNetworkChange(callback: (network: Network) => void): () => void {
+    this.networkListeners.add(callback);
+    return () => this.networkListeners.delete(callback);
+  }
+
+  onConnectionChange(callback: (connected: boolean) => void): () => void {
+    this.connectionListeners.add(callback);
+    return () => this.connectionListeners.delete(callback);
+  }
+}
+
+/**
+ * Creates a WalletAdapter backed by the Lobstr wallet (issue #431).
+ */
+export function createLobstrWalletAdapter(config?: LobstrWalletAdapterConfig): WalletAdapter {
+  return new LobstrWalletAdapter(config);
+}
+
+/** Alias for createLobstrWalletAdapter. */
+export const createLobstrAdapter = createLobstrWalletAdapter;
+

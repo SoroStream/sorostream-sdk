@@ -18,6 +18,10 @@ export {
   KmsWalletAdapter,
   createKmsWalletAdapter,
   createKmsAdapter,
+  LobstrWalletAdapter,
+  createLobstrWalletAdapter,
+  createLobstrAdapter,
 } from './wallet.js';
 export type { ClaimDelegateConfig } from './wallet.js';
-export type { KmsWalletAdapterConfig } from './types.js';
+export type { KmsWalletAdapterConfig, LobstrWalletAdapterConfig } from './types.js';
+
