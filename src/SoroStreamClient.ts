@@ -38,14 +38,16 @@ import type { StorageAdapter, SoroStreamAdapters, FetchAdapter } from './adapter
 import { SoroStreamVersionError } from './errors.js';
 import type { TransactionHistoryOptions, TransactionHistoryPage } from './horizon.js';
 import { getTransactionHistory, getAddressActivity } from './horizon.js';
-import { createDefaultRpcTransport } from './transport.js';
+import { createDefaultRpcTransport, createRetryingRpcTransport } from './transport.js';
 import type { RpcTransportAdapter } from './transport.js';
 import { createRpcCompatTransport } from './rpc-compat.js';
 import type { RpcVersionDetectedPayload } from './rpc-compat.js';
 import { waitForLedger } from './readConsistency.js';
 import { assertEnvelopeUnmutated } from './xdrValidation.js';
 import { PriorityRequestQueue } from './request-queue.js';
+import { RequestDeduplicator, dedupKey, type RequestDedupStats } from './requestDeduplicator.js';
 import { LocalStorageStreamCache } from './streamStateCache.js';
+import { SoroStreamObservable, shareLatest } from './observable.js';
 
 export type { SoroStreamConfigUpdate, ConfigUpdatedEvent } from './types.js';
 import { StreamMonitor } from './stream-monitor.js';
@@ -178,6 +180,9 @@ import type {
   RecipientTrustScore,
   RecipientTrustScoreProvider,
   OnStreamUpdateOptions,
+  GetStreamsOptions,
+  BatchStreamsResult,
+  ObserveStreamOptions,
 } from './types.js';
 import { withRetry, type RetryOptions } from './retry.js';
 import type { EventPollerOptions, StreamRetryPolicy } from './events.js';
@@ -421,6 +426,10 @@ export interface SoroStreamClientOptions {
    * be overridden per call.
    */
   batchReadSize?: number;
+  /** Automatic retry options for RPC calls (issue #425). */
+  rpcRetry?: RetryOptions;
+  /** Opt-in localStorage caching of last known stream state (issue #470). */
+  cacheStreamState?: boolean;
 }
 
 function nativeToStream(raw: Record<string, unknown>): Stream {
@@ -657,6 +666,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
 
   /** TTL cache: streamId → resolved claimable amount */
   private readonly claimableCache = new Cache<string, bigint>(STREAM_CACHE_TTL_MS);
+  private readonly claimableInflight = new Map<string, Promise<bigint>>();
   /**
    * Single in-flight deduplication layer shared by every read path
    * (`getStream`, `getStreams`, `getClaimable`, `getStreamsBySender`,
@@ -774,6 +784,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
           this.eventBus.emit('rpcVersionDetected', payload);
         },
       });
+    if (options.rpcRetry) {
+      this.server = createRetryingRpcTransport(this.server, options.rpcRetry);
+    }
     void this.server.init?.({
       network: this.network,
       rpcUrl: options.rpcUrl ?? RPC_URLS[this.network],
@@ -1123,7 +1136,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       timestamp,
       network,
       operation: entry.operation,
-      params: redacted,
+      params: redacted as Record<string, unknown> | undefined,
       result: entry.result ?? 'success',
       ...(entry.error !== undefined ? { error: entry.error } : {}),
       durationMs: entry.durationMs,
@@ -1133,7 +1146,12 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     // Issue #389: dispatch to caller-supplied logger if provided.
     if (this.auditLogger) {
       try {
-        this.auditLogger.info(logEntry);
+        const logger = this.auditLogger as any;
+        if (typeof logger.info === 'function') {
+          logger.info(logEntry);
+        } else if (typeof logger.log === 'function') {
+          logger.log(logEntry);
+        }
       } catch {
         // never throw from audit logger
       }
@@ -1970,10 +1988,11 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       let builder = new TransactionBuilder(account, {
         fee: BASE_FEE,
         networkPassphrase: NETWORK_PASSPHRASES[this.network],
-      })
-        .addOperation(operation)
-        .setTimeout(30)
-        .build();
+      });
+      for (const op of operations) {
+        builder = builder.addOperation(op);
+      }
+      const tx = builder.setTimeout(30).build();
       const result = await this.withBreaker(() => this.server.simulateTransaction(tx));
       // Issue #391: update last successful RPC timestamp
       this.lastRpcTimestampMs = Date.now();
@@ -3599,21 +3618,16 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     );
   }
 
-    try {
-      const stream = await this.streamInflight.get(cacheKey)!;
+  async getStreams(ids: string[], options?: GetStreamsOptions): Promise<Stream[]> {
+    const { streams } = await this.getStreamsBatch(ids, options);
+    return streams;
+  }
 
-      // Only cache the result if the network hasn't changed during the RPC.
-      // This guard maintains the cache contract keyed by the *current*
-      // network: an in-flight read on the old network must never write into
-      // the new network's slot, and any entry already present must remain
-      // addressable under the network in which it was originally fetched.
-      if (networkAtCallTime === this.network) {
-        this.streamCache.set(cacheKey, stream);
-        // Issue #470: also persist to the opt-in localStorage-backed cache
-        this.persistentStreamCache?.set(networkAtCallTime, stream);
-      }
-      if (!requested.includes(id)) requested.push(id);
+  async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<BatchStreamsResult> {
+    if (!Array.isArray(ids)) {
+      throw new TypeError('getStreams: `ids` must be an array of stream IDs');
     }
+    const requested = ids.map((id) => String(id));
 
     if (requested.length === 0) {
       return { streams: [], missing: [], cached: [], rpcCalls: 0 };
@@ -5125,31 +5139,24 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   }
 
   /**
-   * Returns paginated on-chain events for a given stream.
-   *
-   * Each page contains up to `limit` events (default 100) in ledger order,
-   * plus a `cursor` value you can pass to the next call to retrieve the
-   * following page.
+   * Returns paginated on-chain events for a given stream using cursor-based pagination (issue #428).
    *
    * @param streamId - The stream to query.
-   * @param cursor - Opaque pagination cursor from the previous page (omit for first page).
-   * @param limit - Maximum number of events per page (default 100).
-   * @returns `{ events, cursor, latestLedger }` — typed stream events and pagination state.
-   *
-   * @example
-   * ```ts
-   * const page1 = await client.getStreamHistory("42");
-   * const page2 = await client.getStreamHistory("42", page1.cursor, 50);
-   * ```
+   * @param optionsOrCursor - Options object (StreamIndexerOptions) or opaque pagination cursor string.
+   * @param limit - Maximum number of events per page when passing cursor string.
+   * @returns `{ events, cursor, nextCursor, hasMore, latestLedger }`
    */
   async getStreamHistory(
     streamId: string,
-    cursor?: string,
+    optionsOrCursor?: string | import('./indexer.js').StreamIndexerOptions,
     limit?: number,
   ): Promise<import('./indexer.js').PaginatedEvents> {
     const { StreamIndexer } = await import('./indexer.js');
     const indexer = new StreamIndexer(this.server, this.contract.contractId());
-    return indexer.getStreamHistory(streamId, { cursor, limit });
+    const opts = typeof optionsOrCursor === 'string'
+      ? { cursor: optionsOrCursor, limit }
+      : optionsOrCursor;
+    return indexer.getStreamHistory(streamId, opts);
   }
 
   /**

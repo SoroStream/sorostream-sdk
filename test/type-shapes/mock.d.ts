@@ -19,7 +19,8 @@
  * const claimable = await mock.getClaimable(streamId);
  * ```
  */
-import type { BatchCancelResult, CancelStreamParams, CloneStreamOverrides, CreateStreamParams, PaginatedStreams, PaginationParams, SetOperatorParams, SplitStreamParams, SplitStreamResult, Stream, StreamEvent, StreamEventFilter, StreamFilterCriteria, StreamSnapshot, StreamSubscription, SoroStreamPlugin, TopUpParams, TransferStreamParams, PauseStreamParams, ResumeStreamParams, UpdateFlowRateParams, OperatorTopUpParams, WithdrawParams, WriteOptions } from './types.js';
+import type { BatchCancelResult, CancelStreamParams, CloneStreamOverrides, CreateStreamParams, PaginatedStreams, PaginationParams, SetOperatorParams, SplitStreamParams, SplitStreamResult, Stream, StreamBalance, StreamEvent, StreamEventFilter, StreamFilterCriteria, StreamSnapshot, StreamSubscription, SoroStreamPlugin, TopUpParams, TransferStreamParams, PauseStreamParams, ResumeStreamParams, UpdateFlowRateParams, OperatorTopUpParams, WithdrawParams, WriteOptions, GetStreamsOptions, BatchStreamsResult } from './types.js';
+import { SoroStreamObservable } from './observable.js';
 export declare class MockSoroStreamClient {
     private streams;
     private listeners;
@@ -60,6 +61,14 @@ export declare class MockSoroStreamClient {
     revokeDelegate(delegate: string): Promise<{
         txHash: string;
     }>;
+    private streamDelegates;
+    grantDelegate(streamId: string, delegate: string): Promise<{
+        txHash: string;
+    }>;
+    revokeDelegateFromStream(streamId: string, delegate: string): Promise<{
+        txHash: string;
+    }>;
+    getStreamDelegates(streamId: string): Promise<string[]>;
     setOperator(params: SetOperatorParams): Promise<{
         txHash: string;
     }>;
@@ -82,9 +91,39 @@ export declare class MockSoroStreamClient {
         txHash: string;
     }>;
     getStream(streamId: string): Promise<Stream>;
+    /**
+     * Batch equivalent of {@link MockSoroStreamClient.getStream} (issue #427).
+     *
+     * Mirrors the real client: duplicate IDs are collapsed, the result follows the
+     * requested order, and unknown IDs are omitted (or throw with `strict: true`).
+     */
+    getStreams(ids: string[], options?: GetStreamsOptions): Promise<Stream[]>;
+    /** Batch read with metadata, mirroring `SoroStreamClient.getStreamsBatch` (issue #427). */
+    getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<BatchStreamsResult>;
+    /**
+     * RxJS-compatible observable of a stream's state (issue #423).
+     *
+     * Emits immediately on subscribe and then on every mock mutation that touches
+     * the stream, so consumer tests can exercise reactive code paths without a
+     * polling delay.
+     */
+    observeStream(streamId: string): SoroStreamObservable<Stream>;
     getClaimable(streamId: string): Promise<bigint>;
-    getStreamsBySender(sender: string, pagination?: PaginationParams): Promise<Stream[] | PaginatedStreams>;
+    /**
+     * Returns current accrued claimable balances for multiple stream IDs.
+     *
+     * Mirrors {@link SoroStreamClient.getMultipleStreamBalances}: duplicate IDs
+     * are de-duplicated while preserving first-seen order, and unknown streams
+     * resolve to `0n`. No RPC calls are made — values are computed from the
+     * in-memory stream state.
+     *
+     * @param streamIds - The stream IDs to look up.
+     * @returns One `StreamBalance` entry per unique input ID, in first-seen order.
+     */
+    getMultipleStreamBalances(streamIds: string[]): Promise<StreamBalance[]>;
+    getStreamsBySender(sender: string, pagination?: PaginationParams, filter?: StreamFilterCriteria): Promise<Stream[] | PaginatedStreams>;
     getStreamsByRecipient(recipient: string, pagination?: PaginationParams, filter?: StreamFilterCriteria): Promise<Stream[] | PaginatedStreams>;
+    getStreamsByTag(tag: string, pagination?: PaginationParams, filter?: StreamFilterCriteria): Promise<Stream[] | PaginatedStreams>;
     private _paginate;
     cloneStream(streamId: string, overrides?: CloneStreamOverrides): Promise<{
         streamId: string;
@@ -108,6 +147,7 @@ export declare class MockSoroStreamClient {
         idle: number;
         reused: number;
     };
+    diagnostics(): import('./types.js').DiagnosticsResult;
 }
 export type SandboxUnexpectedCallPolicy = 'error' | 'allow' | 'warn';
 export interface SandboxCallLog {
@@ -146,7 +186,9 @@ export declare class SoroStreamSandbox extends MockSoroStreamClient {
     cancelStream(params: CancelStreamParams, signal?: AbortSignal, options?: WriteOptions): Promise<any>;
     topUp(params: TopUpParams, signal?: AbortSignal, options?: WriteOptions): Promise<any>;
     getStream(streamId: string): Promise<Stream>;
+    getStreams(ids: string[], options?: GetStreamsOptions): Promise<Stream[]>;
     getClaimable(streamId: string): Promise<bigint>;
-    getStreamsBySender(sender: string, pagination?: PaginationParams): Promise<Stream[] | PaginatedStreams>;
+    getMultipleStreamBalances(streamIds: string[]): Promise<StreamBalance[]>;
+    getStreamsBySender(sender: string, pagination?: PaginationParams, filter?: StreamFilterCriteria): Promise<Stream[] | PaginatedStreams>;
     getStreamsByRecipient(recipient: string, pagination?: PaginationParams, filter?: StreamFilterCriteria): Promise<Stream[] | PaginatedStreams>;
 }

@@ -1312,14 +1312,35 @@ export interface LobstrWalletAdapterConfig {
   provider?: any;
 }
 
+/** Configuration options for LedgerWalletAdapter (issue #432). */
+export interface LedgerWalletAdapterConfig {
+  /** Optional transport instance (e.g. from @ledgerhq/hw-transport-webusb or custom transport). */
+  transport?: any;
+  /** BIP32 derivation path for Stellar key. Defaults to "44'/148'/0'". */
+  bip32Path?: string;
+  /** Optional pre-configured or cached public key (G...). */
+  publicKey?: string;
+  /** Transport mechanism type: 'webusb' | 'webhid' | 'custom' (default: 'webusb'). */
+  transportType?: 'webusb' | 'webhid' | 'custom';
+}
+
 /** Result shape returned by SoroStreamClient.healthCheck (issue #308). */
 export interface HealthCheckResult {
   /** True if RPC endpoint responded successfully within timeout. */
   rpcReachable: boolean;
-  /** Measured round-trip latency in milliseconds. */
-  latencyMs: number;
-  /** Optional error message if RPC check failed. */
+  /** Round-trip latency in milliseconds, or null on failure. */
+  latencyMs: number | null;
+  /** Optional error message when rpcReachable is false. */
   error?: string;
+}
+
+/** Result shape returned by SoroStreamClient.diagnostics. */
+export interface DiagnosticsResult {
+  sdkVersion: string;
+  network: Network;
+  walletAdapter: string | null;
+  pollingIntervalMs: number;
+  lastRpcTimestampMs: number | null;
 }
 
 /** Options for exportStreamHistory (issue #307). */
@@ -1332,6 +1353,48 @@ export interface ExportStreamHistoryOptions {
   limit?: number;
   /** Starting ledger number to filter events. */
   startLedger?: number;
+  /** Compression format for ndjson export. */
+  compression?: 'gzip' | 'deflate' | 'none';
+}
+
+export type SoroStreamClientOptions = SoroStreamClientConfig;
+
+export interface AuditLogEntry {
+  timestamp: string | number;
+  network?: Network;
+  operation?: string;
+  action?: string;
+  params?: Record<string, unknown>;
+  result?: string;
+  error?: string;
+  durationMs?: number;
+  txHash?: string;
+  streamId?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface AuditLogger {
+  info?(entry: AuditLogEntry): void;
+  log?(entry: AuditLogEntry): void;
+}
+
+export interface GetStreamsOptions {
+  strict?: boolean;
+  fallbackToIndividual?: boolean;
+  useCache?: boolean;
+  refresh?: boolean;
+  chunkSize?: number;
+}
+
+export interface BatchStreamsResult {
+  streams: Stream[];
+  missing: string[];
+  cached: string[];
+  rpcCalls: number;
+}
+
+export interface ObserveStreamOptions {
+  pollIntervalMs?: number;
 }
 
 // ── Issue #267: JSON Schema generation ───────────────────────────────────────
@@ -1362,6 +1425,8 @@ export interface SoroStreamClientConfig {
   readRetry?: Omit<RetryOptions, 'signal'>;
   /** Retry policy for transaction submission RPC calls. */
   submitRetry?: Omit<RetryOptions, 'signal'>;
+  /** Automatic retry policy with exponential backoff and jitter for transient RPC calls (issue #425). */
+  rpcRetry?: Omit<RetryOptions, 'signal'>;
   /** Contract version to use for call encoding (default: "v1"). */
   contractVersion?: ContractVersion;
   /** Maximum number of pooled HTTP connections reused across RPC calls (default: 5). */
@@ -1380,6 +1445,40 @@ export interface SoroStreamClientConfig {
   checkDuplicate?: boolean;
   /** When true, write an audit log entry for each SDK write operation. */
   auditLog?: boolean;
+  /** Custom AuditLogger instance to receive audit log entries. */
+  auditLogger?: AuditLogger;
+  /** Whether to enable opt-in localStorage cache for last-known stream state. */
+  cacheStreamState?: boolean;
+  /** Optional custom event bus instance. */
+  eventBus?: any;
+  /** Whether to enable cross-tab event synchronization. */
+  crossTabSync?: boolean;
+  /** Offline write queue options or boolean flag. */
+  offlineQueue?: boolean | any;
+  /** Skip peer dependency version compatibility check. */
+  skipPeerCheck?: boolean;
+  /** Whether to deduplicate concurrent read requests (default: true). */
+  dedupeRequests?: boolean;
+  /** Default batch read size for getStreams (default: 50). */
+  batchReadSize?: number;
+  /** Custom validation function for cliff seconds. */
+  validateCliff?: (seconds: number) => void;
+  /** Plugin array. */
+  plugins?: any[];
+  /** Fee bump monitoring options. */
+  feeBumpMonitoring?: any;
+  /** Callback for recipient trust score evaluation. */
+  onRecipientTrustScore?: (score: any) => void;
+  /** Whether telemetry is enabled (default: true). */
+  telemetry?: boolean;
+  /** Custom adapters for storage and fetch. */
+  adapters?: { storage?: any; fetch?: any };
+  /** Custom wallet adapter instance. */
+  walletAdapter?: any;
+  /** Custom RPC transport adapter instance. */
+  transport?: any;
+  /** RPC version setting ('v1' | 'v2' | 'auto'). */
+  rpcVersion?: 'v1' | 'v2' | 'auto';
 }
 
 /** Portfolio statistics aggregated across all of an address's streams. Issue #336. */

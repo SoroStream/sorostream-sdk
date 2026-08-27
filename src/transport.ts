@@ -1,5 +1,7 @@
 import { rpc, type Account, type Transaction, type FeeBumpTransaction } from '@stellar/stellar-sdk';
 import type { Network } from './types.js';
+import { withRetry, isTransientRpcError, type RetryOptions } from './retry.js';
+export { isTransientRpcError };
 
 /**
  * Context passed to {@link RpcTransportAdapter.init} when a transport is
@@ -124,5 +126,36 @@ export function createDefaultRpcTransport(
     prepareTransaction: (tx) => server.prepareTransaction(tx),
     sendTransaction: (tx) => server.sendTransaction(tx),
     getEvents: (request) => server.getEvents(request),
+  };
+}
+
+/**
+ * Wraps an {@link RpcTransportAdapter} with automatic retry logic using exponential
+ * backoff and full jitter for transient RPC errors (issue #425).
+ *
+ * @param transport - The underlying RpcTransportAdapter to wrap.
+ * @param options - Configurable retry options (maxAttempts, baseDelayMs, maxDelayMs, etc.).
+ */
+export function createRetryingRpcTransport(
+  transport: RpcTransportAdapter,
+  options?: RetryOptions,
+): RpcTransportAdapter {
+  const retryOpts: RetryOptions = {
+    transientOnly: true,
+    ...options,
+  };
+
+  return {
+    ...transport,
+    init: transport.init ? (ctx) => transport.init!(ctx) : undefined,
+    teardown: transport.teardown ? () => transport.teardown!() : undefined,
+    getAccount: (address) => withRetry(() => transport.getAccount(address), retryOpts),
+    getHealth: () => withRetry(() => transport.getHealth(), retryOpts),
+    getLatestLedger: () => withRetry(() => transport.getLatestLedger(), retryOpts),
+    getTransaction: (hash) => withRetry(() => transport.getTransaction(hash), retryOpts),
+    simulateTransaction: (tx) => withRetry(() => transport.simulateTransaction(tx), retryOpts),
+    prepareTransaction: (tx) => withRetry(() => transport.prepareTransaction(tx), retryOpts),
+    sendTransaction: (tx) => withRetry(() => transport.sendTransaction(tx), retryOpts),
+    getEvents: (request) => withRetry(() => transport.getEvents(request), retryOpts),
   };
 }

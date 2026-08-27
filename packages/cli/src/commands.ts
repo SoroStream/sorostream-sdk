@@ -6,6 +6,7 @@ export interface GlobalOptions {
   contractId: string;
   rpc: string[];
   secret: string;
+  transport?: any;
 }
 
 function createClient(options: GlobalOptions): SoroStreamClient {
@@ -14,7 +15,8 @@ function createClient(options: GlobalOptions): SoroStreamClient {
     network: options.network,
     contractId: options.contractId,
     walletAdapter: adapter,
-    rpcUrl: options.rpc.length > 0 ? options.rpc : undefined,
+    rpcUrl: options.rpc.length > 0 ? options.rpc[0] : undefined,
+    transport: options.transport,
   });
 }
 
@@ -103,4 +105,41 @@ export async function cmdForecast(opts: GlobalOptions, streamId: string): Promis
       2,
     ),
   );
+}
+
+export async function cmdList(
+  opts: GlobalOptions & {
+    sender?: string;
+    recipient?: string;
+    status?: 'active' | 'cancelled' | 'completed';
+    limit?: number;
+    cursor?: string;
+  },
+): Promise<void> {
+  const client = createClient(opts);
+  let result: any = [];
+
+  if (opts.sender) {
+    result = await client.getStreamsBySender(opts.sender, {
+      limit: opts.limit,
+      cursor: opts.cursor,
+      activeOnly: opts.status === 'active',
+    });
+  } else if (opts.recipient) {
+    result = await client.getStreamsByRecipient(
+      opts.recipient,
+      { limit: opts.limit, cursor: opts.cursor },
+      { activeOnly: opts.status === 'active' },
+    );
+  } else {
+    const keypairAdapter = createKeypairAdapter(opts.secret);
+    const publicKey = await keypairAdapter.getPublicKey();
+    result = await client.getStreamsBySender(publicKey, {
+      limit: opts.limit,
+      cursor: opts.cursor,
+      activeOnly: opts.status === 'active',
+    });
+  }
+
+  console.log(JSON.stringify(result, (_, v) => (typeof v === 'bigint' ? v.toString() : v), 2));
 }

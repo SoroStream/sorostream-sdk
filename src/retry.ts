@@ -59,7 +59,15 @@ export function isTransientRpcError(err: unknown): boolean {
     lowerMsg.includes('socket') ||
     lowerMsg.includes('connection refused') ||
     lowerMsg.includes('enotfound') ||
-    lowerMsg.includes('epipe')
+    lowerMsg.includes('epipe') ||
+    lowerMsg.includes('503') ||
+    lowerMsg.includes('502') ||
+    lowerMsg.includes('504') ||
+    lowerMsg.includes('500') ||
+    lowerMsg.includes('429') ||
+    lowerMsg.includes('service unavailable') ||
+    lowerMsg.includes('rate limit') ||
+    lowerMsg.includes('too many requests')
   ) {
     return true;
   }

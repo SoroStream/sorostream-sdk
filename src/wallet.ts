@@ -7,6 +7,7 @@ import type {
   PasskeyAdapterConfig,
   KmsWalletAdapterConfig,
   LobstrWalletAdapterConfig,
+  LedgerWalletAdapterConfig,
 } from './types.js';
 
 /**
@@ -609,46 +610,131 @@ export async function createPasskeyAdapter(config: PasskeyAdapterConfig): Promis
 }
 
 /**
- * Creates a WalletAdapter backed by a Ledger hardware wallet via `@ledgerhq/hw-app-str`.
- *
- * @example
- * ```ts
- * import TransportWebUSB from "@ledgerhq/hw-transport-webusb";
- * const transport = await TransportWebUSB.create();
- * const adapter = createLedgerAdapter({ transport });
- * const client = new SoroStreamClient({ network: "mainnet", contractId: "...", walletAdapter: adapter });
- * ```
+ * WalletAdapter implementation that communicates with a Ledger hardware device via WebUSB or WebHID to sign Soroban transactions (issue #432).
  */
-export function createLedgerAdapter(config: { transport: unknown }): WalletAdapter {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const hwAppStr = require('@ledgerhq/hw-app-str');
-  const StrClass = hwAppStr.default ?? hwAppStr;
-  const str = new StrClass(config.transport);
+export class LedgerWalletAdapter implements WalletAdapter {
+  private transport?: any;
+  private bip32Path: string;
+  private publicKey?: string;
+  private transportType: 'webusb' | 'webhid' | 'custom';
+  private networkListeners: Set<(network: Network) => void> = new Set();
+  private connectionListeners: Set<(connected: boolean) => void> = new Set();
 
-  return {
-    async isConnected(): Promise<boolean> {
-      return true;
-    },
-    async getPublicKey(): Promise<string> {
-      const result = await str.getPublicKey("44'/148'/0'");
-      return result.publicKey as string;
-    },
-    async signTransaction(xdrStr: string, _network: Network): Promise<string> {
+  constructor(config?: LedgerWalletAdapterConfig) {
+    this.transport = config?.transport;
+    this.bip32Path = config?.bip32Path ?? "44'/148'/0'";
+    this.publicKey = config?.publicKey;
+    this.transportType = config?.transportType ?? 'webusb';
+  }
+
+  private async getTransportInstance(): Promise<any> {
+    if (this.transport) return this.transport;
+
+    if (this.transportType === 'webhid') {
+      // @ts-ignore
+      const mod = await import('@ledgerhq/hw-transport-webhid').catch(() => null);
+      if (!mod) throw new Error('WebHID transport (@ledgerhq/hw-transport-webhid) is not available');
+      const TransportWebHID = (mod as any).default ?? mod;
+      this.transport = await TransportWebHID.create();
+    } else {
+      // @ts-ignore
+      const mod = await import('@ledgerhq/hw-transport-webusb').catch(() => null);
+      if (!mod) throw new Error('WebUSB transport (@ledgerhq/hw-transport-webusb) is not available');
+      const TransportWebUSB = (mod as any).default ?? mod;
+      this.transport = await TransportWebUSB.create();
+    }
+    return this.transport;
+  }
+
+  private async getAppInstance(): Promise<any> {
+    const transport = await this.getTransportInstance();
+    const hwAppStr = await import('@ledgerhq/hw-app-str');
+    const StrClass = (hwAppStr as any).default ?? hwAppStr;
+    return new StrClass(transport);
+  }
+
+  async isConnected(): Promise<boolean> {
+    try {
+      if (this.transport) return true;
+      if (typeof window !== 'undefined') {
+        const nav = (window as any).navigator || (typeof navigator !== 'undefined' ? navigator : null);
+        if (nav && ('usb' in nav || 'hid' in nav)) {
+          return true;
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  async getPublicKey(): Promise<string> {
+    if (this.publicKey) return this.publicKey;
+    try {
+      const app = await this.getAppInstance();
+      const result = await app.getPublicKey(this.bip32Path);
+      const key = typeof result === 'string' ? result : (result.publicKey || result.address);
+      if (!key) throw new Error('Failed to retrieve public key from Ledger device');
+      this.publicKey = key;
+      return key;
+    } catch (err: any) {
+      throw new Error(`Ledger getPublicKey failed: ${err?.message || err}`);
+    }
+  }
+
+  async signTransaction(xdrStr: string, _network: Network): Promise<string> {
+    try {
+      const app = await this.getAppInstance();
       const txEnvelope = xdr.TransactionEnvelope.fromXDR(xdrStr, 'base64');
       const txHash = hash(txEnvelope.toXDR());
-      const result = await str.signHash("44'/148'/0'", txHash);
-      const kp = Keypair.fromPublicKey(
-        await str.getPublicKey("44'/148'/0'").then((r: { publicKey: string }) => r.publicKey),
-      );
+
+      let signature: Buffer;
+      if (typeof app.signHash === 'function') {
+        const res = await app.signHash(this.bip32Path, txHash);
+        signature = res.signature ?? res;
+      } else if (typeof app.signTransaction === 'function') {
+        const res = await app.signTransaction(this.bip32Path, txHash);
+        signature = res.signature ?? res;
+      } else {
+        throw new Error('Ledger app does not support transaction signing');
+      }
+
+      const pubKey = await this.getPublicKey();
+      const kp = Keypair.fromPublicKey(pubKey);
       const decorated = new xdr.DecoratedSignature({
         hint: kp.signatureHint(),
-        signature: result.signature as Buffer,
+        signature: Buffer.from(signature),
       });
-      const tx = txEnvelope.v1().tx();
-      txEnvelope.v1().signatures().push(decorated);
+
+      const v1 = txEnvelope.v1();
+      v1.signatures().push(decorated);
       return txEnvelope.toXDR('base64');
-    },
-  };
+    } catch (err: any) {
+      throw new Error(`Ledger signTransaction failed: ${err?.message || err}`);
+    }
+  }
+
+  onNetworkChange(callback: (network: Network) => void): () => void {
+    this.networkListeners.add(callback);
+    return () => this.networkListeners.delete(callback);
+  }
+
+  onConnectionChange(callback: (connected: boolean) => void): () => void {
+    this.connectionListeners.add(callback);
+    return () => this.connectionListeners.delete(callback);
+  }
+}
+
+/**
+ * Creates a WalletAdapter backed by a Ledger hardware wallet (issue #432).
+ */
+export function createLedgerWalletAdapter(config?: LedgerWalletAdapterConfig): WalletAdapter {
+  return new LedgerWalletAdapter(config);
+}
+
+/** Alias for createLedgerWalletAdapter. */
+export function createLedgerAdapter(config: { transport?: unknown }): WalletAdapter {
+  return new LedgerWalletAdapter(config);
 }
 
 /**
@@ -718,6 +804,111 @@ export function createKmsWalletAdapter(config: KmsWalletAdapterConfig): WalletAd
 /** Alias for createKmsWalletAdapter. */
 export const createKmsAdapter = createKmsWalletAdapter;
 
+/**
+ * WalletAdapter implementation for the Lobstr wallet (issue #431).
+ * Supports both extension (`window.lobstr`) and mobile/custom provider instances.
+ */
+export class LobstrWalletAdapter implements WalletAdapter {
+  private publicKey?: string;
+  private provider?: any;
+  private networkListeners: Set<(network: Network) => void> = new Set();
+  private connectionListeners: Set<(connected: boolean) => void> = new Set();
+
+  constructor(config?: LobstrWalletAdapterConfig) {
+    this.publicKey = config?.publicKey;
+    this.provider = config?.provider;
+  }
+
+  private getProvider(): any {
+    if (this.provider) return this.provider;
+    if (typeof window !== 'undefined' && (window as any).lobstr) {
+      return (window as any).lobstr;
+    }
+    return null;
+  }
+
+  async isConnected(): Promise<boolean> {
+    const provider = this.getProvider();
+    if (!provider) return false;
+    if (typeof provider.isConnected === 'function') {
+      return await provider.isConnected();
+    }
+    return true;
+  }
+
+  async getPublicKey(): Promise<string> {
+    if (this.publicKey) return this.publicKey;
+    const provider = this.getProvider();
+    if (!provider) {
+      throw new Error('Lobstr wallet provider is not available');
+    }
+    if (typeof provider.getPublicKey === 'function') {
+      const key = await provider.getPublicKey();
+      if (typeof key === 'string' && key) {
+        this.publicKey = key;
+        return key;
+      }
+      if (key?.publicKey) {
+        this.publicKey = key.publicKey;
+        return key.publicKey;
+      }
+    }
+    if (typeof provider.getAccount === 'function') {
+      const acc = await provider.getAccount();
+      const key = typeof acc === 'string' ? acc : acc?.address ?? acc?.publicKey;
+      if (key) {
+        this.publicKey = key;
+        return key;
+      }
+    }
+    throw new Error('Lobstr wallet provider did not return a valid public key');
+  }
+
+  async signTransaction(xdrStr: string, network: Network): Promise<string> {
+    const provider = this.getProvider();
+    if (!provider) {
+      throw new Error('Lobstr wallet provider is not available');
+    }
+    const networkPassphrase = NETWORK_PASSPHRASES[network] ?? network;
+
+    if (typeof provider.signTransaction === 'function') {
+      const res = await provider.signTransaction(xdrStr, {
+        networkPassphrase,
+        network,
+      });
+      if (typeof res === 'string') return res;
+      if (res?.signedTxXdr) return res.signedTxXdr;
+      if (res?.xdr) return res.xdr;
+    }
+    if (typeof provider.sign === 'function') {
+      const res = await provider.sign(xdrStr, { networkPassphrase });
+      if (typeof res === 'string') return res;
+      if (res?.signedTxXdr) return res.signedTxXdr;
+    }
+    throw new Error('Lobstr wallet failed to sign transaction');
+  }
+
+  onNetworkChange(callback: (network: Network) => void): () => void {
+    this.networkListeners.add(callback);
+    return () => this.networkListeners.delete(callback);
+  }
+
+  onConnectionChange(callback: (connected: boolean) => void): () => void {
+    this.connectionListeners.add(callback);
+    return () => this.connectionListeners.delete(callback);
+  }
+}
+
+/**
+ * Creates a WalletAdapter backed by the Lobstr wallet (issue #431).
+ */
+export function createLobstrWalletAdapter(config?: LobstrWalletAdapterConfig): WalletAdapter {
+  return new LobstrWalletAdapter(config);
+}
+
+/** Alias for createLobstrWalletAdapter. */
+export const createLobstrAdapter = createLobstrWalletAdapter;
+
 // ── Issue #367: WalletConnect v2 adapter ─────────────────────────────────────
 
 /**
@@ -762,31 +953,22 @@ type WalletConnectSignClientModule = {
   init?(config: unknown): Promise<WalletConnectSignClient>;
 };
 
+function isSessionGoneError(error: unknown): boolean {
+  if (error instanceof Error && error.message.includes('WalletConnect session has expired')) {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /session/i.test(message) &&
+    /(expired|not found|no matching|missing|unknown|deleted|closed|disconnect)/i.test(message)
+  );
+}
+
 /**
  * Creates a WalletAdapter backed by WalletConnect v2, enabling mobile wallet
  * users to connect via QR code or deep link (issue #367).
  *
  * Dynamically imports `@walletconnect/sign-client` to avoid SSR issues.
- *
- * @example
- * ```ts
- * import { createWalletConnectV2Adapter } from "@sorostream/sdk/wallets";
- *
- * const adapter = await createWalletConnectV2Adapter({
- *   projectId: "YOUR_WALLETCONNECT_PROJECT_ID",
- *   metadata: {
- *     name: "My SoroStream App",
- *     description: "Streaming payments on Stellar",
- *     url: "https://myapp.example.com",
- *   },
- * });
- *
- * const client = new SoroStreamClient({
- *   network: "testnet",
- *   contractId: "YOUR_CONTRACT_ID",
- *   walletAdapter: adapter,
- * });
- * ```
  */
 export async function createWalletConnectV2Adapter(
   config: WalletConnectV2AdapterConfig,
@@ -814,10 +996,42 @@ export async function createWalletConnectV2Adapter(
 
   const chainId = config.chainId ?? 'stellar:pubnet';
   let sessionTopic: string | null = null;
+  let sessionExpiry: number | null = null;
   let publicKey: string | null = null;
+  const connectionListeners = new Set<(connected: boolean) => void>();
+
+  function emitConnection(connected: boolean): void {
+    for (const cb of connectionListeners) cb(connected);
+  }
+
+  function invalidateSession(): void {
+    if (sessionTopic === null) return;
+    sessionTopic = null;
+    sessionExpiry = null;
+    publicKey = null;
+    emitConnection(false);
+  }
+
+  function isSessionValid(): boolean {
+    if (sessionTopic === null) return false;
+    try {
+      const session = (signClient as any).session?.get(sessionTopic);
+      if (!session) return false;
+      if (typeof session.expiry === 'number') {
+        sessionExpiry = session.expiry;
+        if (Date.now() / 1000 >= session.expiry) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   async function ensureSession(): Promise<string> {
-    if (sessionTopic) return sessionTopic;
+    if (sessionTopic !== null) {
+      if (isSessionValid()) return sessionTopic;
+      invalidateSession();
+    }
 
     const { topic, namespaces } = await signClient.connect({
       requiredNamespaces: {
@@ -830,11 +1044,18 @@ export async function createWalletConnectV2Adapter(
     });
 
     sessionTopic = topic;
+    sessionExpiry = null;
+    publicKey = null;
 
-    // Extract the Stellar public key from the returned namespace accounts
+    try {
+      const session = (signClient as any).session?.get(topic);
+      if (session && typeof session.expiry === 'number') {
+        sessionExpiry = session.expiry;
+      }
+    } catch {}
+
     const stellarNs = namespaces['stellar'];
     if (stellarNs?.accounts?.length) {
-      // Account format: "stellar:pubnet:GABC..."
       const parts = stellarNs.accounts[0]!.split(':');
       publicKey = parts[2] ?? null;
     }
@@ -843,18 +1064,20 @@ export async function createWalletConnectV2Adapter(
       throw new Error('WalletConnect session did not return a Stellar public key');
     }
 
+    emitConnection(true);
     return sessionTopic;
   }
 
-  // Handle session disconnect events
   signClient.on('session_delete', () => {
-    sessionTopic = null;
-    publicKey = null;
+    invalidateSession();
+  });
+  signClient.on('session_expire', () => {
+    invalidateSession();
   });
 
   return {
     async isConnected(): Promise<boolean> {
-      return sessionTopic !== null;
+      return sessionTopic !== null && isSessionValid();
     },
 
     async getPublicKey(): Promise<string> {
@@ -866,25 +1089,40 @@ export async function createWalletConnectV2Adapter(
       const topic = await ensureSession();
       const passphrase = NETWORK_PASSPHRASES[network];
 
-      const result = (await signClient.request({
-        topic,
-        chainId,
-        request: {
-          method: 'stellar_signXDR',
-          params: {
-            xdr: xdrStr,
-            networkPassphrase: passphrase,
+      let result: unknown;
+      try {
+        result = await signClient.request({
+          topic,
+          chainId,
+          request: {
+            method: 'stellar_signXDR',
+            params: {
+              xdr: xdrStr,
+              networkPassphrase: passphrase,
+            },
           },
-        },
-      })) as { signedXdr?: string; signed_tx_xdr?: string } | string;
+        });
+      } catch (error) {
+        if (isSessionGoneError(error)) {
+          invalidateSession();
+          const { WalletConnectSessionExpiredError } = await import('./errors.js');
+          throw new WalletConnectSessionExpiredError();
+        }
+        throw error;
+      }
 
       if (typeof result === 'string') return result;
-      return result.signedXdr ?? result.signed_tx_xdr ?? xdrStr;
+      const signed = result as { signedXdr?: string; signed_tx_xdr?: string };
+      return signed.signedXdr ?? signed.signed_tx_xdr ?? xdrStr;
     },
 
-    /**
-     * Disconnects the WalletConnect session, releasing resources.
-     */
+    onConnectionChange(callback: (connected: boolean) => void): () => void {
+      connectionListeners.add(callback);
+      return () => {
+        connectionListeners.delete(callback);
+      };
+    },
+
     async disconnect(): Promise<void> {
       if (!sessionTopic) return;
       try {
@@ -892,11 +1130,8 @@ export async function createWalletConnectV2Adapter(
           topic: sessionTopic,
           reason: { code: 6000, message: 'User disconnected' },
         });
-      } catch {
-        // Session may already be expired
-      }
-      sessionTopic = null;
-      publicKey = null;
+      } catch {}
+      invalidateSession();
     },
   } as WalletAdapter & { disconnect(): Promise<void> };
 }
@@ -933,8 +1168,8 @@ export async function createXDEFIAdapter(): Promise<WalletAdapter> {
   }
 
   // XDEFI injects `window.xdefi` (or `window.xfi`) with a Stellar provider
-  const xdefi = (window as Record<string, unknown>)['xdefi'] as XDEFIModule | undefined;
-  const xfi = (window as Record<string, unknown>)['xfi'] as XDEFIModule | undefined;
+  const xdefi = (window as unknown as Record<string, unknown>)['xdefi'] as XDEFIModule | undefined;
+  const xfi = (window as unknown as Record<string, unknown>)['xfi'] as XDEFIModule | undefined;
   const provider = xdefi?.stellar ?? xfi?.stellar;
 
   if (!provider) {
