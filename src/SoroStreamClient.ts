@@ -71,6 +71,23 @@ const NETWORK_PASSPHRASES: Record<Network, string> = {
   futurenet: Networks.FUTURENET,
 };
 
+/**
+ * Lifecycle hook callbacks fired when the client observes stream state
+ * transitions via background event polling.
+ *
+ * Hooks fire for transitions on any stream emitted by the contract — not only
+ * operations initiated by this client instance — so filter on
+ * {@link StreamEvent.streamId} / `data.sender` / `data.recipient` if needed.
+ */
+export interface SoroStreamLifecycleHooks {
+  /** Fired when a `StreamCreated` contract event is observed. */
+  onStreamCreated?(event: StreamEvent): void;
+  /** Fired when a `StreamCompleted` contract event is observed. */
+  onStreamCompleted?(event: StreamEvent): void;
+  /** Fired when a `StreamCancelled` contract event is observed. */
+  onStreamCancelled?(event: StreamEvent): void;
+}
+
 /** Options for constructing a SoroStreamClient. */
 export interface SoroStreamClientOptions {
   /** The Stellar network to connect to. */
@@ -95,6 +112,13 @@ export interface SoroStreamClientOptions {
   contractVersion?: ContractVersion;
   /** Default fee-bump options applied to all transactions (can be overridden per-call). */
   feeBump?: FeeBumpOptions;
+  /**
+   * Optional lifecycle hooks invoked on stream state transitions observed by
+   * this client (`onStreamCreated`, `onStreamCompleted`, `onStreamCancelled`).
+   * Note: configuring any hook enables background contract-event polling for
+   * the lifetime of the client, same as calling {@link subscribeEvents}.
+   */
+  lifecycleHooks?: SoroStreamLifecycleHooks;
 }
 
 /** Maps a raw Soroban contract value to a Stream object. */
@@ -161,6 +185,13 @@ export class SoroStreamClient {
     this.encoder = createContractEncoder(this.contract, options.contractVersion ?? "v1");
     this.defaultFeeBump = options.feeBump ?? null;
     this.priceFeed = options.priceFeed ?? null;
+
+    const hooks = options.lifecycleHooks;
+    if (hooks) {
+      this.registerLifecycleHook("StreamCreated", hooks.onStreamCreated);
+      this.registerLifecycleHook("StreamCompleted", hooks.onStreamCompleted);
+      this.registerLifecycleHook("StreamCancelled", hooks.onStreamCancelled);
+    }
   }
 
   private async withBreaker<T>(fn: () => Promise<T>): Promise<T> {
@@ -661,6 +692,9 @@ export class SoroStreamClient {
     const streamIdB = latest[1]?.id ?? "";
 
     return { txHash, streamIdA, streamIdB };
+  }
+
+  /**
    * Transfers ownership of a stream to a new recipient address mid-flight.
    * Only the sender can transfer ownership.
    */
@@ -792,6 +826,17 @@ export class SoroStreamClient {
       );
     }
     return this.eventPoller;
+  }
+
+  private registerLifecycleHook(
+    eventType: StreamEventType,
+    callback?: (event: StreamEvent) => void
+  ): void {
+    if (!callback) return;
+    this.getEventPoller().subscribe(`hooks:${eventType}`, {
+      filter: (event) => event.type === eventType,
+      callback,
+    });
   }
 
   /**

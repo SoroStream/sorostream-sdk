@@ -43,7 +43,7 @@ import { withRetry } from "../src/retry.js";
 import { NoopLogger } from "../src/logger.js";
 import type { Logger } from "../src/logger.js";
 import { createContractEncoder } from "../src/contractEncoders.js";
-import { Contract } from "@stellar/stellar-sdk";
+import { Contract, rpc, xdr } from "@stellar/stellar-sdk";
 
 const VALID_ACCOUNT = "GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF";
 const VALID_CONTRACT = "CAVTXNC2WCHINDNP4VBLSOQA2667VE3RPQZNGD5TFI4U2QSHTVAC667T";
@@ -1648,5 +1648,125 @@ describe("createLedgerAdapter", () => {
 
     expect(await adapter.isConnected()).toBe(true);
     expect(await adapter.getPublicKey()).toBe(mockPublicKey);
+  });
+});
+
+// ── Lifecycle hooks ────────────────────────────────────────────────────────
+
+function makeRawStreamEvent(
+  type: string,
+  streamId: string,
+): rpc.Api.EventResponse {
+  return {
+    type: "contract",
+    contractId: VALID_CONTRACT,
+    topic: [xdr.ScVal.scvString(type), xdr.ScVal.scvString(streamId)],
+    value: xdr.ScVal.scvString(""),
+    ledger: 12_345,
+    ledgerClosedAt: "2026-01-01T00:00:00Z",
+    txHash: `tx-${streamId}`,
+    inSuccessfulContractCall: true,
+  } as unknown as rpc.Api.EventResponse;
+}
+
+function mockGetEventsResponse(
+  events: rpc.Api.EventResponse[],
+): rpc.Api.GetEventsResponse {
+  return {
+    events,
+    latestLedger: 12_346,
+    cursor: "cursor-1",
+  } as unknown as rpc.Api.GetEventsResponse;
+}
+
+describe("lifecycle hooks", () => {
+  let getEventsSpy: ReturnType<typeof vi.spyOn>;
+  let mockAdapter: WalletAdapter;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockAdapter = {
+      getPublicKey: vi.fn().mockResolvedValue(VALID_ACCOUNT),
+      signTransaction: vi.fn().mockResolvedValue("signed_xdr"),
+      isConnected: vi.fn().mockResolvedValue(true),
+    };
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("fires the matching hook for each observed transition", async () => {
+    const events = [
+      makeRawStreamEvent("StreamCreated", "1"),
+      makeRawStreamEvent("StreamCompleted", "2"),
+      makeRawStreamEvent("StreamCancelled", "3"),
+    ];
+    getEventsSpy = vi
+      .spyOn(rpc.Server.prototype, "getEvents")
+      .mockResolvedValue(mockGetEventsResponse(events));
+
+    const hooks = {
+      onStreamCreated: vi.fn(),
+      onStreamCompleted: vi.fn(),
+      onStreamCancelled: vi.fn(),
+    };
+    new SoroStreamClient({
+      network: "testnet",
+      contractId: VALID_CONTRACT,
+      walletAdapter: mockAdapter,
+      lifecycleHooks: hooks,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(hooks.onStreamCreated).toHaveBeenCalledTimes(1);
+    expect(hooks.onStreamCreated.mock.calls[0]![0].type).toBe("StreamCreated");
+    expect(hooks.onStreamCreated.mock.calls[0]![0].streamId).toBe("1");
+    expect(hooks.onStreamCompleted).toHaveBeenCalledTimes(1);
+    expect(hooks.onStreamCompleted.mock.calls[0]![0].streamId).toBe("2");
+    expect(hooks.onStreamCancelled).toHaveBeenCalledTimes(1);
+    expect(hooks.onStreamCancelled.mock.calls[0]![0].streamId).toBe("3");
+  });
+
+  it("delivers transitions from later polls (interval)", async () => {
+    getEventsSpy = vi
+      .spyOn(rpc.Server.prototype, "getEvents")
+      .mockResolvedValueOnce(mockGetEventsResponse([]))
+      .mockResolvedValueOnce(
+        mockGetEventsResponse([makeRawStreamEvent("StreamCompleted", "7")])
+      );
+
+    const onStreamCompleted = vi.fn();
+    new SoroStreamClient({
+      network: "testnet",
+      contractId: VALID_CONTRACT,
+      walletAdapter: mockAdapter,
+      lifecycleHooks: { onStreamCompleted },
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onStreamCompleted).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(onStreamCompleted).toHaveBeenCalledTimes(1);
+    expect(onStreamCompleted.mock.calls[0]![0].streamId).toBe("7");
+  });
+
+  it("does not poll when no hooks are configured", async () => {
+    getEventsSpy = vi
+      .spyOn(rpc.Server.prototype, "getEvents")
+      .mockResolvedValue(mockGetEventsResponse([]));
+
+    new SoroStreamClient({
+      network: "testnet",
+      contractId: VALID_CONTRACT,
+      walletAdapter: mockAdapter,
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(getEventsSpy).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,9 @@
 export { SoroStreamClient } from "./SoroStreamClient.js";
-export type { SoroStreamClientOptions, SimulateOnlyResult } from "./SoroStreamClient.js";
+export type {
+  SoroStreamClientOptions,
+  SoroStreamLifecycleHooks,
+  SimulateOnlyResult,
+} from "./SoroStreamClient.js";
 
 export { MockSoroStreamClient } from "./mock.js";
 
