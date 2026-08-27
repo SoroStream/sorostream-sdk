@@ -54,6 +54,8 @@ export interface StreamIndexerOptions {
 export interface PaginatedEvents {
   events: StreamEvent[];
   cursor: string;
+  nextCursor?: string;
+  hasMore: boolean;
   latestLedger: number;
 }
 
@@ -155,7 +157,18 @@ export class StreamIndexer {
       .map((e) => this.parseEvent(e, filter))
       .filter((e): e is StreamEvent => e !== null);
 
-    return { events, cursor: response.cursor, latestLedger: response.latestLedger };
+    const lastEvent = events[events.length - 1];
+    const nextCursor = lastEvent ? (lastEvent.pagingToken || lastEvent.id || response.cursor) : response.cursor;
+    const limit = filter.limit ?? 100;
+    const hasMore = events.length >= limit;
+
+    return {
+      events,
+      cursor: response.cursor,
+      nextCursor,
+      hasMore,
+      latestLedger: response.latestLedger,
+    };
   }
 
   private parseEvent(

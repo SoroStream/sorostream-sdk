@@ -351,3 +351,26 @@ export class InsecureRpcUrlError extends SoroStreamError {
     this.rpcUrl = rpcUrl;
   }
 }
+
+export class InvalidStreamIdError extends SoroStreamError {
+  readonly streamId: string;
+  constructor(streamId: string) {
+    super(`Invalid stream ID: "${streamId}". Stream ID must be a valid positive integer string.`);
+    this.name = 'InvalidStreamIdError';
+    this.streamId = streamId;
+  }
+}
+
+export class TransactionMutatedError extends SoroStreamError {
+  constructor(message?: string) {
+    super(message || 'Transaction envelope was mutated unexpectedly');
+    this.name = 'TransactionMutatedError';
+  }
+}
+
+export class WalletConnectSessionExpiredError extends SoroStreamError {
+  constructor(message?: string) {
+    super(message || 'WalletConnect session expired');
+    this.name = 'WalletConnectSessionExpiredError';
+  }
+}

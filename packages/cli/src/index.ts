@@ -4,6 +4,7 @@ import type { GlobalOptions } from './commands.js';
 import {
   cmdCreate,
   cmdGet,
+  cmdList,
   cmdWithdraw,
   cmdCancel,
   cmdTopUp,
@@ -39,6 +40,20 @@ program
   .action(async (opts) => {
     const global = program.opts<GlobalOptions>();
     await cmdCreate({ ...global, ...opts });
+  });
+
+// --- list ------------------------------------------------------------------
+program
+  .command('list')
+  .description('List payment streams filtered by sender, recipient, or status')
+  .option('--sender <address>', 'Filter by sender address')
+  .option('--recipient <address>', 'Filter by recipient address')
+  .option('--status <status>', 'Filter by status (active, cancelled, completed)')
+  .option('--limit <number>', 'Maximum number of streams to return', parseInt)
+  .option('--cursor <string>', 'Cursor for pagination')
+  .action(async (opts) => {
+    const global = program.opts<GlobalOptions>();
+    await cmdList({ ...global, ...opts });
   });
 
 // --- get -------------------------------------------------------------------

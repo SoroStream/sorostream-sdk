@@ -3,6 +3,7 @@ import {
   SoroStreamValidationError,
   FederationResolutionError,
   InsecureRpcUrlError,
+  InvalidStreamIdError,
 } from './errors.js';
 import { getDefaultWebSocketFactory } from './adapters.js';
 import type { FetchAdapter, WebSocketFactory } from './adapters.js';
@@ -33,6 +34,7 @@ import type {
   ParsedMemo,
   MemoHash,
   StreamHealthResult,
+  StreamCompletedSummary,
 } from './types.js';
 
 /** A single point in a stream's payout forecast. */
@@ -1125,6 +1127,19 @@ export function totalValueStreamed(streams: Stream[]): StreamTotals {
  *
  * Issue #386.
  */
+export interface StreamsAggregate {
+  totalStreams: number;
+  totalValueLocked: bigint;
+  averageRate: bigint;
+  averageFlowRate?: bigint;
+  statusBreakdown: {
+    active: number;
+    cancelled: number;
+    completed: number;
+  };
+  totalCount?: number;
+}
+
 export function aggregateStreams(streams: Stream[]): StreamsAggregate {
   let totalValueLocked = 0n;
   let rateSum = 0n;
@@ -1937,4 +1952,11 @@ export function getStreamHealth(stream: Stream, now?: number): StreamHealthResul
     secondsSinceLastWithdrawal,
     diagnostics,
   };
+}
+
+export interface StreamMetadataFields {
+  name?: string;
+  description?: string;
+  tags?: string[];
+  meta?: Record<string, unknown>;
 }
