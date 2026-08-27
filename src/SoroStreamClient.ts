@@ -3900,16 +3900,21 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    *
    * @param sender - The sender address to query.
    * @param pagination - Optional limit/cursor for paginated results.
+   * @param filter - Optional client-side filter criteria (e.g. `{ status: "Active", token, startTimeFrom }`).
    * @returns A `Stream[]` when `pagination` is omitted, otherwise a `PaginatedStreams` page.
    */
   async getStreamsBySender(
     sender: string,
     pagination?: PaginationParams,
+    filter?: StreamFilterCriteria,
   ): Promise<Stream[] | PaginatedStreams> {
     // Network-keyed cache for non-paginated calls (issue #230 & #342).
+    // When a filter is provided, bypass the cache so filtered results don't
+    // poison the unfiltered cache entry for subsequent calls.
     const networkAtCallTime = this.network;
     const cacheKey = `${networkAtCallTime}:${sender}`;
-    if (!pagination) {
+    const hasFilter = filter !== undefined && Object.keys(filter).length > 0;
+    if (!pagination && !hasFilter) {
       const cached = this.senderCache.get(cacheKey);
       if (cached) return cached;
     }
@@ -4066,6 +4071,8 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    * `namespace` parameter. Streams created without a namespace are excluded.
    *
    * @param namespace - The namespace string to filter by.
+   * @param filter - Optional combined filter criteria (status, token, date range, …)
+   *   applied after streams are fetched.
    * @returns An array of streams that have been tagged with the given namespace.
    *
    * @example
@@ -4082,9 +4089,17 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    *
    * // Query streams by namespace
    * const streams = await client.getStreamsByNamespace("tenant-abc");
+   *
+   * // Dashboard: only active USDC streams started this month
+   * const monthAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
+   * const recent = await client.getStreamsByNamespace("tenant-abc", {
+   *   status: "Active",
+   *   token: usdcAddress,
+   *   startTimeFrom: monthAgo,
+   * });
    * ```
    */
-  async getStreamsByNamespace(namespace: string): Promise<Stream[]> {
+  async getStreamsByNamespace(namespace: string, filter?: StreamFilterCriteria): Promise<Stream[]> {
     const streamIds = Array.from(this.namespaceRegistry.entries())
       .filter(([, ns]) => ns === namespace)
       .map(([id]) => id);
@@ -4103,6 +4118,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       }
     }
 
+    if (filter !== undefined && Object.keys(filter).length > 0) {
+      return filterStreams(streams, filter);
+    }
     return streams;
   }
 

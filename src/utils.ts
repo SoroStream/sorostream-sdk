@@ -967,8 +967,12 @@ export function isStreamUnderfunded(stream: Stream): boolean {
 // ── Stream filtering / sorting (issue #204) ─────────────────────────────────
 
 /**
- * Filters a list of streams by status, sender, recipient, token, and/or
- * active-only. All provided criteria are ANDed together.
+ * Filters a list of streams by status, sender, recipient, token, active-only,
+ * and/or date-range bounds (on `startTime` / `endTime`). All provided criteria
+ * are ANDed together.
+ *
+ * Date bounds are inclusive and expressed in Unix seconds, matching the
+ * `startTime` / `endTime` fields on {@link Stream}.
  *
  * @param streams - Streams to filter.
  * @param filters - Criteria to filter by. Omitted fields are not checked.
@@ -976,7 +980,13 @@ export function isStreamUnderfunded(stream: Stream): boolean {
  *
  * @example
  * ```ts
- * const activeFromAlice = filterStreams(streams, { sender: aliceAddress, activeOnly: true });
+ * // Streams started within the last 30 days for a given token
+ * const monthAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
+ * const recent = filterStreams(streams, {
+ *   token: usdcAddress,
+ *   status: "Active",
+ *   startTimeFrom: monthAgo,
+ * });
  * ```
  */
 export function filterStreams(streams: Stream[], filters: StreamFilter): Stream[] {
@@ -986,6 +996,10 @@ export function filterStreams(streams: Stream[], filters: StreamFilter): Stream[
     if (filters.recipient !== undefined && s.recipient !== filters.recipient) return false;
     if (filters.token !== undefined && s.token !== filters.token) return false;
     if (filters.activeOnly && (s.status !== 'Active' || isExpired(s))) return false;
+    if (filters.startTimeFrom !== undefined && s.startTime < filters.startTimeFrom) return false;
+    if (filters.startTimeTo !== undefined && s.startTime > filters.startTimeTo) return false;
+    if (filters.endTimeFrom !== undefined && s.endTime < filters.endTimeFrom) return false;
+    if (filters.endTimeTo !== undefined && s.endTime > filters.endTimeTo) return false;
     return true;
   });
 }

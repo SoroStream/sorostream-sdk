@@ -722,8 +722,13 @@ export class MockSoroStreamClient {
   async getStreamsBySender(
     sender: string,
     pagination?: PaginationParams,
+    filter?: StreamFilterCriteria,
   ): Promise<Stream[] | PaginatedStreams> {
-    const all = Array.from(this.streams.values()).filter((s) => s.sender === sender);
+    let all = Array.from(this.streams.values()).filter((s) => s.sender === sender);
+    // Issue #408-style client-side filter (status, token, date range, …)
+    if (filter && Object.keys(filter).length > 0) {
+      all = filterStreams(all, filter);
+    }
     return this._paginate(all, pagination);
   }
 
@@ -1077,11 +1082,12 @@ export class SoroStreamSandbox extends MockSoroStreamClient {
   override async getStreamsBySender(
     sender: string,
     pagination?: PaginationParams,
+    filter?: StreamFilterCriteria,
   ): Promise<Stream[] | PaginatedStreams> {
     return this.recordAndExecute(
       'getStreamsBySender',
-      () => super.getStreamsBySender(sender, pagination),
-      [sender, pagination],
+      () => super.getStreamsBySender(sender, pagination, filter),
+      [sender, pagination, filter],
     );
   }
 

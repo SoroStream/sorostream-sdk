@@ -1000,6 +1000,17 @@ export interface StreamFilterCriteria {
   status?: StreamStatus;
   /** When true, only include streams that are `"Active"` and not yet expired. */
   activeOnly?: boolean;
+  /**
+   * Inclusive lower bound (Unix seconds) on the stream's `startTime`.
+   * Combine with `startTimeTo` to select streams that started within a window.
+   */
+  startTimeFrom?: number;
+  /** Inclusive upper bound (Unix seconds) on the stream's `startTime`. */
+  startTimeTo?: number;
+  /** Inclusive lower bound (Unix seconds) on the stream's `endTime`. */
+  endTimeFrom?: number;
+  /** Inclusive upper bound (Unix seconds) on the stream's `endTime`. */
+  endTimeTo?: number;
 }
 
 /** Alias for {@link StreamFilterCriteria}, matching the `filterStreams` API. */
