@@ -545,6 +545,12 @@ export interface BulkCreateOptions {
   autoRenew?: boolean;
   /** Max operations per transaction (default 8). */
   batchSize?: number;
+  /**
+   * Optional callback fired after each chunk (or row, for mixed-token chunks)
+   * is submitted. Receives cumulative progress so callers can render
+   * incremental progress while the bulk create is in flight.
+   */
+  onProgress?: (progress: BatchProgress) => void;
 }
 
 /** Result of one batch within a bulk create. */
@@ -575,6 +581,24 @@ export interface BatchWithdrawPartialResult {
   successes: string[];
   /** Stream IDs that failed, with the thrown error per stream. */
   failures: { id: string; error: Error }[];
+}
+
+/**
+ * Progress reported after each completed step of a batch operation, via the
+ * `onProgress` callback of {@link batchWithdraw} and {@link bulkCreateStreams}.
+ * `completed`/`total` count individual items (streams or rows), so callers can
+ * render incremental progress bars while the operation is in flight.
+ */
+export interface BatchProgress {
+  /** Number of items (streams or rows) processed so far, including this step. */
+  completed: number;
+  /** Total number of items to process. */
+  total: number;
+  /**
+   * Identifiers of the items handled by the step that just completed:
+   * stream IDs for `batchWithdraw`, recipient addresses for `bulkCreateStreams`.
+   */
+  processedIds: string[];
 }
 
 /** Per-token aggregate of a set of streams. */
