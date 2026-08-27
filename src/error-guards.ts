@@ -45,6 +45,8 @@ import {
   NonceNotSupportedError,
   SoroStreamDependencyError,
   StartTimeInPastError,
+  InvalidStreamIdError,
+  TransactionMutatedError,
 } from './errors.js';
 
 // ── Error union types ─────────────────────────────────────────────────────────
@@ -118,7 +120,8 @@ export type ValidationError =
   | AccountNotFoundError
   | SoroStreamValidationError
   | SoroStreamMemoError
-  | StartTimeInPastError;
+  | StartTimeInPastError
+  | InvalidStreamIdError;
 
 /**
  * Errors related to wallet authentication, signing capability, and
@@ -130,12 +133,12 @@ export type ValidationError =
  *
  * function handleError(err: unknown) {
  *   if (isAuthError(err)) {
- *     // err: NonceNotSupportedError | SoroStreamDependencyError
+ *     // err: NonceNotSupportedError | SoroStreamDependencyError | TransactionMutatedError
  *   }
  * }
  * ```
  */
-export type AuthError = NonceNotSupportedError | SoroStreamDependencyError;
+export type AuthError = NonceNotSupportedError | SoroStreamDependencyError | TransactionMutatedError;
 
 // ── Type guard functions ──────────────────────────────────────────────────────
 
@@ -245,7 +248,8 @@ export function isValidationError(err: unknown): err is ValidationError {
     err instanceof AccountNotFoundError ||
     err instanceof SoroStreamValidationError ||
     err instanceof SoroStreamMemoError ||
-    err instanceof StartTimeInPastError
+    err instanceof StartTimeInPastError ||
+    err instanceof InvalidStreamIdError
   );
 }
 
@@ -267,7 +271,11 @@ export function isValidationError(err: unknown): err is ValidationError {
  * ```
  */
 export function isAuthError(err: unknown): err is AuthError {
-  return err instanceof NonceNotSupportedError || err instanceof SoroStreamDependencyError;
+  return (
+    err instanceof NonceNotSupportedError ||
+    err instanceof SoroStreamDependencyError ||
+    err instanceof TransactionMutatedError
+  );
 }
 
 // ── matchError helper ─────────────────────────────────────────────────────────

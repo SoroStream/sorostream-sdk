@@ -98,6 +98,7 @@ export {
 export type { BulkCreateFailedSlot, RetryAttempt } from './errors.js';
 export type {
   Stream,
+  StreamBalance,
   StreamStatus,
   CreateStreamParams,
   CloneStreamOverrides,

@@ -1,0 +1,18 @@
+version: '3.8'
+
+# Local Soroban testnet node for issue #467's integration suite.
+# Start:  docker compose -f docker-compose.integration.yml up -d --wait
+# Stop:   docker compose -f docker-compose.integration.yml down -v
+services:
+  soroban-testnet:
+    image: stellar/quickstart:testing
+    platform: linux/amd64
+    command: --futurenet --enable-soroban-rpc
+    ports:
+      - '8000:8000'
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:8000/soroban/rpc/health']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s

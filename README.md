@@ -58,6 +58,7 @@ await client.withdraw({ streamId });
 | `bulkCreateStreams(rows, options)` | Creates many streams at once (batched). Returns `BulkCreateResult` |
 | `getStream(streamId)` | Returns full `Stream` object |
 | `getClaimable(streamId)` | Returns claimable amount in stroops |
+| `getMultipleStreamBalances(streamIds)` | Returns current claimable balances for many streams in a single batched RPC call, e.g. `[{ streamId, balance }]` |
 | `getStreamsBySender(sender)` | Returns all streams for a sender |
 | `getStreamsByRecipient(recipient)` | Returns all streams for a recipient |
 | `estimateCreateStreamFee(params)` | Estimates network fee for `createStream`. Returns `{ totalFee, minResourceFee }` |

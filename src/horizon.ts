@@ -5,6 +5,8 @@
  */
 
 import type { Network } from './types.js';
+import { isValidStellarAddress } from './utils.js';
+import { InvalidAddressError } from './errors.js';
 
 const HORIZON_URLS: Record<Network, string> = {
   mainnet: 'https://horizon.stellar.org',
@@ -86,6 +88,14 @@ export async function getTransactionHistory(
 ): Promise<TransactionHistoryPage> {
   const { limit = 10, cursor, contractId } = options;
   const horizonUrl = HORIZON_URLS[network];
+
+  // Issue #458: sanitise the caller-supplied contract ID before it is
+  // interpolated into the Horizon request URL, so a malformed value fails
+  // with a clear SDK error instead of an opaque Horizon 400 (or worse,
+  // altering the request path/query).
+  if (contractId !== undefined && !isValidStellarAddress(contractId)) {
+    throw new InvalidAddressError(contractId);
+  }
 
   // Build query parameters
   const params = new URLSearchParams({
@@ -171,6 +181,15 @@ export async function getAddressActivity(
 ): Promise<TransactionHistoryPage> {
   const { limit = 10, cursor, contractId } = options;
   const horizonUrl = HORIZON_URLS[network];
+
+  // Issue #458: sanitise caller-supplied addresses before they are
+  // interpolated into the Horizon request URL.
+  if (!isValidStellarAddress(address)) {
+    throw new InvalidAddressError(address);
+  }
+  if (contractId !== undefined && !isValidStellarAddress(contractId)) {
+    throw new InvalidAddressError(contractId);
+  }
 
   const params = new URLSearchParams({
     limit: Math.min(limit, 200).toString(),

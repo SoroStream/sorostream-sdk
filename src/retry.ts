@@ -10,6 +10,88 @@ export interface RetryOptions {
   maxDelayMs?: number;
   /** Optional AbortSignal to cancel retries mid-flight. */
   signal?: AbortSignal;
+  /**
+   * When true, only retry errors classified as transient (network errors,
+   * rate limits, 5xx server errors). Non-transient errors (contract errors,
+   * validation failures) are rethrown immediately without consuming retry
+   * budget. Defaults to false for backwards compatibility.
+   * Issue #363.
+   */
+  transientOnly?: boolean;
+  /**
+   * Custom predicate to decide whether an error should be retried.
+   * Overrides `transientOnly` when provided.
+   * Return `true` to retry, `false` to rethrow immediately.
+   * Issue #363.
+   */
+  shouldRetry?: (err: unknown) => boolean;
+}
+
+/**
+ * Returns `true` when `err` looks like a transient Soroban RPC error that is
+ * safe to retry — i.e. a network-layer hiccup, rate-limit response, or
+ * temporary server-side unavailability — rather than a deterministic failure
+ * (invalid contract call, auth error, bad params) that would fail again on
+ * every subsequent attempt.
+ *
+ * Transient categories:
+ * - Network errors: fetch failures, ECONNRESET, ETIMEDOUT, socket hangups.
+ * - HTTP 429 Too Many Requests (rate limiting).
+ * - HTTP 5xx: 502 Bad Gateway, 503 Service Unavailable, 504 Gateway Timeout.
+ * - Soroban RPC error codes: -32005 (rate limited), -32603 (internal), -32002 (resource unavailable).
+ *
+ * Issue #363.
+ */
+export function isTransientRpcError(err: unknown): boolean {
+  if (err == null) return false;
+
+  const message = err instanceof Error ? err.message : String(err);
+  const lowerMsg = message.toLowerCase();
+
+  // Network-layer patterns
+  if (
+    lowerMsg.includes('timeout') ||
+    lowerMsg.includes('timed out') ||
+    lowerMsg.includes('econnreset') ||
+    lowerMsg.includes('etimedout') ||
+    lowerMsg.includes('network') ||
+    lowerMsg.includes('fetch failed') ||
+    lowerMsg.includes('socket') ||
+    lowerMsg.includes('connection refused') ||
+    lowerMsg.includes('enotfound') ||
+    lowerMsg.includes('epipe')
+  ) {
+    return true;
+  }
+
+  if (typeof err === 'object' && err !== null) {
+    const obj = err as Record<string, unknown>;
+
+    // HTTP status code checks
+    const status = obj['status'] ?? (obj['response'] as Record<string, unknown> | undefined)?.['status'];
+    if (typeof status === 'number') {
+      if (status === 429 || status === 502 || status === 503 || status === 504) {
+        return true;
+      }
+    }
+
+    // Soroban JSON-RPC error code checks
+    const code = obj['code'] ?? (obj['error'] as Record<string, unknown> | undefined)?.['code'];
+    if (typeof code === 'number') {
+      // -32005: rate limited, -32603: internal error, -32002: resource unavailable
+      if (code === -32005 || code === -32603 || code === -32002) {
+        return true;
+      }
+    }
+
+    // DOMException name check (AbortError is NOT transient; NetworkError is)
+    if (err instanceof Error && 'name' in err) {
+      if ((err as DOMException).name === 'NetworkError') return true;
+      if ((err as DOMException).name === 'AbortError') return false;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -81,6 +163,10 @@ export class RetryBackoff {
  * Uses the AWS "full jitter" formula to spread retry load:
  *   delay = random(0, min(maxDelayMs, baseDelayMs * 2^attempt))
  *
+ * When `transientOnly: true` is set, only errors matching {@link isTransientRpcError}
+ * are retried. Non-transient errors (contract errors, validation failures, etc.) are
+ * rethrown immediately without consuming retry budget. Issue #363.
+ *
  * When all attempts are exhausted, throws {@link SoroStreamRetryExhaustedError}
  * with a full log of every attempt, the original error, and (when available)
  * the final RPC response body.
@@ -93,6 +179,14 @@ export async function withRetry<T>(fn: () => Promise<T>, options?: RetryOptions)
   const baseDelayMs = options?.baseDelayMs ?? 200;
   const maxDelayMs = options?.maxDelayMs ?? 5_000;
   const signal = options?.signal;
+
+  // Issue #363: determine whether a given error should be retried.
+  // Priority: explicit shouldRetry > transientOnly flag > retry-all (default).
+  const canRetry: (err: unknown) => boolean = options?.shouldRetry
+    ? options.shouldRetry
+    : options?.transientOnly
+      ? isTransientRpcError
+      : () => true;
 
   const attempts: RetryAttempt[] = [];
   let lastError: unknown;
@@ -125,6 +219,11 @@ export async function withRetry<T>(fn: () => Promise<T>, options?: RetryOptions)
             finalResponseBody = responseBody;
           }
         }
+      }
+
+      // Issue #363: if the error is non-transient, rethrow immediately.
+      if (!canRetry(err)) {
+        throw err;
       }
 
       if (attempt < maxAttempts - 1) {
