@@ -393,6 +393,32 @@ export class MockSoroStreamClient {
       type: "StreamCancelled",
       streamId: params.streamId,
       txHash,
+      ledger: 0,
+      timestamp: now,
+      data: {},
+    });
+
+    this.emit({
+      type: "StreamCreated",
+      streamId: idA,
+      txHash,
+      ledger: 0,
+      timestamp: now,
+      data: { sender: streamA.sender, recipient: streamA.recipient },
+    });
+
+    this.emit({
+      type: "StreamCreated",
+      streamId: idB,
+      txHash,
+      ledger: 0,
+      timestamp: now,
+      data: { sender: streamB.sender, recipient: streamB.recipient },
+    });
+
+    return { txHash, streamIdA: idA, streamIdB: idB };
+  }
+
   async transferStream(
     params: TransferStreamParams
   ): Promise<{ txHash: string }> {
@@ -440,25 +466,6 @@ export class MockSoroStreamClient {
       data: {},
     });
 
-    this.emit({
-      type: "StreamCreated",
-      streamId: idA,
-      txHash,
-      ledger: 0,
-      timestamp: now,
-      data: { sender: streamA.sender, recipient: streamA.recipient },
-    });
-
-    this.emit({
-      type: "StreamCreated",
-      streamId: idB,
-      txHash,
-      ledger: 0,
-      timestamp: now,
-      data: { sender: streamB.sender, recipient: streamB.recipient },
-    });
-
-    return { txHash, streamIdA: idA, streamIdB: idB };
     return { txHash: `mock-tx-pause-${params.streamId}` };
   }
 

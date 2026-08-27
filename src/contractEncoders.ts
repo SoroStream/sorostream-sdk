@@ -101,6 +101,9 @@ class V1Encoder implements ContractCallEncoder {
       nativeToScVal(params.ratioDenominator, { type: "u64" }),
       nativeToScVal(params.recipientA, { type: "address" }),
       nativeToScVal(params.recipientB, { type: "address" })
+    );
+  }
+
   transferStream(streamId: string, sender: string, newRecipient: string): xdr.Operation {
     return this.contract.call(
       "transfer_stream",
