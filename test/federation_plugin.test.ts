@@ -19,10 +19,7 @@ function makeFetchThatResolves(stellarAddress = MOCK_STELLAR_ADDRESS) {
     });
 }
 
-function makeCtx(
-  method: string,
-  args: unknown[],
-): MiddlewareContext & { args: unknown[] } {
+function makeCtx(method: string, args: unknown[]): MiddlewareContext & { args: unknown[] } {
   return { method, args };
 }
 
