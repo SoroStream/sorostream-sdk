@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MockSoroStreamClient } from '../src/mock.js';
+import { StreamStateMachine, InvalidStateTransitionError } from '../src/state-machine.js';
 import type { Stream } from '../src/types.js';
 
 const BASE_STREAM: Omit<Stream, 'id'> = {
@@ -196,3 +197,33 @@ describe('State machine – state unchanged after rejected transition', () => {
     expect(stream.deposit).toBe(1_000n);
   });
 });
+
+describe('StreamStateMachine class & transition guards (Issue #429)', () => {
+  it('correctly evaluates canTransition for all states', () => {
+    expect(StreamStateMachine.canTransition('Active', 'withdraw')).toBe(true);
+    expect(StreamStateMachine.canTransition('Active', 'pause')).toBe(true);
+    expect(StreamStateMachine.canTransition('Paused', 'resume')).toBe(true);
+    expect(StreamStateMachine.canTransition('Cancelled', 'withdraw')).toBe(false);
+    expect(StreamStateMachine.canTransition('Completed', 'topUp')).toBe(false);
+  });
+
+  it('throws InvalidStateTransitionError on invalid transition assertion', () => {
+    expect(() => StreamStateMachine.assertValidTransition('Cancelled', 'withdraw')).toThrow(
+      InvalidStateTransitionError,
+    );
+  });
+
+  it('calculates next state accurately', () => {
+    expect(StreamStateMachine.getNextState('Active', 'cancel')).toBe('Cancelled');
+    expect(StreamStateMachine.getNextState('Active', 'pause')).toBe('Paused');
+    expect(StreamStateMachine.getNextState('Paused', 'resume')).toBe('Active');
+    expect(StreamStateMachine.getNextState('Active', 'withdraw', { isFullyWithdrawn: true })).toBe('Completed');
+  });
+
+  it('returns valid actions for each state', () => {
+    expect(StreamStateMachine.getValidActions('Active')).toContain('withdraw');
+    expect(StreamStateMachine.getValidActions('Cancelled')).toEqual([]);
+    expect(StreamStateMachine.getValidActions('Completed')).toEqual([]);
+  });
+});
+

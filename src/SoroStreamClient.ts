@@ -1713,12 +1713,21 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     feeBumpOpts?: FeeBumpOptions,
     operationName?: string,
     memo?: string | MemoHash,
+    timeoutMs?: number,
   ): Promise<{ txHash: string; ledger: number }> {
     const opStart = Date.now();
     try {
       await this.writeRateLimiter?.acquire(operationName ?? 'write');
       return await this.enqueueOp('write', () =>
-        this.buildAndSubmitInner(operation, opStart, signal, feeBumpOpts, operationName, memo),
+        this.buildAndSubmitInner(
+          operation,
+          opStart,
+          signal,
+          feeBumpOpts,
+          operationName,
+          memo,
+          timeoutMs,
+        ),
       );
     } catch (err) {
       // Issue #212: notify subscribers of the custom event bus on RPC/submission failure.
@@ -1734,7 +1743,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     feeBumpOpts?: FeeBumpOptions,
     operationName?: string,
     memo?: string | MemoHash,
+    timeoutMs?: number,
   ): Promise<{ txHash: string; ledger: number }> {
+    const effectiveTimeoutMs = timeoutMs ?? this.txTimeoutMs;
     const adapter = this.requireWalletAdapter();
     const publicKey = await adapter.getPublicKey();
 
@@ -1820,8 +1831,8 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       }
 
       const elapsed = Date.now() - startTime;
-      if (elapsed >= this.txTimeoutMs) {
-        throw new Error(`Transaction confirmation timed out after ${this.txTimeoutMs}ms`);
+      if (elapsed >= effectiveTimeoutMs) {
+        throw new Error(`Transaction confirmation timed out after ${effectiveTimeoutMs}ms`);
       }
 
       await new Promise((r) => setTimeout(r, delay));
@@ -2317,6 +2328,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         feeBump,
         'createStream',
         options?.memo,
+        options?.timeoutMs ?? options?.timeout,
       );
 
       const result = await this.getStreamsBySender(sender);
@@ -2450,6 +2462,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'withdraw',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
 
     // Issue #212: notify subscribers of the custom event bus.
@@ -2597,6 +2610,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'cancelStream',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
 
     // Issue #212: notify subscribers of the custom event bus.
@@ -2671,6 +2685,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'topUp',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
 
     // Issue #271: record the confirmed ledger for RYOW consistency.
@@ -2732,6 +2747,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'updateFlowRate',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
     return { txHash };
   }
@@ -2770,6 +2786,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'setOperator',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
     return { txHash };
   }
@@ -2798,6 +2815,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'operatorCancelStream',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
     return { txHash };
   }
@@ -2829,6 +2847,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'operatorTopUp',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
     return { txHash };
   }
@@ -2883,6 +2902,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'splitStream',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
 
     const result = await this.getStreamsBySender(sender);
@@ -2924,6 +2944,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'transferStream',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
     return { txHash };
   }
@@ -2952,6 +2973,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'pause',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
     return { txHash };
   }
@@ -2980,6 +3002,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       feeBump,
       'resume',
       options?.memo,
+      options?.timeoutMs ?? options?.timeout,
     );
     return { txHash };
   }
@@ -4078,6 +4101,65 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       hasMore: streams.length >= limit,
     };
   }
+
+  /**
+   * Queries streams filtered by an on-chain tag/label (issue #433).
+   *
+   * Calls the contract `get_streams_by_tag` query method.
+   *
+   * @param tag - The tag string to filter streams by.
+   * @param pagination - Optional limit/cursor for paginated results.
+   * @param filter - Optional client-side filter criteria.
+   * @returns A `Stream[]` when `pagination` is omitted, otherwise a `PaginatedStreams` page.
+   */
+  async getStreamsByTag(
+    tag: string,
+    pagination?: PaginationParams,
+    filter?: StreamFilterCriteria,
+  ): Promise<Stream[] | PaginatedStreams> {
+    const args: xdr.ScVal[] = [nativeToScVal(tag, { type: 'string' })];
+
+    if (pagination) {
+      args.push(nativeToScVal(pagination.limit ?? 20, { type: 'u32' }));
+      args.push(
+        pagination.cursor != null
+          ? nativeToScVal(BigInt(pagination.cursor), { type: 'u64' })
+          : xdr.ScVal.scvVoid(),
+      );
+    }
+
+    const result = await withRetry(
+      () => this.simulateOp(this.contract.call('get_streams_by_tag', ...args)),
+      this.readRetry,
+    );
+
+    if (rpc.Api.isSimulationError(result)) {
+      return pagination ? { streams: [], cursor: null, hasMore: false } : [];
+    }
+
+    const returnVal = (result as rpc.Api.SimulateTransactionSuccessResponse).result?.retval;
+    if (!returnVal) {
+      return pagination ? { streams: [], cursor: null, hasMore: false } : [];
+    }
+
+    const raw = scValToNative(returnVal) as Record<string, unknown>[];
+    let streams = raw.map(nativeToStream);
+
+    if (filter && Object.keys(filter).length > 0) {
+      streams = filterStreams(streams, filter);
+    }
+
+    if (!pagination) return streams;
+
+    const limit = pagination.limit ?? 20;
+    const last = streams[streams.length - 1];
+    return {
+      streams,
+      cursor: last ? last.id : null,
+      hasMore: streams.length >= limit,
+    };
+  }
+
 
   /**
    * Returns all streams matching a given namespace (issue #274).

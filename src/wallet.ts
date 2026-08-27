@@ -6,6 +6,7 @@ import type {
   MultisigSigner,
   PasskeyAdapterConfig,
   KmsWalletAdapterConfig,
+  LobstrWalletAdapterConfig,
 } from './types.js';
 
 /**

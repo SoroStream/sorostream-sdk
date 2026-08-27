@@ -745,6 +745,20 @@ export class MockSoroStreamClient {
     return this._paginate(all, pagination);
   }
 
+  async getStreamsByTag(
+    tag: string,
+    pagination?: PaginationParams,
+    filter?: StreamFilterCriteria,
+  ): Promise<Stream[] | PaginatedStreams> {
+    let all = Array.from(this.streams.values()).filter(
+      (s) => s.tag === tag || (s as any).memo === tag,
+    );
+    if (filter && Object.keys(filter).length > 0) {
+      all = filterStreams(all, filter);
+    }
+    return this._paginate(all, pagination);
+  }
+
   private _paginate(all: Stream[], pagination?: PaginationParams): Stream[] | PaginatedStreams {
     if (!pagination) return all;
     const limit = pagination.limit ?? 20;
