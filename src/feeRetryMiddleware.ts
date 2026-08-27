@@ -25,11 +25,7 @@ import type { SoroStreamPlugin, MiddlewareContext } from './types.js';
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /** Soroban RPC result codes that indicate an insufficient fee. */
-const FEE_ERROR_CODES = new Set([
-  'tx_insufficient_fee',
-  'op_insufficient_fee',
-  'insufficient_fee',
-]);
+const FEE_ERROR_CODES = new Set(['tx_insufficient_fee', 'op_insufficient_fee', 'insufficient_fee']);
 
 /** Default multiplier applied to the fee on each retry (50% bump). */
 const DEFAULT_BUMP_FACTOR = 1.5;
@@ -96,11 +92,7 @@ function isFeeError(error: unknown): boolean {
 
   // Check error message text — Soroban RPC sometimes surfaces this in `.message`
   const message =
-    err instanceof Error
-      ? err.message
-      : typeof err['message'] === 'string'
-        ? err['message']
-        : '';
+    err instanceof Error ? err.message : typeof err['message'] === 'string' ? err['message'] : '';
 
   if (typeof message === 'string') {
     const lower = message.toLowerCase();

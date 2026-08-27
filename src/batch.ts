@@ -27,6 +27,7 @@ export type {
   BatchCancelResult,
   BatchWithdrawResult,
   BatchWithdrawPartialResult,
+  BatchProgress,
 } from './types.js';
 export { BulkCreatePartialError } from './errors.js';
 export type { BulkCreateFailedSlot } from './errors.js';

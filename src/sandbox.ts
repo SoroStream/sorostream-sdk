@@ -1,6 +1,7 @@
 import type {
   CreateStreamParams,
   Stream,
+  StreamBalance,
   WithdrawParams,
   CancelStreamParams,
   StreamEventType,
@@ -35,6 +36,7 @@ export type ScenarioMap = {
   withdraw?: (params: WithdrawParams) => Promise<{ txHash: string; amount: string }>;
   cancelStream?: (params: CancelStreamParams) => Promise<{ txHash: string }>;
   getClaimable?: (streamId: string) => Promise<bigint>;
+  getMultipleStreamBalances?: (streamIds: string[]) => Promise<StreamBalance[]>;
   estimateFee?: (params: unknown) => Promise<bigint>;
   getStreamsBySender?: (sender: string) => Promise<Stream[]>;
   getStreamsByRecipient?: (recipient: string) => Promise<Stream[]>;
@@ -230,6 +232,20 @@ export class SoroStreamSandbox {
       return 0n;
     }
     this.unexpected('getClaimable');
+  }
+
+  /**
+   * Returns claimable balances for multiple streams using the registered
+   * `getMultipleStreamBalances` scenario.
+   */
+  async getMultipleStreamBalances(streamIds: string[]): Promise<StreamBalance[]> {
+    if (this.scenarios.getMultipleStreamBalances) {
+      return this.scenarios.getMultipleStreamBalances(streamIds);
+    }
+    if (this.defaultBehavior === 'empty') {
+      return [];
+    }
+    this.unexpected('getMultipleStreamBalances');
   }
 
   /**

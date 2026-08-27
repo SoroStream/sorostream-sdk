@@ -13,6 +13,7 @@ import type {
   Stream,
   WalletAdapter,
   BulkStreamRow,
+  BatchProgress,
   PriceFeedAdapter,
   FeeBumpOptions,
 } from '../src/types.js';
@@ -917,6 +918,32 @@ describe('SoroStreamClient batchWithdraw', () => {
     expect(result.failures).toEqual([]);
   });
 
+  it('fires onProgress after each chunk with cumulative counts', async () => {
+    const progress: BatchProgress[] = [];
+    await client.batchWithdraw(['1', '2', '3', '4', '5'], 2, (p) => progress.push(p));
+
+    expect(progress).toEqual([
+      { completed: 2, total: 5, processedIds: ['1', '2'] },
+      { completed: 4, total: 5, processedIds: ['3', '4'] },
+      { completed: 5, total: 5, processedIds: ['5'] },
+    ]);
+  });
+
+  it('fires onProgress for failed chunks too', async () => {
+    vi.spyOn(client, 'executeBatch')
+      .mockResolvedValueOnce('tx1')
+      .mockRejectedValueOnce(new Error('chunk failed'));
+
+    const progress: BatchProgress[] = [];
+    const result = await client.batchWithdraw(['1', '2', '3', '4'], 2, (p) => progress.push(p));
+
+    expect(progress).toEqual([
+      { completed: 2, total: 4, processedIds: ['1', '2'] },
+      { completed: 4, total: 4, processedIds: ['3', '4'] },
+    ]);
+    expect(result.failures).toHaveLength(2);
+  });
+
   it('records failures when executeBatch rejects for a chunk', async () => {
     vi.spyOn(client, 'executeBatch')
       .mockResolvedValueOnce('tx1')
@@ -996,6 +1023,50 @@ describe('SoroStreamClient bulkCreateStreams', () => {
 
     expect(result.batches).toHaveLength(1);
     expect(result.batches[0]!.streamIds).toEqual([]);
+  });
+
+  it('fires onProgress after each chunk with cumulative counts', async () => {
+    vi.spyOn(client, 'getStreamsBySender').mockResolvedValue([]);
+
+    const rows: BulkStreamRow[] = [
+      { recipient: TEST_PK, amount: 100n, durationSeconds: 3600 },
+      { recipient: TEST_PK, amount: 200n, durationSeconds: 7200 },
+      { recipient: TEST_PK, amount: 300n, durationSeconds: 3600 },
+    ];
+
+    const progress: BatchProgress[] = [];
+    await client.bulkCreateStreams(rows, {
+      token: TEST_TOKEN,
+      batchSize: 2,
+      onProgress: (p) => progress.push(p),
+    });
+
+    expect(progress).toEqual([
+      { completed: 2, total: 3, processedIds: [TEST_PK, TEST_PK] },
+      { completed: 3, total: 3, processedIds: [TEST_PK] },
+    ]);
+  });
+
+  it('fires onProgress per row when a chunk has mixed tokens', async () => {
+    vi.spyOn(client, 'getStreamsBySender').mockResolvedValue([]);
+    vi.spyOn(client, 'buildAndSubmit').mockResolvedValue({ txHash: 'tx_mixed', ledger: 0 });
+
+    const otherToken = VALID_CONTRACT;
+    const rows: BulkStreamRow[] = [
+      { recipient: TEST_PK, amount: 100n, durationSeconds: 3600, token: TEST_TOKEN },
+      { recipient: TEST_PK, amount: 200n, durationSeconds: 7200, token: otherToken },
+    ];
+
+    const progress: BatchProgress[] = [];
+    await client.bulkCreateStreams(rows, {
+      token: TEST_TOKEN,
+      onProgress: (p) => progress.push(p),
+    });
+
+    expect(progress).toEqual([
+      { completed: 1, total: 2, processedIds: [TEST_PK] },
+      { completed: 2, total: 2, processedIds: [TEST_PK] },
+    ]);
   });
 });
 

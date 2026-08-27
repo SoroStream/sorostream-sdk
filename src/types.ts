@@ -53,6 +53,76 @@ export interface PaginatedStreams {
   hasMore: boolean;
 }
 
+// ── Batch read types (#427) ──────────────────────────────────────────────────
+
+/** Options for {@link SoroStreamClient.getStreams}. */
+export interface GetStreamsOptions {
+  /**
+   * Maximum number of stream IDs sent per RPC call (default: `50`).
+   *
+   * Requests larger than this are split into several parallel calls so a
+   * dashboard asking for 500 streams never builds a transaction that exceeds
+   * the RPC's simulation limits.
+   */
+  chunkSize?: number;
+  /**
+   * When `false`, the per-stream TTL cache is ignored and every requested ID
+   * is fetched from the network (default: `true`).
+   */
+  useCache?: boolean;
+  /**
+   * When `true`, a missing stream raises `StreamNotFoundError` instead of
+   * being reported through {@link BatchStreamsResult.missing} (default: `false`).
+   */
+  strict?: boolean;
+  /**
+   * When `true` (default), a contract that does not implement the batch
+   * `get_streams` entry point transparently falls back to parallel
+   * single-stream reads, so the method works against older deployments.
+   */
+  fallbackToIndividual?: boolean;
+}
+
+/** Detailed result of a batch stream read. See {@link SoroStreamClient.getStreamsBatch}. */
+export interface BatchStreamsResult {
+  /** Resolved streams, in the same order as the requested IDs. */
+  streams: Stream[];
+  /** Requested IDs that have no on-chain record. */
+  missing: string[];
+  /** IDs served from the per-stream TTL cache without touching the network. */
+  cached: string[];
+  /** Number of RPC simulations issued to satisfy the request. */
+  rpcCalls: number;
+}
+
+// ── Reactive (RxJS-compatible) observable types (#423) ───────────────────────
+
+/** Options for {@link SoroStreamClient.observeStream}. */
+export interface ObserveStreamOptions {
+  /**
+   * Polling interval in milliseconds used to refresh the stream (default:
+   * `5000`). All subscribers of the same stream share a single poll loop.
+   */
+  intervalMs?: number;
+  /**
+   * When `true` (default), consecutive identical stream states are collapsed
+   * so subscribers only see real changes.
+   */
+  emitOnlyChanges?: boolean;
+  /**
+   * When `true` (default), the observable completes once the stream reaches a
+   * terminal state (`Completed` or `Cancelled`) — there is nothing left to
+   * observe, so downstream `takeUntil`/`finalize` logic can clean up.
+   */
+  completeWhenSettled?: boolean;
+  /**
+   * When `true`, contract events for this stream also trigger a refresh so
+   * changes surface without waiting for the next poll tick (default: `false`,
+   * because it starts the shared event poller).
+   */
+  refreshOnEvents?: boolean;
+}
+
 // ── Multisig types (#16) ─────────────────────────────────────────────────────
 
 export interface MultisigSigner {
@@ -323,6 +393,21 @@ export interface RevokeDelegateParams {
   delegate: string;
 }
 
+/**
+ * Summary object passed to the {@link WatchClaimableOptions.onStreamCompleted} callback
+ * when a watched stream reaches its end time.
+ *
+ * Issue #385.
+ */
+export interface StreamCompletedSummary {
+  /** The stream ID that completed. */
+  streamId: string;
+  /** Total tokens streamed from startTime to endTime (deposit in stroops). */
+  totalStreamed: bigint;
+  /** Unix timestamp (seconds) when the stream ended. */
+  endTime: number;
+}
+
 /** Options for {@link watchClaimable}. */
 export interface WatchClaimableOptions {
   /** Interval in ms between interpolation ticks (default: 200). */
@@ -368,6 +453,23 @@ export interface WatchClaimableOptions {
    * global (issue #199).
    */
   webSocketFactory?: WebSocketFactory;
+  /**
+   * Called once when the watched stream reaches its `endTime`.
+   * Receives the stream ID and a {@link StreamCompletedSummary} with the
+   * total tokens streamed and the stream's end timestamp.
+   *
+   * Issue #385.
+   *
+   * @example
+   * ```ts
+   * watchClaimable(stream, reconcile, onTick, {
+   *   onStreamCompleted: (streamId, summary) => {
+   *     console.log(`Stream ${streamId} finished. Total streamed: ${summary.totalStreamed}`);
+   *   },
+   * });
+   * ```
+   */
+  onStreamCompleted?: (streamId: string, summary: StreamCompletedSummary) => void;
 }
 
 /** Options for {@link watchTotalClaimable}. */
@@ -411,6 +513,13 @@ export interface WalletAdapter {
    * Returns an unsubscribe function.
    */
   onConnectionChange?(callback: (connected: boolean) => void): () => void;
+  /**
+   * Optional: releases any retained key material (issue #460). Adapters that
+   * hold raw secret key buffers (e.g. `createKeypairAdapter`) zero them out
+   * here; adapters with nothing sensitive to hold in memory simply omit this
+   * method. Once called, the adapter should no longer be used.
+   */
+  destroy?(): void;
 }
 
 /** Result shape returned when a wallet adapter signs a transaction (issue #344). */
@@ -440,6 +549,12 @@ export interface BulkCreateOptions {
   autoRenew?: boolean;
   /** Max operations per transaction (default 8). */
   batchSize?: number;
+  /**
+   * Optional callback fired after each chunk (or row, for mixed-token chunks)
+   * is submitted. Receives cumulative progress so callers can render
+   * incremental progress while the bulk create is in flight.
+   */
+  onProgress?: (progress: BatchProgress) => void;
 }
 
 /** Result of one batch within a bulk create. */
@@ -470,6 +585,24 @@ export interface BatchWithdrawPartialResult {
   successes: string[];
   /** Stream IDs that failed, with the thrown error per stream. */
   failures: { id: string; error: Error }[];
+}
+
+/**
+ * Progress reported after each completed step of a batch operation, via the
+ * `onProgress` callback of {@link batchWithdraw} and {@link bulkCreateStreams}.
+ * `completed`/`total` count individual items (streams or rows), so callers can
+ * render incremental progress bars while the operation is in flight.
+ */
+export interface BatchProgress {
+  /** Number of items (streams or rows) processed so far, including this step. */
+  completed: number;
+  /** Total number of items to process. */
+  total: number;
+  /**
+   * Identifiers of the items handled by the step that just completed:
+   * stream IDs for `batchWithdraw`, recipient addresses for `bulkCreateStreams`.
+   */
+  processedIds: string[];
 }
 
 /** Per-token aggregate of a set of streams. */
@@ -831,6 +964,21 @@ export interface RecipientAggregate {
   claimedSoFar: bigint;
 }
 
+/**
+ * A single stream's current accrued claimable balance returned by
+ * `SoroStreamClient.getMultipleStreamBalances`.
+ *
+ * `balance` is the amount claimable right now in stroops (`0n` when the
+ * stream does not exist). The entry type is JSON-serialisable so dashboard
+ * layers can render many balances directly.
+ */
+export interface StreamBalance {
+  /** The stream ID the balance belongs to. */
+  streamId: string;
+  /** Current accrued claimable amount in stroops. */
+  balance: bigint;
+}
+
 // ── Issue #405: Recipient trust score integration ────────────────────────────
 
 /**
@@ -871,6 +1019,22 @@ export type RecipientTrustScoreProvider = (
   recipient: string,
 ) => RecipientTrustScore | Promise<RecipientTrustScore>;
 
+// ── Issue #364: onStreamUpdate subscription ─────────────────────────────────
+
+/** Options for the {@link SoroStreamClient.onStreamUpdate} subscription. */
+export interface OnStreamUpdateOptions {
+  /**
+   * How often to poll the RPC for state changes, in ms.
+   * Defaults to 5000 (5 seconds).
+   */
+  pollIntervalMs?: number;
+  /**
+   * When true, fire the callback immediately with the current stream state
+   * before waiting for the first poll interval. Defaults to false.
+   */
+  immediate?: boolean;
+}
+
 // ── Stream filtering (issue #204) ───────────────────────────────────────────
 
 /** Criteria for filtering streams. */
@@ -881,6 +1045,17 @@ export interface StreamFilterCriteria {
   status?: StreamStatus;
   /** When true, only include streams that are `"Active"` and not yet expired. */
   activeOnly?: boolean;
+  /**
+   * Inclusive lower bound (Unix seconds) on the stream's `startTime`.
+   * Combine with `startTimeTo` to select streams that started within a window.
+   */
+  startTimeFrom?: number;
+  /** Inclusive upper bound (Unix seconds) on the stream's `startTime`. */
+  startTimeTo?: number;
+  /** Inclusive lower bound (Unix seconds) on the stream's `endTime`. */
+  endTimeFrom?: number;
+  /** Inclusive upper bound (Unix seconds) on the stream's `endTime`. */
+  endTimeTo?: number;
 }
 
 /** Alias for {@link StreamFilterCriteria}, matching the `filterStreams` API. */
@@ -1089,6 +1264,18 @@ export interface SoroStreamEventMap {
   'rpc.error': RpcErrorEventPayload;
   walletAdapterChanged: WalletAdapterChangedEventPayload;
   cacheInvalidated: CacheInvalidatedEventPayload;
+  requestDeduplicated: RequestDeduplicatedEventPayload;
+}
+
+/**
+ * Payload emitted when a read call joined an already in-flight request
+ * instead of issuing its own (issue #426).
+ */
+export interface RequestDeduplicatedEventPayload {
+  /** Internal deduplication key of the shared request. */
+  key: string;
+  /** Network the shared request is running against. */
+  network: Network;
 }
 
 /** Payload emitted when the client read cache is invalidated (issue #342). */
@@ -1233,4 +1420,30 @@ export interface ConfigUpdatedEvent {
   field: string;
   oldValue: unknown;
   newValue: unknown;
+}
+
+// ── Issue #398: getStreamHealth ──────────────────────────────────────────────
+
+/** Health status string returned by {@link getStreamHealth}. */
+export type StreamHealthStatus = 'healthy' | 'warning' | 'critical' | 'completed' | 'cancelled';
+
+/** Result returned by {@link getStreamHealth}. */
+export interface StreamHealthResult {
+  /**
+   * Numeric health score in the range 0–100.
+   * 100 = fully healthy; lower values indicate increasing risk.
+   */
+  score: number;
+  /** Human-readable health status. */
+  status: StreamHealthStatus;
+  /** Remaining balance in stroops (deposit minus streamed so far). */
+  remainingBalance: bigint;
+  /** Seconds elapsed since stream started. */
+  elapsedSeconds: number;
+  /** Seconds remaining until stream ends (0 if ended). */
+  remainingSeconds: number;
+  /** Seconds since the last withdrawal (0 if never withdrawn). */
+  secondsSinceLastWithdrawal: number;
+  /** Human-readable diagnostics messages (empty when status is healthy). */
+  diagnostics: string[];
 }

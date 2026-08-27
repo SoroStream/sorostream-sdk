@@ -5,6 +5,7 @@
   "workspaces": [
     ".",
     "packages/react",
+    "packages/vue",
     "packages/cli",
     "packages/react-native",
     "packages/eslint-plugin"
@@ -34,6 +35,11 @@
       "import": "./dist/testing.mjs",
       "require": "./dist/testing.js"
     },
+    "./simulator": {
+      "types": "./dist/simulator.d.ts",
+      "import": "./dist/simulator.mjs",
+      "require": "./dist/simulator.js"
+    },
     "./schemas/*": "./schemas/*"
   },
   "contracts": {
@@ -41,9 +47,10 @@
     "maxCompatibleVersion": "1.99.99"
   },
   "scripts": {
-    "build": "tsup src/index.ts src/wallets.ts src/mock.ts src/testing.ts --format cjs,esm --dts --clean && npm run validate-exports",
+    "build": "tsup src/index.ts src/wallets.ts src/mock.ts src/testing.ts src/simulator.ts --format cjs,esm --dts --clean && npm run validate-exports",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "tsc --noEmit",
     "check:changeset": "node scripts/check-changeset.js",
     "generate-schemas": "node scripts/generate-schemas.js",
@@ -51,6 +58,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:changelog": "node scripts/check-changelog-format.js",
+    "check:audit": "npm audit --audit-level=high --omit=dev",
     "build:all": "npm run build && npm run build -w packages/react && npm run build -w packages/cli && npm run build -w packages/react-native && npm run build -w packages/eslint-plugin",
     "docs": "typedoc",
     "validate-exports": "node scripts/validate-exports.js",
@@ -79,11 +87,13 @@
     "fast-check": "^3.22.0",
     "graphql": "^16.14.2",
     "prettier": "^3.3.0",
+    "rxjs": "^7.8.1",
     "ts-json-schema-generator": "^2.9.0",
     "tsup": "^8.0.0",
     "typedoc": "^0.28.0",
     "typescript": "^5.9.3",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "vue": "^3.5.0"
   },
   "files": [
     "dist",

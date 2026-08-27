@@ -155,6 +155,8 @@ export class StreamMonitor {
 
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  /** AbortController used to cancel in-flight RPC requests when stop() is called. */
+  private abortController: AbortController | null = null;
 
   // Type-safe listener registry
   private readonly listeners = new Map<string, Set<Listener<StreamMonitorEventName>>>();
@@ -230,6 +232,7 @@ export class StreamMonitor {
 
   /**
    * Stops the monitoring daemon and clears all polling timers.
+   * In-flight RPC requests are aborted via an internal AbortController.
    * After calling `stop()` the instance is permanently inactive.
    */
   stop(): void {
@@ -239,6 +242,10 @@ export class StreamMonitor {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    // Cancel any in-flight RPC requests to prevent resource leaks
+    // when stop() is called while a pending fetcher is still running (issue #365).
+    this.abortController?.abort();
+    this.abortController = null;
   }
 
   // ── Internal ────────────────────────────────────────────────────────────────
@@ -256,12 +263,21 @@ export class StreamMonitor {
   private async poll(): Promise<void> {
     if (this.stopped) return;
 
+    // Create a fresh AbortController for this poll cycle so stop() can cancel
+    // any in-flight RPC requests immediately instead of waiting for them to
+    // complete or timeout — preventing resource leaks (issue #365).
+    const ac = new AbortController();
+    this.abortController = ac;
+
     // Poll all streams concurrently — failure of one must not cancel others.
-    await Promise.allSettled(this.streamIds.map((streamId) => this.pollStream(streamId)));
+    await Promise.allSettled(this.streamIds.map((streamId) => this.pollStream(streamId, ac.signal)));
   }
 
-  private async pollStream(streamId: string): Promise<void> {
+  private async pollStream(streamId: string, signal?: AbortSignal): Promise<void> {
     if (this.stopped) return;
+    // If the poll cycle was aborted (e.g. stop() was called), skip the RPC call
+    // immediately instead of issuing a request that would leak (issue #365).
+    if (signal?.aborted) return;
 
     let stream: Stream;
     try {
@@ -270,6 +286,10 @@ export class StreamMonitor {
       this.emit('monitorError', { streamId, error });
       return;
     }
+
+    // If the poll cycle was aborted while the first RPC was in-flight, bail
+    // before issuing the second one (issue #365).
+    if (signal?.aborted) return;
 
     const nowSeconds = Math.floor(Date.now() / 1_000);
 
