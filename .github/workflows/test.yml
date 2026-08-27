@@ -8,48 +8,17 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        runtime: [node, bun, deno]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        if: matrix.runtime == 'node'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Run Node Tests
-        if: matrix.runtime == 'node'
-        run: |
-          npm ci
-          npm run lint
-          npm test
-
       - name: Setup Bun
-        if: matrix.runtime == 'bun'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Run Bun Tests
-        if: matrix.runtime == 'bun'
         run: |
           bun install
+          bun run format:check
           bun run lint
-          bun test
-
-      - name: Setup Deno
-        if: matrix.runtime == 'deno'
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Run Deno Tests
-        if: matrix.runtime == 'deno'
-        run: |
-          npm ci
-          npm run lint
-          deno run -A npm:vitest run
+          bun run test

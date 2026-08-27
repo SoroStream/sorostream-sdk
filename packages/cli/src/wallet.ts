@@ -1,10 +1,10 @@
-import { Keypair, TransactionBuilder } from "@stellar/stellar-sdk";
-import type { WalletAdapter, Network } from "@sorostream/sdk";
+import { Keypair, TransactionBuilder } from '@stellar/stellar-sdk';
+import type { WalletAdapter, Network } from '@sorostream/sdk';
 
 const NETWORK_PASSPHRASES: Record<Network, string> = {
-  mainnet: "Public Global Stellar Network ; September 2015",
-  testnet: "Test SDF Network ; September 2015",
-  futurenet: "Test SDF Future Network ; October 2022",
+  mainnet: 'Public Global Stellar Network ; September 2015',
+  testnet: 'Test SDF Network ; September 2015',
+  futurenet: 'Test SDF Future Network ; October 2022',
 };
 
 /**
@@ -22,10 +22,7 @@ export function createKeypairAdapter(secretKey: string): WalletAdapter {
       return true;
     },
     async signTransaction(xdr: string, network: Network): Promise<string> {
-      const tx = TransactionBuilder.fromXDR(
-        xdr,
-        NETWORK_PASSPHRASES[network]
-      );
+      const tx = TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASES[network]!);
       tx.sign(keypair);
       return tx.toXDR();
     },

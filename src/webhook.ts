@@ -1,5 +1,5 @@
-import type { StreamEvent, StreamEventFilter, StreamSubscription, WebhookConfig } from "./types.js";
-import type { SoroStreamClient } from "./SoroStreamClient.js";
+import type { StreamEvent, StreamEventFilter, StreamSubscription, WebhookConfig } from './types.js';
+import type { SoroStreamClient } from './SoroStreamClient.js';
 
 /**
  * Forwards stream lifecycle events to an external HTTP webhook URL.
@@ -24,10 +24,12 @@ export class WebhookForwarder {
   private client: SoroStreamClient;
   private config: WebhookConfig;
   private subscription: StreamSubscription | null = null;
+  private readonly fetchImpl: typeof fetch;
 
   constructor(client: SoroStreamClient, config: WebhookConfig) {
     this.client = client;
     this.config = config;
+    this.fetchImpl = config.fetch ?? fetch;
   }
 
   /**
@@ -36,12 +38,9 @@ export class WebhookForwarder {
   start(filter?: StreamEventFilter): void {
     if (this.subscription) return;
 
-    this.subscription = this.client.subscribeEvents(
-      filter ?? {},
-      (event) => {
-        this.forward(event);
-      }
-    );
+    this.subscription = this.client.subscribeEvents(filter ?? {}, (event) => {
+      this.forward(event);
+    });
   }
 
   /**
@@ -60,10 +59,10 @@ export class WebhookForwarder {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const response = await fetch(this.config.url, {
-          method: "POST",
+        const response = await this.fetchImpl(this.config.url, {
+          method: 'POST',
           headers: {
-            "Content-Type": "application/json",
+            'Content-Type': 'application/json',
             ...this.config.headers,
           },
           body: JSON.stringify({

@@ -1,0 +1,41 @@
+{
+  "name": "@sorostream/sdk-react-native",
+  "version": "0.1.0",
+  "description": "React Native adapters for the SoroStream SDK (issue #199)",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "stellar",
+    "soroban",
+    "streaming",
+    "payments",
+    "react-native"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@sorostream/sdk": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SoroStream/sorostream-sdk.git"
+  }
+}

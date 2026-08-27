@@ -1,0 +1,10 @@
+{
+  "_comment": "Baseline P50 latency in ms per operation (mock client). CI fails if any operation is >20% slower.",
+  "_updated": "2026-07-24",
+  "getStream": { "p50_ms": 0.1 },
+  "getClaimable": { "p50_ms": 0.1 },
+  "createStream": { "p50_ms": 0.2 },
+  "withdraw": { "p50_ms": 0.3 },
+  "batchWithdraw_10": { "p50_ms": 3.0 },
+  "getStreamsBySender": { "p50_ms": 0.1 }
+}

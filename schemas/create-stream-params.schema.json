@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/CreateStreamParams",
+  "definitions": {
+    "CreateStreamParams": {
+      "type": "object",
+      "properties": {
+        "recipient": {
+          "type": "string",
+          "description": "Beneficiary address."
+        },
+        "token": {
+          "type": "string",
+          "description": "SAC token contract address."
+        },
+        "amount": {
+          "type": "string",
+          "pattern": "^[0-9]+$",
+          "description": "Total amount to stream in stroops."
+        },
+        "durationSeconds": {
+          "type": "number",
+          "description": "Stream duration in seconds."
+        },
+        "autoRenew": {
+          "type": "boolean",
+          "description": "Whether to auto-renew on completion."
+        },
+        "checkDuplicate": {
+          "type": "boolean",
+          "description": "Opt-in check for duplicate stream creation."
+        },
+        "cliffSeconds": {
+          "type": "number",
+          "description": "Cliff duration in seconds (issue #74). When set, the configured `validateCliff` function is called before the transaction is submitted. Defaults to 0 (no cliff)."
+        },
+        "nonce": {
+          "type": "string",
+          "description": "Optional idempotency nonce for duplicate-safe retries (issue #231). When provided and the deployed contract supports nonce parameters, the nonce is included in the `create_stream` call to deduplicate concurrent retries. If the contract does **not** support nonces, the SDK emits a `console.warn`. Pass `strict: true` in  {@link  WriteOptions }  to throw an error instead of warning."
+        },
+        "skipAllowanceCheck": {
+          "type": "boolean",
+          "description": "Skip the token allowance pre-flight check (issue #165). Set to true when you have already approved the contract or the token does not expose an allowance view (e.g. native XLM)."
+        },
+        "lockUntil": {
+          "type": "number",
+          "description": "Unix timestamp (seconds) before which no withdrawals are allowed. Must be between startTime and endTime when provided. Enforced at contract level; the SDK validates this before submission."
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Optional namespace for multi-tenant scoping (issue #274). Stored in the stream's metadata field. Filtering by namespace is off-chain only — the contract does not enforce isolation."
+        }
+      },
+      "required": ["recipient", "token", "amount", "durationSeconds", "autoRenew"],
+      "additionalProperties": false,
+      "description": "Parameters for creating a new stream."
+    }
+  },
+  "$id": "https://github.com/SoroStream/sorostream-sdk/blob/main/schemas/create-stream-params.schema.json"
+}

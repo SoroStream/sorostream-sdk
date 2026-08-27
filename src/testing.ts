@@ -19,4 +19,5 @@
  * ```
  */
 
-export { MockSoroStreamClient } from "./mock.js";
+export { MockSoroStreamClient, SoroStreamSandbox } from './mock.js';
+export type { SandboxCallLog, SandboxUnexpectedCallPolicy } from './mock.js';

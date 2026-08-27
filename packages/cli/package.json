@@ -5,25 +5,36 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "sorostream": "./dist/index.js"
+    "sorostream": "./dist/index.js",
+    "sorostream-analyze": "./dist/analyze.js",
+    "sorostream-generate-schemas": "./dist/schemas.js"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format cjs --dts --clean",
+    "build": "tsup src/index.ts src/analyze.ts src/schemas.ts --format cjs --dts --clean",
     "lint": "tsc --noEmit"
   },
-  "keywords": ["stellar", "soroban", "streaming", "payments", "cli"],
+  "keywords": [
+    "stellar",
+    "soroban",
+    "streaming",
+    "payments",
+    "cli"
+  ],
   "license": "MIT",
   "dependencies": {
     "@sorostream/sdk": "^0.1.0",
     "@stellar/stellar-sdk": "^13.0.0",
-    "commander": "^12.0.0"
+    "commander": "^12.0.0",
+    "esbuild": "^0.24.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/SoroStream/sorostream-sdk.git"

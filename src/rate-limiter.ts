@@ -12,7 +12,7 @@ export class RateLimiter {
   private readonly maxConcurrent: number;
 
   constructor(maxConcurrent = 10) {
-    if (maxConcurrent < 1) throw new Error("maxConcurrent must be >= 1");
+    if (maxConcurrent < 1) throw new Error('maxConcurrent must be >= 1');
     this.maxConcurrent = maxConcurrent;
   }
 
@@ -22,7 +22,11 @@ export class RateLimiter {
     }
 
     return new Promise<T>((resolve, reject) => {
-      this.queue.push({ task: task as Task<unknown>, resolve: resolve as (v: unknown) => void, reject });
+      this.queue.push({
+        task: task as Task<unknown>,
+        resolve: resolve as (v: unknown) => void,
+        reject,
+      });
     });
   }
 

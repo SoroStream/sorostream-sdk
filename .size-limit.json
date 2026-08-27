@@ -1,0 +1,26 @@
+[
+  {
+    "name": "@sorostream/sdk (full)",
+    "path": "dist/index.mjs",
+    "limit": "120 KB",
+    "gzip": true
+  },
+  {
+    "name": "@sorostream/sdk/wallets",
+    "path": "dist/wallets.mjs",
+    "limit": "50 KB",
+    "gzip": true
+  },
+  {
+    "name": "@sorostream/sdk/mock",
+    "path": "dist/mock.mjs",
+    "limit": "80 KB",
+    "gzip": true
+  },
+  {
+    "name": "@sorostream/sdk/testing",
+    "path": "dist/testing.mjs",
+    "limit": "30 KB",
+    "gzip": true
+  }
+]

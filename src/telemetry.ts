@@ -1,12 +1,16 @@
 type Attributes = Record<string, string | number | boolean>;
-interface SpanOptions { attributes?: Attributes }
+interface SpanOptions {
+  attributes?: Attributes;
+}
 interface Span {
   setAttributes(attrs: Attributes): void;
   end(): void;
   recordException(e: Error): void;
   setAttribute(k: string, v: unknown): void;
 }
-interface Tracer { startSpan(name: string, opts?: SpanOptions): Span }
+interface Tracer {
+  startSpan(name: string, opts?: SpanOptions): Span;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _otelModule: any | null = null;
@@ -15,7 +19,7 @@ let _otelModule: any | null = null;
 function getOtel(): any | null {
   if (_otelModule !== undefined) return _otelModule;
   try {
-    _otelModule = require("@opentelemetry/api");
+    _otelModule = require('@opentelemetry/api');
   } catch {
     _otelModule = null;
   }
@@ -31,7 +35,7 @@ export class Telemetry {
     if (enabled) {
       const otel = getOtel();
       if (otel) {
-        this.tracer = otel.trace.getTracer("@sorostream/sdk", "0.1.0");
+        this.tracer = otel.trace.getTracer('@sorostream/sdk', '0.1.0');
       }
     }
   }
@@ -55,6 +59,6 @@ export class Telemetry {
   recordError(span: Span | null, error: Error): void {
     if (!span) return;
     span.recordException(error);
-    span.setAttribute("error", true);
+    span.setAttribute('error', true);
   }
 }

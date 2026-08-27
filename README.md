@@ -58,12 +58,19 @@ await client.withdraw({ streamId });
 | `bulkCreateStreams(rows, options)` | Creates many streams at once (batched). Returns `BulkCreateResult` |
 | `getStream(streamId)` | Returns full `Stream` object |
 | `getClaimable(streamId)` | Returns claimable amount in stroops |
+| `getMultipleStreamBalances(streamIds)` | Returns current claimable balances for many streams in a single batched RPC call, e.g. `[{ streamId, balance }]` |
 | `getStreamsBySender(sender)` | Returns all streams for a sender |
 | `getStreamsByRecipient(recipient)` | Returns all streams for a recipient |
 | `estimateCreateStreamFee(params)` | Estimates network fee for `createStream`. Returns `{ totalFee, minResourceFee }` |
 | `estimateWithdrawFee(params)` | Estimates network fee for `withdraw`. Returns `{ totalFee, minResourceFee }` |
 | `estimateCancelStreamFee(params)` | Estimates network fee for `cancelStream`. Returns `{ totalFee, minResourceFee }` |
 | `estimateTopUpFee(params)` | Estimates network fee for `topUp`. Returns `{ totalFee, minResourceFee }` |
+| `getNetwork()` | Returns the resolved network (explicit or auto-detected from `rpcUrl`) |
+| `getTokenMetadata(tokenAddress)` | Returns cached or fresh SAC token `{ name, symbol, decimals }` |
+| `clearTokenCache(tokenAddress?)` | Clears cached token metadata for one token, or all tokens when omitted |
+| `resolveFederationAddress(name)` | Resolves a federation address (`alice*example.com`) to a G-address. Cached for 5 minutes; returns `null` (never throws) if unresolvable |
+| `onNetworkChanged(cb)` | Subscribes to wallet-initiated network switches. Returns an unsubscribe function |
+| `disconnect()` | Tears down the active RPC transport via its `teardown()` hook, if any (see [CUSTOM_TRANSPORT.md](./CUSTOM_TRANSPORT.md)) |
 
 ### Utilities
 
@@ -76,19 +83,30 @@ await client.withdraw({ streamId });
 | `timeUntilStreamEnd(stream)` | Returns seconds until stream ends |
 | `calculateVestingSchedule(stream, cliffSeconds, now?)` | Display-only vesting schedule approximating a cliff. **Not enforced on-chain** |
 | `watchClaimable(stream, reconcile, onTick, options?)` | Live counting-up ticker for claimable balance. Returns unsubscribe function |
+| `filterStreams(streams, filters)` | Filters streams by status, sender, recipient, token, and/or active-only |
+| `sortStreams(streams, by, order?)` | Sorts streams by `"startTime"`, `"endTime"`, or `"amount"` |
+| `detectNetworkFromRpcUrl(rpcUrl)` | Detects `"testnet"`/`"mainnet"` from an RPC URL, or `undefined` if unrecognized |
+| `parseMemo(transaction)` | Decodes the memo from a Horizon transaction record |
 
 ### Client Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `network` | — | Stellar network (`"mainnet"`, `"testnet"`, `"futurenet"`) |
-| `contractId` | — | Deployed stream contract address |
-| `walletAdapter` | — | Wallet adapter for signing |
-| `rpcUrl?` | Default per network | Custom RPC URL override |
+| `network?` | Auto-detected from `rpcUrl` | Stellar network (`"mainnet"`, `"testnet"`, `"futurenet"`). Required unless `rpcUrl` contains a detectable `"testnet"`/`"mainnet"`/`horizon.stellar.org` hostname |
+| `contractId` | â€” | Deployed stream contract address |
+| `walletAdapter` | â€” | Wallet adapter for signing |
+| `rpcUrl?` | Default per network | Custom RPC URL override; also used for network auto-detection |
+| `transport?` | Wraps `rpc.Server` at `rpcUrl` | Custom `RpcTransportAdapter` for all Soroban RPC calls — see [CUSTOM_TRANSPORT.md](./CUSTOM_TRANSPORT.md) |
 | `txTimeoutMs?` | `120000` | Max time (ms) to wait for transaction confirmation |
 | `checkDuplicate?` | `false` | Heuristic check to warn/block duplicate stream creation |
+| `tokenMetadataTtlMs?` | `600000` | TTL (ms) for cached `getTokenMetadata()` results |
+| `onNetworkChange?` | â€” | Called when the connected wallet switches networks mid-session |
+| `skipPeerCheck?` | `false` | Skips the `@stellar/stellar-sdk` peer version compatibility check |
+| `telemetry?` | `true` | Set to `false` to opt out of any SDK telemetry now and in future releases. No data is collected as of this version. See [TELEMETRY.md](./TELEMETRY.md) for the full policy |
 
 All mutation methods (`createStream`, `withdraw`, `cancelStream`, `topUp`) accept an optional `AbortSignal` as the last argument to cancel in-flight transactions.
+
+All write methods also accept a `memo` field on their `WriteOptions` argument (e.g. `client.withdraw(params, signal, { memo: "invoice-123" })`) to tag the transaction for off-chain reconciliation. A `string` is encoded as `MEMO_TEXT` (28-byte limit); a 32-byte `Buffer` is encoded as `MEMO_HASH`. Use `parseMemo()` to decode a memo back out of a Horizon transaction record.
 
 | Method | Description |
 |--------|-------------|
@@ -105,7 +123,76 @@ All mutation methods (`createStream`, `withdraw`, `cancelStream`, `topUp`) accep
 | `createLedgerAdapter({ transport, path? })` | Creates a WalletAdapter backed by a Ledger device |
 | `connectWallet()` | Prompts Freighter connection, returns public key |
 
-The `WalletAdapter` interface (see `src/types.ts`) is the official extension point for custom signing backends. Implement `getPublicKey`, `signTransaction`, and `isConnected` to support any wallet or signing service.
+The `WalletAdapter` interface (see `src/types.ts`) is the official extension point for custom signing backends. Implement `getPublicKey`, `signTransaction`, and `isConnected` to support any wallet or signing service. See the [wallet adapter examples](#wallet-adapter-examples) below for copy-pasteable testnet patterns.
+
+### Wallet adapter examples
+
+#### Freighter adapter
+
+```ts
+import { SoroStreamClient, createFreighterAdapter } from "@sorostream/sdk";
+
+const freighterAdapter = await createFreighterAdapter();
+const client = new SoroStreamClient({
+  network: "testnet",
+  contractId: "YOUR_CONTRACT_ID",
+  walletAdapter: freighterAdapter,
+});
+```
+
+#### Ledger adapter
+
+```ts
+import { TransactionBuilder, Networks } from "@stellar/stellar-sdk";
+import TransportWebUSB from "@ledgerhq/hw-transport-webusb";
+import AppStr from "@ledgerhq/hw-app-str";
+import type { WalletAdapter, Network } from "@sorostream/sdk";
+
+async function signWithLedger(xdr: string, network: Network) {
+  const transport = await TransportWebUSB.create();
+  const app = new AppStr(transport);
+  const path = "m/44'/148'/0'/0/0";
+  const tx = TransactionBuilder.fromXDR(
+    xdr,
+    network === "testnet" ? Networks.TESTNET : network === "futurenet" ? Networks.FUTURENET : Networks.PUBLIC,
+  );
+
+  const signature = await app.signTransaction(path, tx.hash());
+  await transport.close();
+
+  return signature;
+}
+
+const ledgerAdapter: WalletAdapter = {
+  async isConnected() {
+    return true;
+  },
+  async getPublicKey() {
+    const transport = await TransportWebUSB.create();
+    const app = new AppStr(transport);
+    const result = await app.getAddress("m/44'/148'/0'/0/0");
+    await transport.close();
+    return result.address;
+  },
+  async signTransaction(xdr, network) {
+    const signature = await signWithLedger(xdr, network);
+    return signature;
+  },
+};
+```
+
+#### Server-side keypair adapter
+
+```ts
+import { SoroStreamClient, createKeypairAdapter } from "@sorostream/sdk";
+
+const serverKeypairAdapter = createKeypairAdapter(process.env.STELLAR_SECRET!);
+const client = new SoroStreamClient({
+  network: "testnet",
+  contractId: "YOUR_CONTRACT_ID",
+  walletAdapter: serverKeypairAdapter,
+});
+```
 
 ### Deno and Bun Compatibility
 
@@ -150,6 +237,81 @@ const { batches } = await client.bulkCreateStreams(rows, {
 });
 console.log(`Created ${batches.length} batch(es)`);
 ```
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Getting Started](./GETTING_STARTED.md) | Step-by-step tutorial from installation to withdrawal |
+| [Plugins](./PLUGINS.md) | Plugin/middleware system reference with worked examples |
+| [Custom Wallet Adapters](./CUSTOM_WALLET_ADAPTERS.md) | How to build adapters for unsupported wallets |
+| [Custom Transport Adapters](./CUSTOM_TRANSPORT.md) | How to route RPC calls through your own transport layer |
+| [Migration from Stellar SDK](./MIGRATION_FROM_STELLAR_SDK.md) | Before/after mapping of common operations |
+| [Stream State Machine](./docs/state-machine.md) | Mermaid diagram of all stream states and valid / invalid transitions |
+| [Rate Limiting](./docs/rate-limiting.md) | Default polling intervals, network call frequency, and tuning advice |
+| [linear-vesting.ts](./examples/linear-vesting.ts) | Constant-rate stream with no cliff |
+| [cliff-linear-vesting.ts](./examples/cliff-linear-vesting.ts) | Cliff period followed by linear release |
+| [milestone-vesting.ts](./examples/milestone-vesting.ts) | Fixed tranches released at scheduled dates |
+| [logging-middleware.ts](./examples/logging-middleware.ts) | Plugin system worked example |
+
+## JSON Schema validation
+
+Non-TypeScript tooling (Python/Go scripts assembling stream-creation payloads, for example) can validate against JSON Schema files generated from the SDK's own TypeScript types, published at `@sorostream/sdk/schemas/*`:
+
+- `sorostream-client-config.schema.json` — `SoroStreamClientConfig`, the JSON-serializable subset of `SoroStreamClientOptions`
+- `create-stream-params.schema.json` — `CreateStreamParams`
+- `stream-filter.schema.json` — `StreamFilter`
+
+```js
+const Ajv = require("ajv");
+const schema = require("@sorostream/sdk/schemas/create-stream-params.schema.json");
+const ajv = new Ajv();
+const validate = ajv.compile(schema);
+validate({ recipient: "G...", token: "C...", amount: "100000000", durationSeconds: 3600, autoRenew: false });
+```
+
+Schemas are regenerated with `npm run generate-schemas` (or `sorostream-generate-schemas` from a repo checkout) and kept in sync with the TypeScript source by a CI check (`npm run check:schemas`).
+
+## Architecture
+
+```
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚          Your App / UI          â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+               â”‚ imports
+               â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚        @sorostream/sdk          â”‚
+â”‚                                 â”‚
+â”‚  SoroStreamClient               â”‚
+â”‚    â”œâ”€ WalletAdapter (sign txs)  â”‚
+â”‚    â”œâ”€ Cache (optimistic reads)  â”‚
+â”‚    â””â”€ CircuitBreaker / Retry    â”‚
+â”‚                                 â”‚
+â”‚  Utils (pure helpers)           â”‚
+â”‚    â”œâ”€ toStroops / formatUSDC    â”‚
+â”‚    â”œâ”€ claimableNow / isExpired  â”‚
+â”‚    â””â”€ calculateVestingSchedule  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+               â”‚ Stellar RPC (simulateTransaction / sendTransaction)
+               â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚   SoroStream Contract (Soroban) â”‚
+â”‚   github.com/SoroStream/contractâ”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+```
+
+**SoroStreamClient** is the primary entry point. It handles transaction building, signing, submission, polling, and retry logic. It exposes both mutation methods (`createStream`, `withdraw`, `topUp`, â€¦) and read methods (`getStream`, `getClaimable`, â€¦).
+
+**WalletAdapters** decouple signing from the client. Three are built-in â€” `createFreighterAdapter` (browser extension), `createKeypairAdapter` (server-side secret key), and `createLedgerAdapter` (hardware wallet). Implement `WalletAdapter` to add any custom signer.
+
+**Utils** are pure functions with no network dependency. Use them for client-side estimates (`claimableNow`, `isExpired`), display formatting (`formatUSDC`, `toStroops`), and display-only vesting schedules (`calculateVestingSchedule`). They can run in any JS/TS environment including Deno and Bun.
+
+Contract source: [github.com/SoroStream/contract](https://github.com/SoroStream/contract) Â· Example app: [github.com/SoroStream/app](https://github.com/SoroStream/app)
+
+## Migrating from v0.x
+
+See [docs/migration-v1.md](./docs/migration-v1.md) for a full list of breaking changes with before/after examples.
 
 ## Local Setup
 

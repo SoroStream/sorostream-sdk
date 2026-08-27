@@ -1,13 +1,14 @@
-import { rpc, scValToNative, nativeToScVal, xdr } from "@stellar/stellar-sdk";
+import { rpc, scValToNative, nativeToScVal, xdr } from '@stellar/stellar-sdk';
+import type { RpcTransportAdapter } from './transport.js';
 
 function toBigInt(val: unknown): bigint {
-  if (typeof val === "bigint") return val;
-  if (typeof val === "number") return BigInt(val);
-  if (typeof val === "string") return BigInt(val);
+  if (typeof val === 'bigint') return val;
+  if (typeof val === 'number') return BigInt(val);
+  if (typeof val === 'string') return BigInt(val);
   return 0n;
 }
 
-export type StreamEventType = "StreamCreated" | "StreamWithdrawn" | "StreamCancelled";
+export type StreamEventType = 'StreamCreated' | 'StreamWithdrawn' | 'StreamCancelled';
 
 export interface StreamEventBase {
   type: StreamEventType;
@@ -40,9 +41,9 @@ export interface StreamCancelledData {
 }
 
 export type StreamEvent =
-  | (StreamEventBase & { type: "StreamCreated"; data: StreamCreatedData })
-  | (StreamEventBase & { type: "StreamWithdrawn"; data: StreamWithdrawnData })
-  | (StreamEventBase & { type: "StreamCancelled"; data: StreamCancelledData });
+  | (StreamEventBase & { type: 'StreamCreated'; data: StreamCreatedData })
+  | (StreamEventBase & { type: 'StreamWithdrawn'; data: StreamWithdrawnData })
+  | (StreamEventBase & { type: 'StreamCancelled'; data: StreamCancelledData });
 
 export interface StreamIndexerOptions {
   startLedger?: number;
@@ -63,10 +64,10 @@ export interface PaginatedEvents {
  * over a ledger range.
  */
 export class StreamIndexer {
-  private readonly server: rpc.Server;
+  private readonly server: RpcTransportAdapter;
   private readonly contractId: string;
 
-  constructor(server: rpc.Server, contractId: string) {
+  constructor(server: RpcTransportAdapter, contractId: string) {
     this.server = server;
     this.contractId = contractId;
   }
@@ -125,10 +126,10 @@ export class StreamIndexer {
     cursor?: string;
     limit?: number;
   }): Promise<PaginatedEvents> {
-    const eventTypes = ["StreamCreated", "StreamWithdrawn", "StreamCancelled"] as const;
+    const eventTypes = ['StreamCreated', 'StreamWithdrawn', 'StreamCancelled'] as const;
 
     const topics: string[][] = eventTypes.map((eventType) => {
-      return [nativeToScVal(eventType, { type: "symbol" }).toXDR("base64")];
+      return [nativeToScVal(eventType, { type: 'symbol' }).toXDR('base64')];
     });
 
     const request: rpc.Server.GetEventsRequest = {
@@ -136,7 +137,7 @@ export class StreamIndexer {
       limit: filter.limit ?? 100,
       filters: [
         {
-          type: "contract",
+          type: 'contract',
           contractIds: [this.contractId],
           topics,
         },
@@ -171,13 +172,13 @@ export class StreamIndexer {
       return null;
     }
 
-    if (!["StreamCreated", "StreamWithdrawn", "StreamCancelled"].includes(eventType)) {
+    if (!['StreamCreated', 'StreamWithdrawn', 'StreamCancelled'].includes(eventType)) {
       return null;
     }
 
     const base: StreamEventBase = {
       type: eventType as StreamEventType,
-      streamId: "",
+      streamId: '',
       ledger: event.ledger,
       ledgerClosedAt: event.ledgerClosedAt,
       txHash: event.txHash,
@@ -193,52 +194,53 @@ export class StreamIndexer {
     }
 
     switch (eventType) {
-      case "StreamCreated": {
-        const streamId = String(rawData["id"] ?? "");
+      case 'StreamCreated': {
+        const streamId = String(rawData['id'] ?? '');
         if (filter.streamId && streamId !== filter.streamId) return null;
-        if (filter.sender && String(rawData["sender"] ?? "") !== filter.sender) return null;
-        if (filter.recipient && String(rawData["recipient"] ?? "") !== filter.recipient) return null;
+        if (filter.sender && String(rawData['sender'] ?? '') !== filter.sender) return null;
+        if (filter.recipient && String(rawData['recipient'] ?? '') !== filter.recipient)
+          return null;
 
         return {
           ...base,
           streamId,
-          type: "StreamCreated",
+          type: 'StreamCreated',
           data: {
-            sender: String(rawData["sender"] ?? ""),
-            recipient: String(rawData["recipient"] ?? ""),
-            token: String(rawData["token"] ?? ""),
-            deposit: toBigInt(rawData["deposit"]),
-            flowRate: toBigInt(rawData["flow_rate"]),
-            startTime: Number(rawData["start_time"] ?? 0),
-            endTime: Number(rawData["end_time"] ?? 0),
-            autoRenew: Boolean(rawData["auto_renew"] ?? false),
+            sender: String(rawData['sender'] ?? ''),
+            recipient: String(rawData['recipient'] ?? ''),
+            token: String(rawData['token'] ?? ''),
+            deposit: toBigInt(rawData['deposit']),
+            flowRate: toBigInt(rawData['flow_rate']),
+            startTime: Number(rawData['start_time'] ?? 0),
+            endTime: Number(rawData['end_time'] ?? 0),
+            autoRenew: Boolean(rawData['auto_renew'] ?? false),
           },
         };
       }
-      case "StreamWithdrawn": {
+      case 'StreamWithdrawn': {
         const streamId = this.extractStreamId(topic);
         if (filter.streamId && streamId !== filter.streamId) return null;
 
         return {
           ...base,
           streamId,
-          type: "StreamWithdrawn",
+          type: 'StreamWithdrawn',
           data: {
-            recipient: String(rawData["recipient"] ?? ""),
-            amount: toBigInt(rawData["amount"]),
+            recipient: String(rawData['recipient'] ?? ''),
+            amount: toBigInt(rawData['amount']),
           },
         };
       }
-      case "StreamCancelled": {
+      case 'StreamCancelled': {
         const streamId = this.extractStreamId(topic);
         if (filter.streamId && streamId !== filter.streamId) return null;
 
         return {
           ...base,
           streamId,
-          type: "StreamCancelled",
+          type: 'StreamCancelled',
           data: {
-            sender: String(rawData["sender"] ?? ""),
+            sender: String(rawData['sender'] ?? ''),
           },
         };
       }
@@ -249,11 +251,11 @@ export class StreamIndexer {
 
   private extractStreamId(topic: xdr.ScVal[]): string {
     const scVal = topic[1];
-    if (!scVal) return "";
+    if (!scVal) return '';
     try {
       return String(scValToNative(scVal));
     } catch {
-      return "";
+      return '';
     }
   }
 }

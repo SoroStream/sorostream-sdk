@@ -1,4 +1,4 @@
-import type { CreateStreamParams } from "./types.js";
+import type { CreateStreamParams } from './types.js';
 
 const DAY = 86_400;
 const WEEK = 604_800;
@@ -27,27 +27,21 @@ export const templates = {
   /**
    * Creates a biweekly (14-day) payroll stream.
    */
-  biweeklyPayroll(
-    params: Omit<CreateStreamParams, "durationSeconds">
-  ): CreateStreamParams {
+  biweeklyPayroll(params: Omit<CreateStreamParams, 'durationSeconds'>): CreateStreamParams {
     return { ...params, durationSeconds: days(14) };
   },
 
   /**
    * Creates a weekly (7-day) stream.
    */
-  weekly(
-    params: Omit<CreateStreamParams, "durationSeconds">
-  ): CreateStreamParams {
+  weekly(params: Omit<CreateStreamParams, 'durationSeconds'>): CreateStreamParams {
     return { ...params, durationSeconds: WEEK };
   },
 
   /**
    * Creates a monthly (30-day) stream.
    */
-  monthly(
-    params: Omit<CreateStreamParams, "durationSeconds">
-  ): CreateStreamParams {
+  monthly(params: Omit<CreateStreamParams, 'durationSeconds'>): CreateStreamParams {
     return { ...params, durationSeconds: days(30) };
   },
 
@@ -56,7 +50,7 @@ export const templates = {
    * @param params.years - Number of years for the vesting period.
    */
   vesting(
-    params: Omit<CreateStreamParams, "durationSeconds"> & { years: number }
+    params: Omit<CreateStreamParams, 'durationSeconds'> & { years: number },
   ): CreateStreamParams {
     return { ...params, durationSeconds: days(365 * params.years) };
   },
@@ -65,7 +59,7 @@ export const templates = {
    * Creates a custom-duration stream for a given number of days.
    */
   custom(
-    params: Omit<CreateStreamParams, "durationSeconds"> & { days: number }
+    params: Omit<CreateStreamParams, 'durationSeconds'> & { days: number },
   ): CreateStreamParams {
     return { ...params, durationSeconds: days(params.days) };
   },

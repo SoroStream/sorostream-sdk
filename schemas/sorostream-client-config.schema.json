@@ -1,0 +1,165 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/SoroStreamClientConfig",
+  "definitions": {
+    "SoroStreamClientConfig": {
+      "type": "object",
+      "properties": {
+        "network": {
+          "$ref": "#/definitions/Network",
+          "description": "The Stellar network to connect to."
+        },
+        "contractId": {
+          "type": "string",
+          "description": "The deployed StreamContract address."
+        },
+        "rpcUrl": {
+          "type": "string",
+          "description": "Optional custom RPC URL (overrides the default for `network`)."
+        },
+        "circuitBreaker": {
+          "$ref": "#/definitions/CircuitBreakerOptions",
+          "description": "Optional circuit-breaker configuration for RPC calls."
+        },
+        "txTimeoutMs": {
+          "type": "number",
+          "description": "Maximum time in ms to wait for a transaction to confirm (default: 120000)."
+        },
+        "readRetry": {
+          "type": "object",
+          "properties": {
+            "maxAttempts": {
+              "type": "number",
+              "description": "Maximum number of attempts (default: 3)."
+            },
+            "baseDelayMs": {
+              "type": "number",
+              "description": "Base delay in ms for exponential backoff (default: 200)."
+            },
+            "maxDelayMs": {
+              "type": "number",
+              "description": "Maximum delay cap in ms (default: 5000)."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Retry policy for read methods (getStream, getClaimable, etc.)."
+        },
+        "submitRetry": {
+          "type": "object",
+          "properties": {
+            "maxAttempts": {
+              "type": "number",
+              "description": "Maximum number of attempts (default: 3)."
+            },
+            "baseDelayMs": {
+              "type": "number",
+              "description": "Base delay in ms for exponential backoff (default: 200)."
+            },
+            "maxDelayMs": {
+              "type": "number",
+              "description": "Maximum delay cap in ms (default: 5000)."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Retry policy for transaction submission RPC calls."
+        },
+        "contractVersion": {
+          "$ref": "#/definitions/ContractVersion",
+          "description": "Contract version to use for call encoding (default: \"v1\")."
+        },
+        "maxConnections": {
+          "type": "number",
+          "description": "Maximum number of pooled HTTP connections reused across RPC calls (default: 5)."
+        },
+        "idleTimeoutMs": {
+          "type": "number",
+          "description": "Time in ms before an idle pooled connection is closed (default: 30000)."
+        },
+        "poolSize": {
+          "type": "number",
+          "description": "Opt-in connection pool size for high-throughput stream scenarios."
+        },
+        "maxSubscriptionsPerConnection": {
+          "type": "number",
+          "description": "Maximum concurrent subscriptions per pooled connection (default: 10)."
+        },
+        "retryPolicy": {
+          "$ref": "#/definitions/StreamRetryPolicy",
+          "description": "Retry policy for automatic event-stream reconnection on unexpected failures."
+        },
+        "batchingOptions": {
+          "$ref": "#/definitions/BatchingOptions",
+          "description": "Opt-in event batching configuration for high-frequency streams."
+        },
+        "checkDuplicate": {
+          "type": "boolean",
+          "description": "Opt-in check for duplicate stream creation."
+        },
+        "auditLog": {
+          "type": "boolean",
+          "description": "When true, write an audit log entry for each SDK write operation."
+        }
+      },
+      "required": ["contractId"],
+      "additionalProperties": false,
+      "description": "The JSON-serializable subset of `SoroStreamClientOptions` — the parts of a client config a non-TypeScript caller (a Python or Go script assembling a config payload) can meaningfully specify and validate.\n\nDeliberately excludes fields that bind to a runtime object with no JSON representation: `walletAdapter`, `transport`, `priceFeed`, `validateCliff`, `plugins`, `adapters`, and `feeBump` (its `sponsorAdapter` is a signer). This is the type `generateSchemas()` reflects to produce the `SoroStreamClientConfig` JSON Schema exported at `@sorostream/sdk/schemas`."
+    },
+    "Network": {
+      "type": "string",
+      "enum": ["mainnet", "testnet", "futurenet"],
+      "description": "Network configuration."
+    },
+    "CircuitBreakerOptions": {
+      "type": "object",
+      "properties": {
+        "threshold": {
+          "type": "number"
+        },
+        "cooldownMs": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ContractVersion": {
+      "type": "string",
+      "enum": ["v1", "v2"],
+      "description": "Supported contract versions for call encoding."
+    },
+    "StreamRetryPolicy": {
+      "type": "object",
+      "properties": {
+        "maxAttempts": {
+          "type": "number",
+          "description": "Max reconnect attempts. 0 disables retry (default: 5)."
+        },
+        "baseDelayMs": {
+          "type": "number",
+          "description": "Base delay in ms for exponential backoff (default: 1000)."
+        },
+        "maxDelayMs": {
+          "type": "number",
+          "description": "Maximum backoff delay cap in ms (default: 30000)."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Retry policy for automatic event poller reconnection on unexpected failures. Issue #186."
+    },
+    "BatchingOptions": {
+      "type": "object",
+      "properties": {
+        "maxBatchSize": {
+          "type": "number",
+          "description": "Max events per batch before flushing (default: 50)."
+        },
+        "maxBatchDelayMs": {
+          "type": "number",
+          "description": "Max delay in ms before a non-full batch is flushed (default: 10)."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Configuration for event batching on high-frequency streams."
+    }
+  },
+  "$id": "https://github.com/SoroStream/sorostream-sdk/blob/main/schemas/sorostream-client-config.schema.json"
+}

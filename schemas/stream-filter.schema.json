@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$ref": "#/definitions/StreamFilter",
+  "definitions": {
+    "StreamFilter": {
+      "$ref": "#/definitions/StreamFilterCriteria",
+      "description": "Alias for  {@link  StreamFilterCriteria } , matching the `filterStreams` API."
+    },
+    "StreamFilterCriteria": {
+      "type": "object",
+      "properties": {
+        "sender": {
+          "type": "string"
+        },
+        "recipient": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/StreamStatus"
+        },
+        "activeOnly": {
+          "type": "boolean",
+          "description": "When true, only include streams that are `\"Active\"` and not yet expired."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Criteria for filtering streams."
+    },
+    "StreamStatus": {
+      "type": "string",
+      "enum": ["Active", "Cancelled", "Completed", "Paused"],
+      "description": "Status of a payment stream."
+    }
+  },
+  "$id": "https://github.com/SoroStream/sorostream-sdk/blob/main/schemas/stream-filter.schema.json"
+}

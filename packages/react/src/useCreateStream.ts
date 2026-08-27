@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import type { SoroStreamClient, CreateStreamParams } from "@sorostream/sdk";
+import { useState, useCallback } from 'react';
+import type { SoroStreamClient, CreateStreamParams } from '@sorostream/sdk';
 
 interface UseCreateStreamResult {
   createStream: (params: CreateStreamParams) => Promise<{ streamId: string; txHash: string }>;
@@ -13,9 +13,7 @@ interface UseCreateStreamResult {
  *
  * @param client - A connected `SoroStreamClient` instance.
  */
-export function useCreateStream(
-  client: SoroStreamClient | null
-): UseCreateStreamResult {
+export function useCreateStream(client: SoroStreamClient | null): UseCreateStreamResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [data, setData] = useState<{
@@ -25,7 +23,7 @@ export function useCreateStream(
 
   const createStream = useCallback(
     async (params: CreateStreamParams) => {
-      if (!client) throw new Error("SoroStreamClient not provided");
+      if (!client) throw new Error('SoroStreamClient not provided');
 
       setLoading(true);
       setError(null);
@@ -43,7 +41,7 @@ export function useCreateStream(
         throw e;
       }
     },
-    [client]
+    [client],
   );
 
   return { createStream, loading, error, data };

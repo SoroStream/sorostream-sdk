@@ -16,7 +16,14 @@
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "lint": "tsc --noEmit"
   },
-  "keywords": ["stellar", "soroban", "streaming", "payments", "react", "hooks"],
+  "keywords": [
+    "stellar",
+    "soroban",
+    "streaming",
+    "payments",
+    "react",
+    "hooks"
+  ],
   "license": "MIT",
   "peerDependencies": {
     "@sorostream/sdk": "^0.1.0",
@@ -28,7 +35,9 @@
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/SoroStream/sorostream-sdk.git"

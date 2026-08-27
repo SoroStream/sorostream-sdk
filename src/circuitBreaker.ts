@@ -1,4 +1,4 @@
-export type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
+export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
 export interface CircuitBreakerOptions {
   threshold?: number;
@@ -9,7 +9,7 @@ const DEFAULT_THRESHOLD = 3;
 const DEFAULT_COOLDOWN_MS = 30_000;
 
 export class CircuitBreaker {
-  private state: CircuitState = "CLOSED";
+  private state: CircuitState = 'CLOSED';
   private failureCount = 0;
   private lastFailureTime = 0;
   private readonly threshold: number;
@@ -21,17 +21,17 @@ export class CircuitBreaker {
   }
 
   async call<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.state === "OPEN") {
+    if (this.state === 'OPEN') {
       if (Date.now() - this.lastFailureTime >= this.cooldownMs) {
-        this.state = "HALF_OPEN";
+        this.state = 'HALF_OPEN';
       } else {
-        throw new Error("RPC endpoint unavailable (circuit breaker open)");
+        throw new Error('RPC endpoint unavailable (circuit breaker open)');
       }
     }
 
     try {
       const result = await fn();
-      if (this.state === "HALF_OPEN") {
+      if (this.state === 'HALF_OPEN') {
         this.reset();
       }
       return result;
@@ -39,7 +39,7 @@ export class CircuitBreaker {
       this.failureCount++;
       this.lastFailureTime = Date.now();
       if (this.failureCount >= this.threshold) {
-        this.state = "OPEN";
+        this.state = 'OPEN';
       }
       throw err;
     }
@@ -50,7 +50,7 @@ export class CircuitBreaker {
   }
 
   reset(): void {
-    this.state = "CLOSED";
+    this.state = 'CLOSED';
     this.failureCount = 0;
   }
 }

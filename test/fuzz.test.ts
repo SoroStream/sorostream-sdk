@@ -3,39 +3,39 @@
  * Asserts that no combination of inputs causes an unhandled TypeError or RangeError.
  * Uses fast-check with 50,000 iterations in CI.
  */
-import { describe, it, expect } from "vitest";
-import * as fc from "fast-check";
-import { SoroStreamClient } from "../src/SoroStreamClient.js";
-import type { WalletAdapter } from "../src/types.js";
+import { describe, it, expect } from 'vitest';
+import * as fc from 'fast-check';
+import { SoroStreamClient } from '../src/SoroStreamClient.js';
+import type { WalletAdapter } from '../src/types.js';
 
 const NUM_RUNS = 50_000;
 
-const VALID_CONTRACT = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM";
-const VALID_ACCOUNT = "GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF";
+const VALID_CONTRACT = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
+const VALID_ACCOUNT = 'GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF';
 
 // Arbitrary that generates any string (including empty, unicode, huge strings)
 const anyStringArb = fc.oneof(
   fc.string(),
   fc.string({ minLength: 0, maxLength: 200 }),
-  fc.constantFrom("", "0", "G", "C", "invalid", "GAAAA", " "),
+  fc.constantFrom('', '0', 'G', 'C', 'invalid', 'GAAAA', ' '),
   // Valid-looking Stellar addresses to exercise the address path
-  fc.constantFrom(VALID_ACCOUNT, VALID_CONTRACT)
+  fc.constantFrom(VALID_ACCOUNT, VALID_CONTRACT),
 );
 
 // Arbitrary for amount: mix of zero, negative, positive, and huge values
 const amountArb = fc.oneof(
   fc.bigInt({ min: -1_000_000n, max: 1_000_000_000_000n }),
-  fc.constantFrom(0n, -1n, 1n, BigInt(Number.MAX_SAFE_INTEGER))
+  fc.constantFrom(0n, -1n, 1n, BigInt(Number.MAX_SAFE_INTEGER)),
 );
 
 // Arbitrary for durationSeconds: zero, negative, positive, huge
 const durationArb = fc.oneof(
   fc.integer({ min: -1000, max: 1_000_000_000 }),
-  fc.constantFrom(0, -1, 1, Number.MAX_SAFE_INTEGER, NaN, Infinity)
+  fc.constantFrom(0, -1, 1, Number.MAX_SAFE_INTEGER, NaN, Infinity),
 );
 
-describe("fuzz: validateStreamParams never throws TypeError or RangeError", () => {
-  it("handles any CreateStreamParams input gracefully", () => {
+describe('fuzz: validateStreamParams never throws TypeError or RangeError', () => {
+  it('handles any CreateStreamParams input gracefully', () => {
     const mockAdapter: WalletAdapter = {
       getPublicKey: async () => VALID_ACCOUNT,
       signTransaction: async (xdr: string) => xdr,
@@ -43,18 +43,28 @@ describe("fuzz: validateStreamParams never throws TypeError or RangeError", () =
     };
 
     const client = new SoroStreamClient({
-      network: "testnet",
+      network: 'testnet',
       contractId: VALID_CONTRACT,
       walletAdapter: mockAdapter,
     });
 
     // Patch the server so network calls never trigger
     (client as any).server = {
-      getAccount: async () => { throw new Error("not found"); },
-      simulateTransaction: async () => { throw new Error("no rpc"); },
-      prepareTransaction: async () => { throw new Error("no rpc"); },
-      sendTransaction: async () => { throw new Error("no rpc"); },
-      getTransaction: async () => { throw new Error("no rpc"); },
+      getAccount: async () => {
+        throw new Error('not found');
+      },
+      simulateTransaction: async () => {
+        throw new Error('no rpc');
+      },
+      prepareTransaction: async () => {
+        throw new Error('no rpc');
+      },
+      sendTransaction: async () => {
+        throw new Error('no rpc');
+      },
+      getTransaction: async () => {
+        throw new Error('no rpc');
+      },
     };
 
     fc.assert(
@@ -75,9 +85,9 @@ describe("fuzz: validateStreamParams never throws TypeError or RangeError", () =
           }
           // Always return true — the property holds as long as no TypeError/RangeError escapes
           return true;
-        }
+        },
       ),
-      { numRuns: NUM_RUNS }
+      { numRuns: NUM_RUNS },
     );
   });
 });
