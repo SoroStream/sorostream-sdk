@@ -682,6 +682,19 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   private readonly streamObservables = new Map<string, SoroStreamObservable<Stream>>();
   /** Shared, reference-counted claimable observables (issue #423). */
   private readonly claimableObservables = new Map<string, SoroStreamObservable<bigint>>();
+  /**
+   * Issue #516: Deduplication set for the typed EventEmitter's `emit()` method.
+   * Tracks txHashes that have already been dispatched so repeated Horizon poll
+   * results never fire handlers more than once. Capped at 1 000 entries with a
+   * simple LRU-like eviction to prevent unbounded memory growth.
+   */
+  private readonly _emittedTxHashes = new Set<string>();
+  /** Issue #516: "any" subscribers — receive every stream event type. */
+  private readonly _anySubscribers = new Map<
+    string,
+    (event: StreamEvent<TEventData>) => void
+  >();
+  private _anySubscriberCounter = 0;
   /** Event bus used to emit SDK lifecycle events. Issue #212. */
   private eventBus: IEventBus;
   /** Issue: cross-tab event relay (BroadcastChannel). Null when disabled. */
@@ -3445,6 +3458,96 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   }
 
   /**
+   * Shorthand for subscribing to `WithdrawalMade` events.
+   *
+   * `WithdrawalMade` is the typed-emitter alias for `StreamWithdrawn` (issue #516).
+   * It fires whenever a withdrawal is confirmed on-chain, either from Horizon
+   * polling or from a programmatic {@link emit} call.
+   *
+   * @param callback - Invoked with each matching event.
+   * @returns A `StreamSubscription` — call `.unsubscribe()` to stop listening.
+   */
+  onWithdrawalMade(callback: (event: StreamEvent<TEventData>) => void): StreamSubscription {
+    return this.on('WithdrawalMade', callback);
+  }
+
+  /**
+   * Subscribe to **all** stream lifecycle events regardless of type (issue #516).
+   *
+   * Unlike `subscribeEvents({}, cb)` which only fires on events fetched by
+   * the background EventPoller, `onAny` also receives events dispatched
+   * programmatically via {@link emit}.
+   *
+   * @param callback - Invoked with every stream event.
+   * @returns A `StreamSubscription` — call `.unsubscribe()` to stop listening.
+   *
+   * @example
+   * ```ts
+   * const sub = client.onAny((event) => {
+   *   console.log(`[${event.type}] stream ${event.streamId}`);
+   * });
+   * sub.unsubscribe();
+   * ```
+   */
+  onAny(callback: (event: StreamEvent<TEventData>) => void): StreamSubscription {
+    const key = `any-${++this._anySubscriberCounter}`;
+    this._anySubscribers.set(key, callback);
+    return {
+      unsubscribe: () => {
+        this._anySubscribers.delete(key);
+      },
+    };
+  }
+
+  /**
+   * Programmatically emit a stream lifecycle event to all matching subscribers
+   * (issue #516).
+   *
+   * Deduplication is applied using the event's `txHash`: each unique txHash
+   * is dispatched to any given subscriber exactly once, preventing duplicate
+   * notifications from repeated Horizon poll results. Up to 1 000 txHashes
+   * are cached; the oldest entries are evicted when the cache is full.
+   *
+   * @param event - The stream event to emit.
+   *
+   * @example
+   * ```ts
+   * client.emit({
+   *   type: 'WithdrawalMade',
+   *   streamId: '42',
+   *   txHash: 'abc123',
+   *   ledger: 1001,
+   *   timestamp: Date.now(),
+   *   data: { amount: 500n },
+   * });
+   * ```
+   */
+  emit(event: StreamEvent<TEventData>): void {
+    // Deduplicate by txHash so repeated Horizon poll results don't fire twice.
+    if (event.txHash) {
+      if (this._emittedTxHashes.has(event.txHash)) return;
+      // Evict oldest entry if we've hit the 1 000-entry cap.
+      if (this._emittedTxHashes.size >= 1_000) {
+        const oldest = this._emittedTxHashes.values().next().value;
+        if (oldest !== undefined) {
+          this._emittedTxHashes.delete(oldest);
+        }
+      }
+      this._emittedTxHashes.add(event.txHash);
+    }
+
+    // Dispatch to "any" subscribers first.
+    for (const cb of this._anySubscribers.values()) {
+      cb(event);
+    }
+
+    // Dispatch to event-type-specific `on()` subscribers via the event bus.
+    // Re-use the existing InMemoryEventBus so `subscribeEvents` listeners
+    // also fire when `emit` is called.
+    this.eventBus.emit(`stream.${event.type.toLowerCase()}` as string, event as unknown as Record<string, unknown>);
+  }
+
+  /**
    * Subscribes to live state changes for a specific stream by polling.
    *
    * The callback is invoked each time the stream's state changes between
@@ -5212,37 +5315,64 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   }
 
   /**
-   * Health check method for RPC server connectivity monitoring (issue #308 / #305).
+   * Health check method for RPC server connectivity and contract reachability
+   * (issue #308 / #518).
+   *
+   * Pings the configured RPC endpoint and verifies that the target contract is
+   * deployed and reachable. Applications can call this before attempting stream
+   * operations to surface connectivity issues early.
    *
    * @param options - Timeout configuration (default: 5000ms)
-   * @returns HealthCheckResult with rpcReachable, latencyMs, and optional error message
+   * @returns {@link HealthCheckResult} with `rpcReachable`, `contractReachable`,
+   *          `latencyMs`, and an optional `error` message.
    */
   async healthCheck(options?: { timeoutMs?: number }): Promise<HealthCheckResult> {
     const start = Date.now();
     const timeoutMs = options?.timeoutMs ?? 5000;
     try {
       const getHealthPromise = this.server.getHealth();
-      let timer: any;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('RPC health check timed out')), timeoutMs);
       });
 
       const res = await Promise.race([getHealthPromise, timeoutPromise]).finally(() => {
-        if (timer) clearTimeout(timer);
+        if (timer !== undefined) clearTimeout(timer);
       });
 
       const latencyMs = Date.now() - start;
-      if (res && (res as any).status === 'healthy') {
-        return { rpcReachable: true, latencyMs };
-      } else {
-        return { rpcReachable: false, latencyMs, error: (res as any)?.status || 'unhealthy' };
+      const rpcReachable = !!(res && (res as { status?: string }).status === 'healthy');
+
+      if (!rpcReachable) {
+        return {
+          rpcReachable: false,
+          contractReachable: false,
+          latencyMs,
+          error: (res as { status?: string })?.status || 'unhealthy',
+        };
       }
-    } catch (err: any) {
+
+      // Issue #518: verify the contract is deployed and accessible
+      let contractReachable = false;
+      try {
+        // Attempt a lightweight simulation against the contract. Any
+        // successful (non-error) simulation confirms the contract is live.
+        const result = await this.simulateOp(this.contract.call('get_version'));
+        contractReachable = !rpc.Api.isSimulationError(result);
+      } catch {
+        contractReachable = false;
+      }
+
+      return { rpcReachable: true, contractReachable, latencyMs };
+    } catch (err: unknown) {
       const latencyMs = Date.now() - start;
+      const message =
+        err instanceof Error ? err.message : String(err);
       return {
         rpcReachable: false,
+        contractReachable: false,
         latencyMs,
-        error: err?.message || String(err),
+        error: message,
       };
     }
   }

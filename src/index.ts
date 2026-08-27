@@ -71,8 +71,9 @@ export {
   encodeStreamId,
   decodeStreamId,
   getStreamHealth,
+  simulateStream,
 } from './utils.js';
-export type { StreamMetadataFields } from './utils.js';
+export type { StreamMetadataFields, SimulateStreamParams, StreamSimulationResult, StreamSimulationSnapshot } from './utils.js';
 export { templates } from './templates.js';
 export { serializeStream, deserializeStream } from './serialization.js';
 export type { SerializedStream } from './serialization.js';
@@ -257,6 +258,7 @@ export type {
   RecipientTrustScoreProvider,
   StreamHealthStatus,
   StreamHealthResult,
+  SoroStreamEmitter,
 } from './types.js';
 
 export { RecipientValidationError } from './errors.js';

@@ -16,7 +16,10 @@ export type StreamEventType =
   | 'StreamToppedUp'
   | 'StreamPaused'
   | 'StreamResumed'
-  | 'StreamTransferred';
+  | 'StreamTransferred'
+  /** Alias emitted by the typed EventEmitter when a withdrawal is confirmed
+   * (issue #516). Semantically equivalent to `StreamWithdrawn`. */
+  | 'WithdrawalMade';
 
 export interface StreamEvent<TData = Record<string, unknown>> {
   type: StreamEventType;
@@ -29,6 +32,39 @@ export interface StreamEvent<TData = Record<string, unknown>> {
 
 /** Typed event handler utility type. */
 export type EventHandler<TData = Record<string, unknown>> = (event: StreamEvent<TData>) => void;
+
+/**
+ * Typed event emitter interface for SDK stream lifecycle events (issue #516).
+ *
+ * Consumers can subscribe to individual events or all events. The emitter
+ * deduplicates repeated events from Horizon poll results so each unique
+ * `txHash` fires each handler exactly once.
+ *
+ * Implemented by {@link SoroStreamClient}.
+ */
+export interface SoroStreamEmitter<TData = Record<string, unknown>> {
+  /**
+   * Subscribe to a specific stream lifecycle event by type.
+   * Returns a {@link StreamSubscription} — call `.unsubscribe()` to stop.
+   */
+  on(
+    eventType: StreamEventType,
+    callback: (event: StreamEvent<TData>) => void,
+  ): StreamSubscription;
+
+  /**
+   * Subscribe to all stream lifecycle events regardless of type.
+   * Returns a {@link StreamSubscription} — call `.unsubscribe()` to stop.
+   */
+  onAny(callback: (event: StreamEvent<TData>) => void): StreamSubscription;
+
+  /**
+   * Programmatically emit a stream event to all matching subscribers.
+   * Deduplication is applied: a given `txHash` is only dispatched once
+   * per subscription.
+   */
+  emit(event: StreamEvent<TData>): void;
+}
 
 export interface StreamSubscription {
   unsubscribe(): void;
@@ -1324,12 +1360,18 @@ export interface LedgerWalletAdapterConfig {
   transportType?: 'webusb' | 'webhid' | 'custom';
 }
 
-/** Result shape returned by SoroStreamClient.healthCheck (issue #308). */
+/** Result shape returned by SoroStreamClient.healthCheck (issue #308, #518). */
 export interface HealthCheckResult {
   /** True if RPC endpoint responded successfully within timeout. */
   rpcReachable: boolean;
   /** Round-trip latency in milliseconds, or null on failure. */
   latencyMs: number | null;
+  /**
+   * True when the configured contract address is deployed and reachable on
+   * the network, false when the contract could not be verified or the RPC
+   * was unreachable (issue #518).
+   */
+  contractReachable: boolean;
   /** Optional error message when rpcReachable is false. */
   error?: string;
 }
