@@ -1,0 +1,45 @@
+{
+  "name": "@sorostream/vue",
+  "version": "0.1.0",
+  "description": "Vue 3 composables for the SoroStream payment streaming protocol (issue #422)",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "stellar",
+    "soroban",
+    "streaming",
+    "payments",
+    "vue",
+    "vue3",
+    "composables"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@sorostream/sdk": "^0.1.0",
+    "vue": "^3.3.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vue": "^3.5.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SoroStream/sorostream-sdk.git"
+  }
+}

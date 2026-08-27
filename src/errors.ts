@@ -329,3 +329,25 @@ export class RecipientValidationError extends SoroStreamError {
     this.warnings = warnings;
   }
 }
+
+/**
+ * Thrown when a non-TLS (`http://`) RPC endpoint URL is supplied to the SDK
+ * (constructor, `setNetwork`, or `updateConfig`) for a non-loopback host
+ * (issue #463). Transaction data — including signed envelopes — must never
+ * be routed over an unencrypted connection. Loopback hosts (`localhost`,
+ * `127.0.0.1`, `::1`) are exempt to keep local Soroban quickstart workflows
+ * working.
+ */
+export class InsecureRpcUrlError extends SoroStreamError {
+  /** The rejected RPC URL. */
+  readonly rpcUrl: string;
+
+  constructor(rpcUrl: string) {
+    super(
+      `Insecure RPC URL "${rpcUrl}": non-TLS "http://" endpoints are not allowed. ` +
+        'Use an "https://" URL, or a loopback host (localhost/127.0.0.1) for local development.',
+    );
+    this.name = 'InsecureRpcUrlError';
+    this.rpcUrl = rpcUrl;
+  }
+}

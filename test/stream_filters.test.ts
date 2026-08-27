@@ -130,6 +130,61 @@ describe('#204 filterStreams', () => {
   });
 });
 
+describe('#date-range filterStreams', () => {
+  const T0 = 1_700_000_000; // fixed epoch (Unix seconds)
+  const streams: Stream[] = [
+    makeStream({ id: 'a', startTime: T0, endTime: T0 + 1000 }),
+    makeStream({ id: 'b', startTime: T0 + 2000, endTime: T0 + 3000 }),
+    makeStream({ id: 'c', startTime: T0 + 4000, endTime: T0 + 5000 }),
+  ];
+
+  it('filters by startTimeFrom (inclusive lower bound)', () => {
+    const result = filterStreams(streams, { startTimeFrom: T0 + 2000 });
+    expect(result.map((s) => s.id)).toEqual(['b', 'c']);
+  });
+
+  it('filters by startTimeTo (inclusive upper bound)', () => {
+    const result = filterStreams(streams, { startTimeTo: T0 + 2000 });
+    expect(result.map((s) => s.id)).toEqual(['a', 'b']);
+  });
+
+  it('filters by start time window', () => {
+    const result = filterStreams(streams, { startTimeFrom: T0 + 1000, startTimeTo: T0 + 4000 });
+    expect(result.map((s) => s.id)).toEqual(['b', 'c']);
+  });
+
+  it('filters by endTimeFrom (inclusive lower bound)', () => {
+    const result = filterStreams(streams, { endTimeFrom: T0 + 3000 });
+    expect(result.map((s) => s.id)).toEqual(['b', 'c']);
+  });
+
+  it('filters by endTimeTo (inclusive upper bound)', () => {
+    const result = filterStreams(streams, { endTimeTo: T0 + 3000 });
+    expect(result.map((s) => s.id)).toEqual(['a', 'b']);
+  });
+
+  it('filters by end time window', () => {
+    const result = filterStreams(streams, { endTimeFrom: T0 + 1000, endTimeTo: T0 + 4000 });
+    expect(result.map((s) => s.id)).toEqual(['a', 'b']);
+  });
+
+  it('combines date range with status and token', () => {
+    const combined: Stream[] = [
+      makeStream({ id: 'a', token: TOKEN_A, status: 'Active', startTime: T0 }),
+      makeStream({ id: 'b', token: TOKEN_B, status: 'Active', startTime: T0 }),
+      makeStream({ id: 'c', token: TOKEN_A, status: 'Cancelled', startTime: T0 }),
+      makeStream({ id: 'd', token: TOKEN_A, status: 'Active', startTime: T0 + 5000 }),
+    ];
+    const result = filterStreams(combined, {
+      status: 'Active',
+      token: TOKEN_A,
+      startTimeFrom: T0 - 1,
+      startTimeTo: T0 + 1,
+    });
+    expect(result.map((s) => s.id)).toEqual(['a']);
+  });
+});
+
 describe('#204 sortStreams', () => {
   const streams: Stream[] = [
     makeStream({ id: 'a', startTime: 300, endTime: 900, deposit: 30n }),

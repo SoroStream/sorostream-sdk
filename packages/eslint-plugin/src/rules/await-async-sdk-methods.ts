@@ -8,6 +8,7 @@ const DEFAULT_ASYNC_METHODS = [
   'topUp',
   'getStream',
   'getClaimable',
+  'getMultipleStreamBalances',
   'getStreamsBySender',
   'getStreamsByRecipient',
   'batchWithdraw',

@@ -52,12 +52,13 @@ await client.withdraw({ streamId });
 |--------|-------------|
 | `createStream(params)` | Creates a new payment stream. Returns `{ streamId, txHash }` |
 | `withdraw(params)` | Withdraws all claimable tokens. Returns `{ txHash, amount }` |
-| `batchWithdraw(streamIds, batchSize?, onProgress?)` | Withdraws from multiple streams in one tx. Returns `{ successes, failures }`. Optional `onProgress` fires after each chunk |
+| `batchWithdraw(streamIds, batchSize?)` | Withdraws from multiple streams in one tx. Returns `BatchWithdrawResult[]` |
 | `cancelStream(params)` | Cancels stream, refunds sender remainder. Returns `{ txHash }` |
 | `topUp(params)` | Adds tokens, extends duration. Returns `{ txHash, newEndTime }` |
-| `bulkCreateStreams(rows, options)` | Creates many streams at once (batched). Returns `BulkCreateResult`. `options.onProgress` fires after each chunk |
+| `bulkCreateStreams(rows, options)` | Creates many streams at once (batched). Returns `BulkCreateResult` |
 | `getStream(streamId)` | Returns full `Stream` object |
 | `getClaimable(streamId)` | Returns claimable amount in stroops |
+| `getMultipleStreamBalances(streamIds)` | Returns current claimable balances for many streams in a single batched RPC call, e.g. `[{ streamId, balance }]` |
 | `getStreamsBySender(sender)` | Returns all streams for a sender |
 | `getStreamsByRecipient(recipient)` | Returns all streams for a recipient |
 | `estimateCreateStreamFee(params)` | Estimates network fee for `createStream`. Returns `{ totalFee, minResourceFee }` |
