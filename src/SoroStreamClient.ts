@@ -199,6 +199,23 @@ const NETWORK_PASSPHRASES: Record<Network, string> = {
   futurenet: Networks.FUTURENET,
 };
 
+/**
+ * Lifecycle hook callbacks fired when the client observes stream state
+ * transitions via background event polling.
+ *
+ * Hooks fire for transitions on any stream emitted by the contract — not only
+ * operations initiated by this client instance — so filter on
+ * {@link StreamEvent.streamId} / `data.sender` / `data.recipient` if needed.
+ */
+export interface SoroStreamLifecycleHooks {
+  /** Fired when a `StreamCreated` contract event is observed. */
+  onStreamCreated?(event: StreamEvent): void;
+  /** Fired when a `StreamCompleted` contract event is observed. */
+  onStreamCompleted?(event: StreamEvent): void;
+  /** Fired when a `StreamCancelled` contract event is observed. */
+  onStreamCancelled?(event: StreamEvent): void;
+}
+
 /** Options for constructing a SoroStreamClient. */
 export interface SoroStreamClientOptions {
   /**
@@ -4895,6 +4912,17 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   onNetworkChanged(cb: (network: Network) => void): () => void {
     this.networkChangedCbs.add(cb);
     return () => this.networkChangedCbs.delete(cb);
+  }
+
+  private registerLifecycleHook(
+    eventType: StreamEventType,
+    callback?: (event: StreamEvent) => void
+  ): void {
+    if (!callback) return;
+    this.getEventPoller().subscribe(`hooks:${eventType}`, {
+      filter: (event) => event.type === eventType,
+      callback,
+    });
   }
 
   /**
