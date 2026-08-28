@@ -1399,6 +1399,15 @@ export interface ObserveStreamOptions {
 
 // ── Issue #267: JSON Schema generation ───────────────────────────────────────
 
+export interface CacheConfigOptions {
+  /** Whether to enable in-memory response caching (default: true). */
+  enabled?: boolean;
+  /** Configurable TTL in milliseconds for cached read-only responses (default: 60000). */
+  ttlMs?: number;
+  /** Maximum number of entries stored before LRU eviction occurs (default: 1000). */
+  maxSize?: number;
+}
+
 /**
  * The JSON-serializable subset of `SoroStreamClientOptions` — the parts of a
  * client config a non-TypeScript caller (a Python or Go script assembling a
@@ -1417,6 +1426,8 @@ export interface SoroStreamClientConfig {
   contractId: string;
   /** Optional custom RPC URL (overrides the default for `network`). */
   rpcUrl?: string;
+  /** Optional response caching configuration for read-only RPC calls (issue #528). */
+  cacheOptions?: CacheConfigOptions;
   /** Optional circuit-breaker configuration for RPC calls. */
   circuitBreaker?: CircuitBreakerOptions;
   /** Maximum time in ms to wait for a transaction to confirm (default: 120000). */

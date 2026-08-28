@@ -253,13 +253,15 @@ export type {
   OperationExplanation,
   BalanceDelta,
   SoroStreamClientConfig,
+  CacheConfigOptions,
   RecipientTrustScore,
   RecipientTrustScoreProvider,
   StreamHealthStatus,
   StreamHealthResult,
 } from './types.js';
 
-export { RecipientValidationError } from './errors.js';
+export { ConnectionPoolExhaustedError, RecipientValidationError } from './errors.js';
+export { SanitizingLogger } from './logger.js';
 export {
   StreamStateMachine,
   InvalidStateTransitionError,

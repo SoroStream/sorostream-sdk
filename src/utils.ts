@@ -1960,3 +1960,17 @@ export interface StreamMetadataFields {
   tags?: string[];
   meta?: Record<string, unknown>;
 }
+
+/**
+ * Redacts Stellar secret keys (S...), mnemonics, and private keys from strings and error messages (issue #525).
+ *
+ * @param input - The string to redact secret materials from.
+ * @returns The redacted string with placeholders.
+ */
+export function redactSecretKey(input: string): string {
+  if (!input) return input;
+  let result = input.replace(/\bS[A-Z2-7]{55}\b/g, '[REDACTED_SECRET_KEY]');
+  result = result.replace(/\b(secretKey|secretSeed|privateKey|mnemonic|secret|seed)\s*[:=]\s*["']?[^"'\s,]+["']?/gi, '$1=[REDACTED_SECRET]');
+  return result;
+}
+

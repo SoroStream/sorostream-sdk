@@ -1,10 +1,19 @@
+import { redactSecretKey } from './utils.js';
+
 // See ERRORS.md for cause, typical trigger, and recovery guidance for each
 // error class below, and which SoroStreamClient methods throw them.
 
 export class SoroStreamError extends Error {
   constructor(message: string) {
-    super(message);
+    super(redactSecretKey(message));
     this.name = 'SoroStreamError';
+  }
+}
+
+export class ConnectionPoolExhaustedError extends SoroStreamError {
+  constructor(message?: string) {
+    super(message ?? 'Connection pool exhausted: maximum subscription limit reached across all connections');
+    this.name = 'ConnectionPoolExhaustedError';
   }
 }
 
