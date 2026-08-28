@@ -1,3 +1,4 @@
+import type { rpc } from '@stellar/stellar-sdk';
 import type { FetchAdapter, WebSocketFactory } from './adapters.js';
 import type { CircuitBreakerOptions } from './circuitBreaker.js';
 import type { RetryOptions } from './retry.js';
@@ -182,6 +183,8 @@ export interface Stream {
 
 /** Parameters for creating a new stream. */
 export interface CreateStreamParams {
+  /** If true, validate parameters and simulate via RPC without submitting (issue #439). */
+  dryRun?: boolean;
   /** Beneficiary address. */
   recipient: string;
   /** SAC token contract address. */
@@ -759,6 +762,8 @@ export type MemoHash = Uint8Array;
 export interface WriteOptions {
   /** If true, simulate only without submitting. */
   simulateOnly?: boolean;
+  /** If true, validate parameters and simulate via RPC without submitting (issue #439). */
+  dryRun?: boolean;
   /** Optional AbortSignal to cancel in-flight transaction polling. */
   signal?: AbortSignal;
   /** Override fee-bump for this specific transaction. */
@@ -1545,4 +1550,22 @@ export interface StreamHealthResult {
   secondsSinceLastWithdrawal: number;
   /** Human-readable diagnostics messages (empty when status is healthy). */
   diagnostics: string[];
+}
+
+/**
+ * Result returned by createStream when dryRun option is enabled (issue #439).
+ */
+export interface CreateStreamDryRunResult {
+  /** Indicates this was a dry-run execution. */
+  dryRun: true;
+  /** Whether the simulation succeeded. */
+  simulated: boolean;
+  /** Expected resource fee in stroops. */
+  expectedFee: string;
+  /** Min resource fee from simulation if available. */
+  minResourceFee?: string;
+  /** Raw simulation result returned by Soroban RPC endpoint. */
+  result: rpc.Api.SimulateTransactionResponse;
+  /** Stream parameters that were validated. */
+  params: CreateStreamParams;
 }

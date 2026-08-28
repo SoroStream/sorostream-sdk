@@ -25,6 +25,7 @@ import type {
   CancelStreamParams,
   CloneStreamOverrides,
   CreateStreamParams,
+  CreateStreamDryRunResult,
   PaginatedStreams,
   PaginationParams,
   SetOperatorParams,
@@ -53,6 +54,7 @@ import type {
   BatchStreamsResult,
 } from './types.js';
 import { streamToJSON, filterStreams } from './utils.js';
+import { InsufficientAmountError, SelfStreamError } from './errors.js';
 import { SoroStreamObservable, shareLatest } from './observable.js';
 
 let nextId = 1;
@@ -122,6 +124,27 @@ export class MockSoroStreamClient {
     _signal?: AbortSignal,
     options?: WriteOptions,
   ): Promise<{ streamId: string; txHash: string }> {
+    if (params.amount <= 0n) {
+      throw new InsufficientAmountError();
+    }
+    if (this.senderKey && params.recipient === this.senderKey) {
+      throw new SelfStreamError();
+    }
+    if (options?.dryRun || (params as any)?.dryRun) {
+      return {
+        dryRun: true,
+        simulated: true,
+        expectedFee: "100",
+        minResourceFee: "100",
+        result: {
+          id: "mock-sim-id",
+          events: [],
+          minResourceFee: "100",
+        } as any,
+        params,
+      } as any;
+    }
+
     if (options?.explain || (params as any)?.explain) {
       return {
         operation: 'createStream',
