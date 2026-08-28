@@ -2735,6 +2735,37 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   }
 
   /**
+   * Tops up a stream to extend its duration, given a positional `streamId` and
+   * `amount`.
+   *
+   * This is a convenience wrapper around {@link topUp} — it calls the contract
+   * `top_up` entry point so a sender can add more funds to an active stream and
+   * extend its `endTime` proportionally, without cancelling and recreating it.
+   *
+   * @param streamId - ID of the stream to top up.
+   * @param amount - Additional amount to deposit in stroops (must be > 0).
+   * @param signal - Optional `AbortSignal` to cancel in-flight transaction polling.
+   * @param options - Optional write options (e.g. `feeBump`).
+   * @returns `{ txHash, newEndTime }` — confirming transaction hash and updated end time.
+   * @throws {InsufficientAmountError} If `amount` is 0 or negative.
+   * @throws {TransactionFailedError} If the transaction is rejected.
+   *
+   * @example
+   * ```ts
+   * const { txHash, newEndTime } = await client.topUpStream("42", toStroops("50"));
+   * console.log("Stream extended until:", newEndTime.toISOString());
+   * ```
+   */
+  async topUpStream(
+    streamId: string,
+    amount: bigint,
+    signal?: AbortSignal,
+    options?: WriteOptions,
+  ): Promise<{ txHash: string; newEndTime: Date }> {
+    return this.topUp({ streamId, amount }, signal, options);
+  }
+
+  /**
    * Cancels multiple streams in batched transactions.
    *
    * @param streamIds - Stream IDs to cancel.
