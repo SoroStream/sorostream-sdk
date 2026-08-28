@@ -275,6 +275,27 @@ export interface FeeEstimate {
   minResourceFee: number;
 }
 
+/**
+ * Structured cost breakdown returned by {@link SoroStreamClient.getStreamCost}.
+ *
+ * All fee values are in stroops. `totalInAsset` expresses the same total
+ * converted to the stream's token denomination using the standard
+ * 10^7 stroops-per-unit ratio. Issue #520.
+ */
+export interface StreamCostBreakdown {
+  /** Soroban resource fee component in stroops. */
+  resourceFee: number;
+  /** Base transaction fee component in stroops. */
+  baseFee: number;
+  /** Total fee (resourceFee + baseFee) in stroops. */
+  totalFee: number;
+  /**
+   * Total fee expressed in the stream asset's denomination
+   * (stroops / 10_000_000).
+   */
+  totalInAsset: string;
+}
+
 /** Result of batch cancellation. */
 export interface BatchCancelResult {
   txHash: string;
