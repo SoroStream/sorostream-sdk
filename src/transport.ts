@@ -159,3 +159,92 @@ export function createRetryingRpcTransport(
     getEvents: (request) => withRetry(() => transport.getEvents(request), retryOpts),
   };
 }
+
+/**
+ * Options for configuring a pooled RPC transport (issue #435).
+ */
+export interface PooledRpcTransportOptions {
+  /** Number of RPC connection instances to maintain in the pool (default: 4). */
+  poolSize?: number;
+  /** Idle timeout in ms before recycling inactive connections (default: 30000). */
+  idleTimeoutMs?: number;
+  /** Maximum number of concurrent requests per server instance (default: 10). */
+  maxConcurrentPerServer?: number;
+}
+
+/**
+ * Creates an RPC transport adapter that pools and load-balances RPC requests
+ * across multiple `rpc.Server` instances to improve concurrent throughput and reuse connections (issue #435).
+ *
+ * @param rpcUrl - The RPC endpoint URL.
+ * @param options - Sizing and configuration options for the connection pool.
+ */
+export function createPooledRpcTransport(
+  rpcUrl: string,
+  options?: PooledRpcTransportOptions & rpc.Server.Options,
+): RpcTransportAdapter & {
+  getPoolStats(): { poolSize: number; activeRequests: number; totalRequests: number; reusedConnections: number };
+} {
+  const poolSize = Math.max(1, options?.poolSize ?? 4);
+  const serverOpts = { allowHttp: false, ...options };
+  let currentUrl = rpcUrl;
+  let servers: rpc.Server[] = Array.from({ length: poolSize }, () => new rpc.Server(currentUrl, serverOpts));
+  let roundRobinIndex = 0;
+  let activeRequests = 0;
+  let totalRequests = 0;
+  let reusedConnections = 0;
+
+  function getServer(): rpc.Server {
+    if (servers.length === 0) {
+      servers = Array.from({ length: poolSize }, () => new rpc.Server(currentUrl, serverOpts));
+    }
+    const s = servers[roundRobinIndex % servers.length]!;
+    roundRobinIndex = (roundRobinIndex + 1) % servers.length;
+    return s;
+  }
+
+  async function execute<T>(fn: (server: rpc.Server) => Promise<T>): Promise<T> {
+    const s = getServer();
+    activeRequests++;
+    totalRequests++;
+    if (totalRequests > poolSize) {
+      reusedConnections++;
+    }
+    try {
+      return await fn(s);
+    } finally {
+      activeRequests = Math.max(0, activeRequests - 1);
+    }
+  }
+
+  return {
+    get serverURL() {
+      return servers[0]?.serverURL;
+    },
+    init(ctx) {
+      if (ctx?.rpcUrl && ctx.rpcUrl !== currentUrl) {
+        currentUrl = ctx.rpcUrl;
+        servers = Array.from({ length: poolSize }, () => new rpc.Server(currentUrl, serverOpts));
+        roundRobinIndex = 0;
+      }
+    },
+    teardown() {
+      servers = [];
+      activeRequests = 0;
+    },
+    getAccount: (address) => execute((s) => s.getAccount(address)),
+    getHealth: () => execute((s) => s.getHealth()),
+    getLatestLedger: () => execute((s) => s.getLatestLedger()),
+    getTransaction: (hash) => execute((s) => s.getTransaction(hash)),
+    simulateTransaction: (tx) => execute((s) => s.simulateTransaction(tx)),
+    prepareTransaction: (tx) => execute((s) => s.prepareTransaction(tx)),
+    sendTransaction: (tx) => execute((s) => s.sendTransaction(tx)),
+    getEvents: (request) => execute((s) => s.getEvents(request)),
+    getPoolStats: () => ({
+      poolSize: servers.length,
+      activeRequests,
+      totalRequests,
+      reusedConnections,
+    }),
+  };
+}
