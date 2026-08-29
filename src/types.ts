@@ -16,7 +16,10 @@ export type StreamEventType =
   | 'StreamToppedUp'
   | 'StreamPaused'
   | 'StreamResumed'
-  | 'StreamTransferred';
+  | 'StreamTransferred'
+  /** Alias emitted by the typed EventEmitter when a withdrawal is confirmed
+   * (issue #516). Semantically equivalent to `StreamWithdrawn`. */
+  | 'WithdrawalMade';
 
 export interface StreamEvent<TData = Record<string, unknown>> {
   type: StreamEventType;
@@ -29,6 +32,39 @@ export interface StreamEvent<TData = Record<string, unknown>> {
 
 /** Typed event handler utility type. */
 export type EventHandler<TData = Record<string, unknown>> = (event: StreamEvent<TData>) => void;
+
+/**
+ * Typed event emitter interface for SDK stream lifecycle events (issue #516).
+ *
+ * Consumers can subscribe to individual events or all events. The emitter
+ * deduplicates repeated events from Horizon poll results so each unique
+ * `txHash` fires each handler exactly once.
+ *
+ * Implemented by {@link SoroStreamClient}.
+ */
+export interface SoroStreamEmitter<TData = Record<string, unknown>> {
+  /**
+   * Subscribe to a specific stream lifecycle event by type.
+   * Returns a {@link StreamSubscription} — call `.unsubscribe()` to stop.
+   */
+  on(
+    eventType: StreamEventType,
+    callback: (event: StreamEvent<TData>) => void,
+  ): StreamSubscription;
+
+  /**
+   * Subscribe to all stream lifecycle events regardless of type.
+   * Returns a {@link StreamSubscription} — call `.unsubscribe()` to stop.
+   */
+  onAny(callback: (event: StreamEvent<TData>) => void): StreamSubscription;
+
+  /**
+   * Programmatically emit a stream event to all matching subscribers.
+   * Deduplication is applied: a given `txHash` is only dispatched once
+   * per subscription.
+   */
+  emit(event: StreamEvent<TData>): void;
+}
 
 export interface StreamSubscription {
   unsubscribe(): void;
@@ -273,6 +309,27 @@ export interface FeeEstimate {
   totalFee: number;
   /** Soroban resource fee in stroops. */
   minResourceFee: number;
+}
+
+/**
+ * Structured cost breakdown returned by {@link SoroStreamClient.getStreamCost}.
+ *
+ * All fee values are in stroops. `totalInAsset` expresses the same total
+ * converted to the stream's token denomination using the standard
+ * 10^7 stroops-per-unit ratio. Issue #520.
+ */
+export interface StreamCostBreakdown {
+  /** Soroban resource fee component in stroops. */
+  resourceFee: number;
+  /** Base transaction fee component in stroops. */
+  baseFee: number;
+  /** Total fee (resourceFee + baseFee) in stroops. */
+  totalFee: number;
+  /**
+   * Total fee expressed in the stream asset's denomination
+   * (stroops / 10_000_000).
+   */
+  totalInAsset: string;
 }
 
 /** Result of batch cancellation. */
@@ -1304,6 +1361,16 @@ export interface KmsWalletAdapterConfig {
   sign: (payload: Uint8Array) => Promise<Uint8Array>;
 }
 
+/** Configuration options for AlbedoWalletAdapter (issue #430). */
+export interface AlbedoWalletAdapterConfig {
+  /** Optional public key pre-configured for the adapter. */
+  publicKey?: string;
+  /** Optional custom Albedo provider object or window.albedo reference. */
+  provider?: any;
+  /** Optional network override (e.g. "testnet" | "mainnet"). */
+  network?: Network;
+}
+
 /** Configuration options for LobstrWalletAdapter (issue #431). */
 export interface LobstrWalletAdapterConfig {
   /** Optional public key pre-configured for the adapter. */
@@ -1324,12 +1391,18 @@ export interface LedgerWalletAdapterConfig {
   transportType?: 'webusb' | 'webhid' | 'custom';
 }
 
-/** Result shape returned by SoroStreamClient.healthCheck (issue #308). */
+/** Result shape returned by SoroStreamClient.healthCheck (issue #308, #518). */
 export interface HealthCheckResult {
   /** True if RPC endpoint responded successfully within timeout. */
   rpcReachable: boolean;
   /** Round-trip latency in milliseconds, or null on failure. */
   latencyMs: number | null;
+  /**
+   * True when the configured contract address is deployed and reachable on
+   * the network, false when the contract could not be verified or the RPC
+   * was unreachable (issue #518).
+   */
+  contractReachable: boolean;
   /** Optional error message when rpcReachable is false. */
   error?: string;
 }
@@ -1399,6 +1472,15 @@ export interface ObserveStreamOptions {
 
 // ── Issue #267: JSON Schema generation ───────────────────────────────────────
 
+export interface CacheConfigOptions {
+  /** Whether to enable in-memory response caching (default: true). */
+  enabled?: boolean;
+  /** Configurable TTL in milliseconds for cached read-only responses (default: 60000). */
+  ttlMs?: number;
+  /** Maximum number of entries stored before LRU eviction occurs (default: 1000). */
+  maxSize?: number;
+}
+
 /**
  * The JSON-serializable subset of `SoroStreamClientOptions` — the parts of a
  * client config a non-TypeScript caller (a Python or Go script assembling a
@@ -1417,6 +1499,8 @@ export interface SoroStreamClientConfig {
   contractId: string;
   /** Optional custom RPC URL (overrides the default for `network`). */
   rpcUrl?: string;
+  /** Optional response caching configuration for read-only RPC calls (issue #528). */
+  cacheOptions?: CacheConfigOptions;
   /** Optional circuit-breaker configuration for RPC calls. */
   circuitBreaker?: CircuitBreakerOptions;
   /** Maximum time in ms to wait for a transaction to confirm (default: 120000). */

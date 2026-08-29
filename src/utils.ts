@@ -1954,9 +1954,160 @@ export function getStreamHealth(stream: Stream, now?: number): StreamHealthResul
   };
 }
 
+// ── Issue #519: simulateStream ───────────────────────────────────────────────
+
+/**
+ * A single point-in-time snapshot in a simulated stream timeline.
+ */
+export interface StreamSimulationSnapshot {
+  /** Unix timestamp (seconds) for this snapshot. */
+  timestamp: number;
+  /** Tokens streamed from startTime to this point (in stroops). */
+  streamed: bigint;
+  /** Tokens remaining (deposit − streamed) at this point (in stroops). */
+  remaining: bigint;
+  /** Percentage of the total amount that has been streamed (0–100). */
+  percentComplete: number;
+}
+
+/**
+ * The result of {@link simulateStream}: a full offline simulation of a
+ * stream's token-flow timeline without any network calls.
+ */
+export interface StreamSimulationResult {
+  /** Unix timestamp (seconds) when the stream starts. */
+  startTime: number;
+  /** Unix timestamp (seconds) when the stream ends. */
+  endTime: number;
+  /** Duration of the stream in seconds. */
+  durationSeconds: number;
+  /** Tokens released per second (stroops). */
+  flowRate: bigint;
+  /** Total amount that will be streamed (stroops). May be slightly less than
+   * `amount` due to integer-division rounding of the flow rate. */
+  totalAmount: bigint;
+  /** Ordered timeline snapshots from 0 % to 100 %. */
+  snapshots: StreamSimulationSnapshot[];
+}
+
+/**
+ * Parameters for {@link simulateStream}.
+ */
+export interface SimulateStreamParams {
+  /** Total amount to stream in stroops. */
+  amount: bigint;
+  /** Stream duration in seconds. */
+  durationSeconds: number;
+  /**
+   * Optional Unix timestamp (seconds) for the stream start.
+   * Defaults to `Math.floor(Date.now() / 1000)`.
+   */
+  startTime?: number;
+}
+
+/**
+ * Simulates a stream's token-flow timeline entirely offline (no RPC calls).
+ *
+ * Returns the flow rate, start/end times, total streamable amount, and an
+ * ordered array of {@link StreamSimulationSnapshot} objects covering the full
+ * stream lifetime at regular intervals plus a guaranteed start and end point.
+ *
+ * Use this for integration tests and UI previews when testnet access is
+ * unavailable.
+ *
+ * Issue #519.
+ *
+ * @param params - Stream parameters: amount, durationSeconds, optional startTime.
+ * @param snapshotCount - Number of intermediate snapshots (default: 10).
+ * @returns A {@link StreamSimulationResult} with the full timeline.
+ *
+ * @throws {Error} When `amount` is 0 or negative.
+ * @throws {Error} When `durationSeconds` is 0 or negative.
+ *
+ * @example
+ * ```ts
+ * import { simulateStream, toStroops } from "@sorostream/sdk";
+ *
+ * const result = simulateStream({
+ *   amount: toStroops("100"),
+ *   durationSeconds: 3600,
+ * });
+ * console.log("flow rate:", result.flowRate, "stroops/s");
+ * console.log("snapshots:", result.snapshots.length);
+ * ```
+ */
+export function simulateStream(
+  params: SimulateStreamParams,
+  snapshotCount = 10,
+): StreamSimulationResult {
+  const { amount, durationSeconds, startTime: startTimeParam } = params;
+
+  if (amount <= 0n) {
+    throw new Error('simulateStream: amount must be > 0');
+  }
+  if (durationSeconds <= 0) {
+    throw new Error('simulateStream: durationSeconds must be > 0');
+  }
+
+  const startTime = startTimeParam ?? Math.floor(Date.now() / 1000);
+  const endTime = startTime + durationSeconds;
+
+  // Integer division: flowRate stroops/second
+  const flowRate = amount / BigInt(durationSeconds);
+  // Total amount actually streamable given integer arithmetic
+  const totalAmount = flowRate * BigInt(durationSeconds);
+
+  // Build intermediate timestamps at regular intervals
+  const count = Math.max(1, snapshotCount);
+  const step = durationSeconds / (count + 1);
+
+  const timestamps = new Set<number>();
+  timestamps.add(startTime);
+  for (let i = 1; i <= count; i++) {
+    const t = startTime + Math.round(step * i);
+    if (t < endTime) {
+      timestamps.add(t);
+    }
+  }
+  timestamps.add(endTime);
+
+  const sortedTimestamps = Array.from(timestamps).sort((a, b) => a - b);
+
+  const snapshots: StreamSimulationSnapshot[] = sortedTimestamps.map((ts) => {
+    const elapsedSec = Math.max(0, Math.min(ts - startTime, durationSeconds));
+    const streamed = flowRate * BigInt(elapsedSec);
+    const remaining = totalAmount - streamed;
+    const percentComplete = totalAmount > 0n ? Number((streamed * 100n) / totalAmount) : 0;
+    return { timestamp: ts, streamed, remaining, percentComplete };
+  });
+
+  return {
+    startTime,
+    endTime,
+    durationSeconds,
+    flowRate,
+    totalAmount,
+    snapshots,
+  };
+}
+
 export interface StreamMetadataFields {
   name?: string;
   description?: string;
   tags?: string[];
   meta?: Record<string, unknown>;
 }
+
+/**
+ * Redacts Stellar secret keys (S...), mnemonics, and private keys from strings and error messages (issue #525).
+ *
+ * @param input - The string to redact secret materials from.
+ * @returns The redacted string with placeholders.
+ */
+export function redactSecretKey(input: string): string {
+  if (!input) return input;
+  let result = input.replace(/\bS[A-Z2-7]{55}\b/g, '[REDACTED_SECRET_KEY]');
+  result = result.replace(/\b(secretKey|secretSeed|privateKey|mnemonic|secret|seed)\s*[:=]\s*["']?[^"'\s,]+["']?/gi, '$1=[REDACTED_SECRET]');
+  return result;
+}
+
