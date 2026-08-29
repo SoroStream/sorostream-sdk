@@ -133,6 +133,7 @@ export {
   SelfStreamError,
   SoroStreamTransportError,
   InsecureRpcUrlError,
+  SdkNetworkError,
 } from './errors.js';
 export { assertEnvelopeUnmutated } from './xdrValidation.js';
 export { checkPeerDependencies } from './peerDependencies.js';
@@ -187,6 +188,7 @@ export type {
   WalletAdapter,
   WalletAdapterSignResult,
   FeeEstimate,
+  StreamCostBreakdown,
   VestingSchedulePoint,
   VestingScheduleResult,
   WatchClaimableOptions,

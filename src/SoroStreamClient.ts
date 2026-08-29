@@ -183,6 +183,7 @@ import type {
   GetStreamsOptions,
   BatchStreamsResult,
   ObserveStreamOptions,
+  StreamCostBreakdown,
 } from './types.js';
 import { withRetry, type RetryOptions } from './retry.js';
 import type { EventPollerOptions, StreamRetryPolicy } from './events.js';
@@ -811,7 +812,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       ? new WriteRateLimiter(options.writeRateLimit)
       : undefined;
     this.readRetry = options.readRetry ?? {};
-    this.submitRetry = options.submitRetry ?? {};
+    // Issue #523: default to transientOnly so 400/422 permanent errors are
+    // never retried. Callers can override by passing submitRetry explicitly.
+    this.submitRetry = options.submitRetry ?? { transientOnly: true };
     this.encoder = createContractEncoder(this.contract, options.contractVersion ?? 'v1');
     this.defaultFeeBump = options.feeBump ?? null;
     this.priceFeed = options.priceFeed ?? null;
@@ -3167,6 +3170,35 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   }
 
   /**
+   * Preflight-simulates a `createStream` transaction and returns a structured
+   * cost breakdown so front-ends can show users the total cost before they sign.
+   *
+   * The breakdown separates the Soroban resource fee from the base transaction
+   * fee and also expresses the total in the stream asset's denomination
+   * (stroops ÷ 10,000,000). Issue #520.
+   *
+   * @param params - Same shape as {@link createStream}'s `params`.
+   * @returns {@link StreamCostBreakdown} with `resourceFee`, `baseFee`, `totalFee`, and `totalInAsset`.
+   * @throws {Error} If `amount` is 0 or negative, or `durationSeconds` is 0 or negative.
+   */
+  async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
+    if (params.amount <= 0n) throw new Error('Amount must be > 0');
+    if (params.durationSeconds <= 0) throw new Error('Duration must be > 0');
+
+    const sender = await this.requireWalletAdapter().getPublicKey();
+    const operation = this.encoder.createStream(sender, params);
+    const estimate = await this.estimateOperationFee(operation);
+
+    const resourceFee = estimate.minResourceFee;
+    const baseFee = estimate.totalFee - estimate.minResourceFee;
+    const totalFee = estimate.totalFee;
+    // Express the total fee in the asset's denomination: stroops / 10^7.
+    const totalInAsset = (totalFee / 10_000_000).toFixed(7);
+
+    return { resourceFee, baseFee, totalFee, totalInAsset };
+  }
+
+  /**
    * Estimates the network fee for a {@link withdraw} call without submitting it.
    * @param params - Withdraw parameters.
    * @param params.streamId - ID of the stream to withdraw from.
@@ -4306,6 +4338,12 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     pagination?: PaginationParams,
     filter?: StreamFilterCriteria,
   ): Promise<Stream[] | PaginatedStreams> {
+    // Issue #522: an empty-string tag is always invalid — callers cannot
+    // distinguish "no streams for this tag" from "invalid query".
+    if (tag.trim() === '') {
+      throw new SoroStreamError('tag must not be empty');
+    }
+
     const args: xdr.ScVal[] = [nativeToScVal(tag, { type: 'string' })];
 
     if (pagination) {

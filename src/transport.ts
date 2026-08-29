@@ -1,6 +1,7 @@
 import { rpc, type Account, type Transaction, type FeeBumpTransaction } from '@stellar/stellar-sdk';
 import type { Network } from './types.js';
 import { withRetry, isTransientRpcError, type RetryOptions } from './retry.js';
+import { SdkNetworkError } from './errors.js';
 export { isTransientRpcError };
 
 /**
@@ -93,6 +94,29 @@ export interface RpcTransportAdapter {
 }
 
 /**
+ * Wraps an async RPC call so that any `SyntaxError` caused by a non-JSON
+ * response body is caught and re-thrown as {@link SdkNetworkError} with the
+ * raw body attached. Any other error propagates unchanged. Issue #521.
+ */
+async function wrapNonJsonError<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      // Stellar SDK rethrows JSON parse failures as bare SyntaxErrors.
+      // Attach whatever we know (the message contains the raw snippet in
+      // some environments) and re-throw as SdkNetworkError.
+      const raw = err.message ?? '';
+      throw new SdkNetworkError(
+        `RPC returned a non-JSON response. This usually means the endpoint is down or a proxy returned an HTML error page. Raw body: ${raw}`,
+        raw,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
  * The transport `SoroStreamClient` uses when no `transport` option is
  * provided — a thin, drop-in wrapper around `@stellar/stellar-sdk`'s
  * `rpc.Server`. Exported so custom transports can compose or delegate to it
@@ -122,9 +146,12 @@ export function createDefaultRpcTransport(
     getHealth: () => server.getHealth(),
     getLatestLedger: () => server.getLatestLedger(),
     getTransaction: (hash) => server.getTransaction(hash),
-    simulateTransaction: (tx) => server.simulateTransaction(tx),
-    prepareTransaction: (tx) => server.prepareTransaction(tx),
-    sendTransaction: (tx) => server.sendTransaction(tx),
+    // Issue #521: wrap methods that parse a JSON response body so a non-JSON
+    // reply (HTML error page, plain-text gateway message) becomes a
+    // descriptive SdkNetworkError instead of a bare SyntaxError.
+    simulateTransaction: (tx) => wrapNonJsonError(() => server.simulateTransaction(tx)),
+    prepareTransaction: (tx) => wrapNonJsonError(() => server.prepareTransaction(tx)),
+    sendTransaction: (tx) => wrapNonJsonError(() => server.sendTransaction(tx)),
     getEvents: (request) => server.getEvents(request),
   };
 }
