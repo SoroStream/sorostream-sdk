@@ -75,8 +75,9 @@ export {
 } from './utils.js';
 export type { StreamMetadataFields, SimulateStreamParams, StreamSimulationResult, StreamSimulationSnapshot } from './utils.js';
 export { templates } from './templates.js';
-export { serializeStream, deserializeStream } from './serialization.js';
+export { serializeStream, deserializeStream, buildUnsignedXdr } from './serialization.js';
 export type { SerializedStream } from './serialization.js';
+export type { BuildUnsignedXdrParams } from './types.js';
 export { getTransactionHistory, getAddressActivity } from './horizon.js';
 export type {
   StreamTransaction,

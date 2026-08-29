@@ -1630,3 +1630,44 @@ export interface StreamHealthResult {
   /** Human-readable diagnostics messages (empty when status is healthy). */
   diagnostics: string[];
 }
+
+/** Parameter options for buildUnsignedXdr helper (issue #438). */
+export interface BuildUnsignedXdrParams {
+  /** The deployed contract address (required if operation is a method name string). */
+  contractId?: string;
+  /** Source account public key (Stellar address) or Account instance. */
+  sourceAccount: string | any;
+  /** Sequence number for the transaction (default: "0"). */
+  sequenceNumber?: string | number | bigint;
+  /** Target network ("testnet" | "mainnet" | "futurenet"). */
+  network?: Network;
+  /** Network passphrase override. */
+  networkPassphrase?: string;
+  /** Base fee in stroops (default: "100"). */
+  fee?: string | number;
+  /** Transaction timeout in seconds (default: 30). */
+  timeout?: number;
+  /** Optional transaction memo string. */
+  memo?: string;
+  /** Contract version ("v1" | "v2"). */
+  contractVersion?: ContractVersion;
+
+  // Operation arguments
+  recipient?: string;
+  token?: string;
+  amount?: bigint | string | number;
+  durationSeconds?: number;
+  startTime?: number;
+  cliffSeconds?: number;
+  autoRenew?: boolean;
+  namespace?: string;
+  streamId?: string;
+  sender?: string;
+  newFlowRate?: bigint | string | number;
+  newRecipient?: string;
+  operator?: string;
+  approved?: boolean;
+  delegate?: string;
+  delegator?: string;
+  [key: string]: any;
+}

@@ -2300,6 +2300,35 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    * console.log("Stream created:", streamId, txHash);
    * ```
    */
+
+  /**
+   * Constructs and serialises an unsigned transaction XDR for offline/air-gapped signing (issue #438).
+   *
+   * @param operation - Operation name string or xdr.Operation instance.
+   * @param params - Optional parameters and arguments for the operation.
+   * @returns Unsigned transaction envelope as a base64 XDR string.
+   */
+  async buildUnsignedXdr(
+    operation: xdr.Operation | string,
+    params?: Partial<BuildUnsignedXdrParams>,
+  ): Promise<string> {
+    const sender = params?.sourceAccount
+      ? (typeof params.sourceAccount === "string" ? params.sourceAccount : params.sourceAccount.accountId())
+      : (this.walletAdapter ? await this.walletAdapter.getPublicKey() : undefined);
+
+    if (!sender) {
+      throw new Error("sourceAccount or a connected wallet adapter is required to build unsigned XDR");
+    }
+
+    return buildUnsignedXdr(operation, {
+      contractId: this.contract.address().toString(),
+      network: this.network,
+      contractVersion: params?.contractVersion ?? 'v1',
+      sourceAccount: sender,
+      ...params,
+    });
+  }
+
   async createStream(
     params: CreateStreamParams,
     signal?: AbortSignal,
