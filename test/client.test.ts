@@ -728,6 +728,10 @@ describe('SoroStreamClient input validation', () => {
       InsufficientAmountError,
     );
   });
+
+  it('rejects topUpStream with zero amount (InsufficientAmountError)', async () => {
+    await expect(client.topUpStream('1', 0n)).rejects.toThrow(InsufficientAmountError);
+  });
 });
 
 // ── Typed error tests ────────────────────────────────────────────────────────

@@ -78,6 +78,16 @@ describe('State machine – valid transitions', () => {
     expect(after.endTime).toBeGreaterThan(before.endTime);
     expect(after.deposit).toBeGreaterThan(before.deposit);
   });
+
+  it('Active → topUpStream positional form stays Active and extends endTime', async () => {
+    const id = seedStream(mock);
+    const before = await mock.getStream(id);
+    await mock.topUpStream(id, 1_000_000n);
+    const after = await mock.getStream(id);
+    expect(after.status).toBe('Active');
+    expect(after.endTime).toBeGreaterThan(before.endTime);
+    expect(after.deposit).toBeGreaterThan(before.deposit);
+  });
 });
 
 // ── Invalid transitions – Cancelled state ────────────────────────────────────

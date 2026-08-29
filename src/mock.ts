@@ -334,6 +334,24 @@ export class MockSoroStreamClient {
     };
   }
 
+  /**
+   * Tops up a stream to extend its duration, given a positional `streamId` and
+   * `amount`.
+   *
+   * Convenience wrapper around {@link topUp} so the mock mirrors the
+   * `SoroStreamClient.topUpStream` API.
+   *
+   * @param streamId - ID of the stream to top up.
+   * @param amount - Additional amount to deposit in stroops (must be > 0).
+   * @returns `{ txHash, newEndTime }` — confirming transaction hash and updated end time.
+   */
+  async topUpStream(
+    streamId: string,
+    amount: bigint,
+  ): Promise<{ txHash: string; newEndTime: Date }> {
+    return this.topUp({ streamId, amount });
+  }
+
   async batchCancel(streamIds: string[], _batchSize = 8): Promise<BatchCancelResult[]> {
     const results: BatchCancelResult[] = [];
     for (const id of streamIds) {
