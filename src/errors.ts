@@ -1,10 +1,19 @@
+import { redactSecretKey } from './utils.js';
+
 // See ERRORS.md for cause, typical trigger, and recovery guidance for each
 // error class below, and which SoroStreamClient methods throw them.
 
 export class SoroStreamError extends Error {
   constructor(message: string) {
-    super(message);
+    super(redactSecretKey(message));
     this.name = 'SoroStreamError';
+  }
+}
+
+export class ConnectionPoolExhaustedError extends SoroStreamError {
+  constructor(message?: string) {
+    super(message ?? 'Connection pool exhausted: maximum subscription limit reached across all connections');
+    this.name = 'ConnectionPoolExhaustedError';
   }
 }
 
@@ -372,5 +381,27 @@ export class WalletConnectSessionExpiredError extends SoroStreamError {
   constructor(message?: string) {
     super(message || 'WalletConnect session expired');
     this.name = 'WalletConnectSessionExpiredError';
+  }
+}
+
+/**
+ * Thrown when the Soroban RPC endpoint returns a non-JSON response body
+ * (e.g. an HTML error page, a plain-text gateway message, or a 502 from a
+ * proxy). The raw response body and HTTP status code are attached so callers
+ * can log or display a meaningful message instead of a bare `SyntaxError`.
+ *
+ * Issue #521.
+ */
+export class SdkNetworkError extends SoroStreamError {
+  /** Raw response body text returned by the server. */
+  readonly rawBody: string;
+  /** HTTP status code, if available. */
+  readonly statusCode: number | undefined;
+
+  constructor(message: string, rawBody: string, statusCode?: number) {
+    super(message);
+    this.name = 'SdkNetworkError';
+    this.rawBody = rawBody;
+    this.statusCode = statusCode;
   }
 }

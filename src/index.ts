@@ -13,7 +13,7 @@ export type {
   SoroStreamAdapters,
 } from './adapters.js';
 
-export { createDefaultRpcTransport, createRetryingRpcTransport } from './transport.js';
+export { createDefaultRpcTransport, createRetryingRpcTransport, createPooledRpcTransport } from './transport.js';
 export type {
   RpcTransportAdapter,
   RpcTransportInitContext,
@@ -71,11 +71,13 @@ export {
   encodeStreamId,
   decodeStreamId,
   getStreamHealth,
+  simulateStream,
 } from './utils.js';
-export type { StreamMetadataFields } from './utils.js';
+export type { StreamMetadataFields, SimulateStreamParams, StreamSimulationResult, StreamSimulationSnapshot } from './utils.js';
 export { templates } from './templates.js';
-export { serializeStream, deserializeStream } from './serialization.js';
+export { serializeStream, deserializeStream, buildUnsignedXdr } from './serialization.js';
 export type { SerializedStream } from './serialization.js';
+export type { BuildUnsignedXdrParams } from './types.js';
 export { getTransactionHistory, getAddressActivity } from './horizon.js';
 export type {
   StreamTransaction,
@@ -132,6 +134,7 @@ export {
   SelfStreamError,
   SoroStreamTransportError,
   InsecureRpcUrlError,
+  SdkNetworkError,
 } from './errors.js';
 export { assertEnvelopeUnmutated } from './xdrValidation.js';
 export { checkPeerDependencies } from './peerDependencies.js';
@@ -187,6 +190,7 @@ export type {
   WalletAdapter,
   WalletAdapterSignResult,
   FeeEstimate,
+  StreamCostBreakdown,
   VestingSchedulePoint,
   VestingScheduleResult,
   WatchClaimableOptions,
@@ -254,19 +258,25 @@ export type {
   OperationExplanation,
   BalanceDelta,
   SoroStreamClientConfig,
+  CacheConfigOptions,
   RecipientTrustScore,
   RecipientTrustScoreProvider,
   StreamHealthStatus,
   StreamHealthResult,
+  SoroStreamEmitter,
 } from './types.js';
 
-export { RecipientValidationError } from './errors.js';
+export { ConnectionPoolExhaustedError, RecipientValidationError } from './errors.js';
+export { SanitizingLogger } from './logger.js';
 export {
   StreamStateMachine,
   InvalidStateTransitionError,
 } from './state-machine.js';
 export type { StreamState, StreamAction } from './state-machine.js';
 export {
+  AlbedoWalletAdapter,
+  createAlbedoWalletAdapter,
+  createAlbedoAdapter,
   LobstrWalletAdapter,
   createLobstrWalletAdapter,
   createLobstrAdapter,
@@ -274,7 +284,7 @@ export {
   createLedgerWalletAdapter,
   createLedgerAdapter,
 } from './wallet.js';
-export type { LobstrWalletAdapterConfig, LedgerWalletAdapterConfig, RequestOptions } from './types.js';
+export type { AlbedoWalletAdapterConfig, LobstrWalletAdapterConfig, LedgerWalletAdapterConfig, RequestOptions } from './types.js';
 export { PluginRegistry } from './pluginRegistry.js';
 export { getPortfolioStats } from './portfolioAnalytics.js';
 export { scheduleFeeBumpMonitor } from './feeBump.js';
