@@ -1,5 +1,6 @@
 import { rpc } from '@stellar/stellar-sdk';
 import { EventPoller, unrefTimer } from './events.js';
+import { ConnectionPoolExhaustedError } from './errors.js';
 
 export type PoolEventType = 'pool:full' | 'pool:reconnect' | 'pool:drain';
 
@@ -63,8 +64,9 @@ export class ConnectionPool {
   /**
    * Acquires the least-loaded event poller from the pool.
    * Call the returned `release` function when the subscription ends.
+   * Accepts an optional `AbortSignal` to automatically release the slot on abort.
    */
-  acquirePoller(): { poller: EventPoller; release: () => void } {
+  acquirePoller(options?: { signal?: AbortSignal }): { poller: EventPoller; release: () => void } {
     let best = this.slots[0]!;
     for (const slot of this.slots) {
       if (slot.subscriptions < best.subscriptions) best = slot;
@@ -72,6 +74,9 @@ export class ConnectionPool {
 
     if (best.subscriptions >= this.maxSubs) {
       this._emit({ type: 'pool:full' });
+      throw new ConnectionPoolExhaustedError(
+        `Connection pool exhausted: all ${this.slots.length} connection slots reached capacity (${this.maxSubs} subs/connection)`
+      );
     }
 
     best.subscriptions++;
@@ -79,16 +84,33 @@ export class ConnectionPool {
 
     let released = false;
     const slot = best;
+    const release = () => {
+      if (released) return;
+      released = true;
+      slot.subscriptions = Math.max(0, slot.subscriptions - 1);
+      if (options?.signal && abortHandler) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
+      if (this.slots.every((s) => s.subscriptions === 0)) {
+        this._emit({ type: 'pool:drain' });
+      }
+    };
+
+    let abortHandler: (() => void) | undefined;
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        release();
+      } else {
+        abortHandler = () => {
+          release();
+        };
+        options.signal.addEventListener('abort', abortHandler, { once: true });
+      }
+    }
+
     return {
       poller: slot.poller,
-      release: () => {
-        if (released) return;
-        released = true;
-        slot.subscriptions = Math.max(0, slot.subscriptions - 1);
-        if (this.slots.every((s) => s.subscriptions === 0)) {
-          this._emit({ type: 'pool:drain' });
-        }
-      },
+      release,
     };
   }
 

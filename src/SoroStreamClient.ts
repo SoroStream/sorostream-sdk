@@ -815,9 +815,20 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     this.encoder = createContractEncoder(this.contract, options.contractVersion ?? 'v1');
     this.defaultFeeBump = options.feeBump ?? null;
     this.priceFeed = options.priceFeed ?? null;
-    // Default TTL of 5 seconds: short enough to stay reasonably fresh,
-    // long enough to absorb bursts of concurrent reads for the same stream.
-    this.claimableCache = new Cache<string, bigint>(5_000);
+    const cacheTtl = options.cacheOptions?.ttlMs ?? 5_000;
+    const cacheMaxSize = options.cacheOptions?.maxSize ?? 1_000;
+    this.claimableCache = new Cache<string, bigint>(cacheTtl, cacheMaxSize);
+    if (options.cacheOptions) {
+      if (options.cacheOptions.enabled === false) {
+        this.streamCache.setTtl(0);
+        this.streamCache.setMaxSize(0);
+        this.claimableCache.setTtl(0);
+        this.claimableCache.setMaxSize(0);
+      } else {
+        this.streamCache.setTtl(cacheTtl);
+        this.streamCache.setMaxSize(cacheMaxSize);
+      }
+    }
     // Issue #426: one deduplication layer for every read path. Enabled by
     // default — pass `{ dedupeRequests: false }` to opt out.
     this.requestDedup = new RequestDeduplicator({
@@ -1602,6 +1613,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   clearStreamCache(streamId?: string): void {
     if (streamId === undefined) {
       this.streamCache.clear();
+      this.claimableCache.clear();
       this.senderCache.clear();
       this.recipientCache.clear();
       this.eventBus.emit('cacheInvalidated', {
@@ -1612,6 +1624,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     }
     // Cache keys are network-prefixed to defend against mid-flight network
     // switches. Remove entries for every known network.
+    this.claimableCache.delete(streamId);
     for (const key of ['mainnet', 'testnet', 'futurenet'] as Network[]) {
       this.streamCache.delete(`${key}:${streamId}`);
       this.persistentStreamCache?.delete(key, streamId);
@@ -2995,6 +3008,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       options?.memo,
       options?.timeoutMs ?? options?.timeout,
     );
+    this.clearStreamCache(params.streamId);
     return { txHash };
   }
 
@@ -3024,6 +3038,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       options?.memo,
       options?.timeoutMs ?? options?.timeout,
     );
+    this.clearStreamCache(params.streamId);
     return { txHash };
   }
 
@@ -3053,6 +3068,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       options?.memo,
       options?.timeoutMs ?? options?.timeout,
     );
+    this.clearStreamCache(params.streamId);
     return { txHash };
   }
 
@@ -3328,6 +3344,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   subscribeEvents(
     filter: StreamEventFilter,
     callback: (event: StreamEvent<TEventData>) => void,
+    options?: { signal?: AbortSignal },
   ): StreamSubscription {
     const key = `${filter.streamId ?? '*'}:${filter.sender ?? '*'}:${filter.recipient ?? '*'}:${Date.now()}`;
     const matchFn = (event: StreamEvent): boolean => {
@@ -3337,28 +3354,55 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       return true;
     };
 
+    let subscription: StreamSubscription;
+
     if (this.pool) {
-      const { poller, release } = this.pool.acquirePoller();
+      const { poller, release } = this.pool.acquirePoller({ signal: options?.signal });
       this.poolReleases.set(key, release);
       const sub = poller.subscribe(key, {
         filter: matchFn,
         callback: (event) => callback(event as StreamEvent<TEventData>),
       });
-      return {
+      subscription = {
         unsubscribe: () => {
           sub.unsubscribe();
           const rel = this.poolReleases.get(key);
           rel?.();
           this.poolReleases.delete(key);
+          if (options?.signal && abortHandler) {
+            options.signal.removeEventListener('abort', abortHandler);
+          }
+        },
+      };
+    } else {
+      const poller = this.getEventPoller();
+      const sub = poller.subscribe(key, {
+        filter: matchFn,
+        callback: (event) => callback(event as StreamEvent<TEventData>),
+      });
+      subscription = {
+        unsubscribe: () => {
+          sub.unsubscribe();
+          if (options?.signal && abortHandler) {
+            options.signal.removeEventListener('abort', abortHandler);
+          }
         },
       };
     }
 
-    const poller = this.getEventPoller();
-    return poller.subscribe(key, {
-      filter: matchFn,
-      callback: (event) => callback(event as StreamEvent<TEventData>),
-    });
+    let abortHandler: (() => void) | undefined;
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        subscription.unsubscribe();
+      } else {
+        abortHandler = () => {
+          subscription.unsubscribe();
+        };
+        options.signal.addEventListener('abort', abortHandler, { once: true });
+      }
+    }
+
+    return subscription;
   }
 
   /**
@@ -3922,6 +3966,17 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         return value;
       },
     );
+  }
+
+  /**
+   * Returns the current accrued claimable balance for a stream.
+   * Alias of {@link getClaimable} (issue #528).
+   *
+   * @param streamId - ID of the stream to check.
+   * @returns Accrued balance in stroops.
+   */
+  async getAccruedBalance(streamId: string): Promise<bigint> {
+    return this.getClaimable(streamId);
   }
 
   /**
