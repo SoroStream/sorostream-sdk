@@ -1361,6 +1361,16 @@ export interface KmsWalletAdapterConfig {
   sign: (payload: Uint8Array) => Promise<Uint8Array>;
 }
 
+/** Configuration options for AlbedoWalletAdapter (issue #430). */
+export interface AlbedoWalletAdapterConfig {
+  /** Optional public key pre-configured for the adapter. */
+  publicKey?: string;
+  /** Optional custom Albedo provider object or window.albedo reference. */
+  provider?: any;
+  /** Optional network override (e.g. "testnet" | "mainnet"). */
+  network?: Network;
+}
+
 /** Configuration options for LobstrWalletAdapter (issue #431). */
 export interface LobstrWalletAdapterConfig {
   /** Optional public key pre-configured for the adapter. */

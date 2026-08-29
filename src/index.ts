@@ -272,6 +272,9 @@ export {
 } from './state-machine.js';
 export type { StreamState, StreamAction } from './state-machine.js';
 export {
+  AlbedoWalletAdapter,
+  createAlbedoWalletAdapter,
+  createAlbedoAdapter,
   LobstrWalletAdapter,
   createLobstrWalletAdapter,
   createLobstrAdapter,
@@ -279,7 +282,7 @@ export {
   createLedgerWalletAdapter,
   createLedgerAdapter,
 } from './wallet.js';
-export type { LobstrWalletAdapterConfig, LedgerWalletAdapterConfig, RequestOptions } from './types.js';
+export type { AlbedoWalletAdapterConfig, LobstrWalletAdapterConfig, LedgerWalletAdapterConfig, RequestOptions } from './types.js';
 export { PluginRegistry } from './pluginRegistry.js';
 export { getPortfolioStats } from './portfolioAnalytics.js';
 export { scheduleFeeBumpMonitor } from './feeBump.js';
