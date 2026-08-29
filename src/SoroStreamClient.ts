@@ -129,6 +129,7 @@ import type {
   CancelStreamParams,
   CloneStreamOverrides,
   CreateStreamParams,
+  CreateStreamDryRunResult,
   FeeEstimate,
   Network,
   PaginatedStreams,
@@ -2333,7 +2334,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     params: CreateStreamParams,
     signal?: AbortSignal,
     options?: WriteOptions,
-  ): Promise<{ streamId: string; txHash: string }> {
+  ): Promise<{ streamId: string; txHash: string } | CreateStreamDryRunResult> {
     return this.runWithMiddleware('createStream', [params], async () => {
       if (params.amount <= 0n) throw new InsufficientAmountError();
       await this.validateCliff(params.cliffSeconds ?? 0);
@@ -2427,6 +2428,23 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
             { address: params.recipient, token: params.token, delta: params.amount },
           ],
         ) as unknown as { streamId: string; txHash: string };
+      }
+
+      // Issue #439: dryRun mode — validate parameters and simulate without broadcasting
+      if (options?.dryRun || (params as any).dryRun) {
+        const simResult = await this.simulateOp(operation);
+        const isSuccess = rpc.Api.isSimulationSuccess(simResult);
+        const minFee = isSuccess
+          ? String((simResult as rpc.Api.SimulateTransactionSuccessResponse).minResourceFee ?? BASE_FEE)
+          : BASE_FEE;
+        return {
+          dryRun: true,
+          simulated: isSuccess,
+          expectedFee: minFee,
+          minResourceFee: minFee,
+          result: simResult,
+          params,
+        } as unknown as { streamId: string; txHash: string };
       }
 
       const feeBump = this.resolveFeeBump(options?.feeBump);
@@ -4821,7 +4839,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       ...overrides,
     };
 
-    return this.createStream(params, signal, options);
+    return (await this.createStream(params, signal, options)) as { streamId: string; txHash: string };
   }
 
   // ── Bulk operations ───────────────────────────────────────────────────────
