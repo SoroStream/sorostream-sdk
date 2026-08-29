@@ -114,6 +114,34 @@ export class ConnectionPool {
     };
   }
 
+
+  /**
+   * Acquires the least-loaded RPC server instance from the pool for executing a request (issue #435).
+   */
+  acquireServer(): { server: rpc.Server; release: () => void } {
+    let best = this.slots[0]!;
+    for (const slot of this.slots) {
+      if (slot.subscriptions < best.subscriptions) best = slot;
+    }
+
+    best.subscriptions++;
+    best.lastActive = Date.now();
+
+    let released = false;
+    const slot = best;
+    return {
+      server: slot.server,
+      release: () => {
+        if (released) return;
+        released = true;
+        slot.subscriptions = Math.max(0, slot.subscriptions - 1);
+        if (this.slots.every((s) => s.subscriptions === 0)) {
+          this._emit({ type: "pool:drain" });
+        }
+      },
+    };
+  }
+
   /** Returns current pool connection statistics. */
   getStats(): { total: number; active: number; idle: number } {
     const active = this.slots.filter((s) => s.subscriptions > 0).length;

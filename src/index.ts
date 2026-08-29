@@ -13,7 +13,7 @@ export type {
   SoroStreamAdapters,
 } from './adapters.js';
 
-export { createDefaultRpcTransport, createRetryingRpcTransport } from './transport.js';
+export { createDefaultRpcTransport, createRetryingRpcTransport, createPooledRpcTransport } from './transport.js';
 export type {
   RpcTransportAdapter,
   RpcTransportInitContext,

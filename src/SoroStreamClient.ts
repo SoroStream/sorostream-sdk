@@ -38,7 +38,7 @@ import type { StorageAdapter, SoroStreamAdapters, FetchAdapter } from './adapter
 import { SoroStreamVersionError } from './errors.js';
 import type { TransactionHistoryOptions, TransactionHistoryPage } from './horizon.js';
 import { getTransactionHistory, getAddressActivity } from './horizon.js';
-import { createDefaultRpcTransport, createRetryingRpcTransport } from './transport.js';
+import { createDefaultRpcTransport, createRetryingRpcTransport, createPooledRpcTransport, type PooledRpcTransportOptions } from './transport.js';
 import type { RpcTransportAdapter } from './transport.js';
 import { createRpcCompatTransport } from './rpc-compat.js';
 import type { RpcVersionDetectedPayload } from './rpc-compat.js';
@@ -294,6 +294,14 @@ export interface SoroStreamClientOptions {
    * When set, subscriptions are distributed across `poolSize` connections.
    * Issue #179.
    */
+  /**
+   * Enables connection pooling for RPC requests across concurrent calls (issue #435).
+   */
+  useConnectionPooling?: boolean;
+  /**
+   * Sizing and configuration options for RPC connection pooling.
+   */
+  pooledRpcTransportOptions?: PooledRpcTransportOptions;
   poolSize?: number;
   /**
    * Maximum concurrent subscriptions per pooled connection (default: 10).
@@ -789,15 +797,21 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     this.customTransport = options.transport ?? null;
     this.server =
       this.customTransport ??
-      createRpcCompatTransport(options.rpcUrl ?? RPC_URLS[this.network], {
-        // Issue #272: "auto" is the default so existing integrations pick up
-        // RPC v2 support transparently without any config change.
-        rpcVersion: options.rpcVersion ?? 'auto',
-        onVersionDetected: (payload: RpcVersionDetectedPayload) => {
-          this.detectedRpcVersion = payload.version;
-          this.eventBus.emit('rpcVersionDetected', payload);
-        },
-      });
+      (options.useConnectionPooling
+        ? createPooledRpcTransport(options.rpcUrl ?? RPC_URLS[this.network], {
+            poolSize: options.poolSize ?? options.maxConnections ?? 4,
+            idleTimeoutMs: options.idleTimeoutMs,
+            ...options.pooledRpcTransportOptions,
+          })
+        : createRpcCompatTransport(options.rpcUrl ?? RPC_URLS[this.network], {
+            // Issue #272: "auto" is the default so existing integrations pick up
+            // RPC v2 support transparently without any config change.
+            rpcVersion: options.rpcVersion ?? 'auto',
+            onVersionDetected: (payload: RpcVersionDetectedPayload) => {
+              this.detectedRpcVersion = payload.version;
+              this.eventBus.emit('rpcVersionDetected', payload);
+            },
+          }));
     if (options.rpcRetry) {
       this.server = createRetryingRpcTransport(this.server, options.rpcRetry);
     }
