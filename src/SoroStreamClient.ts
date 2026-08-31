@@ -48,6 +48,8 @@ import { PriorityRequestQueue } from './request-queue.js';
 import { RequestDeduplicator, dedupKey, type RequestDedupStats } from './requestDeduplicator.js';
 import { LocalStorageStreamCache } from './streamStateCache.js';
 import { SoroStreamObservable, shareLatest } from './observable.js';
+import { NoopLogger } from './logger.js';
+import type { Logger } from './logger.js';
 
 export type { SoroStreamConfigUpdate, ConfigUpdatedEvent } from './types.js';
 import { StreamMonitor } from './stream-monitor.js';
@@ -640,6 +642,8 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   private readonly auditLogEnabled: boolean;
   // Issue #389: caller-supplied audit logger
   private readonly auditLogger: import('./types.js').AuditLogger | undefined;
+  // Issue #437: structured logger for SDK diagnostic messages
+  private readonly logger: Logger;
   // Issue #391: timestamp of the most recent successful RPC call (ms)
   private lastRpcTimestampMs: number | null = null;
   // Issue #270: telemetry opt-out flag
@@ -871,6 +875,8 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     this.batchingOptions = options.batchingOptions;
     this.auditLogEnabled = options.auditLog ?? false;
     this.auditLogger = options.auditLogger;
+    // Issue #437: structured logger — default to NoopLogger when not provided
+    this.logger = options.logger ?? new NoopLogger();
     this.telemetryEnabled = options.telemetry !== false;
     this.storageAdapter = options.adapters?.storage ?? getDefaultStorageAdapter();
     this.fetchAdapter = options.adapters?.fetch ?? getDefaultFetchAdapter() ?? fetch;
@@ -2339,6 +2345,8 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       if (params.amount <= 0n) throw new InsufficientAmountError();
       await this.validateCliff(params.cliffSeconds ?? 0);
 
+      this.logger.info(`createStream: creating stream for recipient ${params.recipient}, amount=${params.amount}, duration=${params.durationSeconds}s`);
+
       // Issue #231: Warn (or throw when strict:true) if the caller provides a
       // nonce field but the contract does not support it.
       if (params.nonce !== undefined) {
@@ -2563,6 +2571,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     const recipient = await this.requireWalletAdapter().getPublicKey();
     const claimable = await this.getClaimable(params.streamId);
 
+    this.logger.info(`withdraw: stream ${params.streamId}, claimable=${claimable}`);
     const operation = this.encoder.withdraw(params.streamId, recipient);
 
     // Issue #268: explain mode — return dry-run description without submitting.
@@ -3478,6 +3487,8 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       return true;
     };
 
+    this.logger.debug(`subscribeEvents: new subscription key=${key}`);
+
     let subscription: StreamSubscription;
 
     if (this.pool) {
@@ -3637,6 +3648,56 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    */
   onWithdrawalMade(callback: (event: StreamEvent<TEventData>) => void): StreamSubscription {
     return this.on('WithdrawalMade', callback);
+  }
+
+  /**
+   * Merges events from multiple streams into a single chronological activity
+   * feed (issue #441).
+   *
+   * Subscribes to each stream ID's events using the existing event-polling
+   * infrastructure. Whenever an event arrives for any of the specified streams
+   * it is wrapped into a `StreamActivityFeedEntry` and forwarded to
+   * `callback`.
+   *
+   * @param streamIds - Stream IDs to watch.
+   * @param callback  - Invoked with each activity feed entry as events arrive.
+   * @returns A `StreamSubscription` — call `.unsubscribe()` to tear down all
+   *          per-stream subscriptions at once.
+   *
+   * @example
+   * ```ts
+   * const feed = client.subscribeToActivityFeed(['42', '43'], (entry) => {
+   *   console.log(`[${entry.type}] stream ${entry.streamId} @ ledger ${entry.ledger}`);
+   * });
+   * // later:
+   * feed.unsubscribe();
+   * ```
+   */
+  subscribeToActivityFeed(
+    streamIds: string[],
+    callback: (entry: import('./types.js').StreamActivityFeedEntry) => void,
+  ): StreamSubscription {
+    const subscriptions: StreamSubscription[] = streamIds.map((streamId) =>
+      this.subscribeEvents({ streamId }, (event) => {
+        const entry: import('./types.js').StreamActivityFeedEntry = {
+          streamId: event.streamId,
+          type: event.type,
+          txHash: event.txHash,
+          ledger: event.ledger,
+          timestamp: event.timestamp,
+          data: event.data as Record<string, unknown>,
+        };
+        callback(entry);
+      }),
+    );
+
+    return {
+      unsubscribe(): void {
+        for (const sub of subscriptions) {
+          sub.unsubscribe();
+        }
+      },
+    };
   }
 
   /**
@@ -3860,6 +3921,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     return this.requestDedup.dedupe(
       dedupKey('getStream', networkAtCallTime, streamId),
       async () => {
+        this.logger.debug(`getStream: fetching stream ${streamId} via RPC`);
         const result = await withRetry(
           () =>
             this.simulateOp(
@@ -3869,6 +3931,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         );
 
         if (rpc.Api.isSimulationError(result)) {
+          this.logger.debug(`getStream: stream ${streamId} not found`);
           throw new StreamNotFoundError(streamId);
         }
 
@@ -3884,6 +3947,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         if (networkAtCallTime === this.network) {
           this.streamCache.set(cacheKey, stream);
         }
+        this.logger.debug(`getStream: stream ${streamId} fetched successfully`);
         return stream;
       },
     );

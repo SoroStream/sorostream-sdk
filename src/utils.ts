@@ -2171,3 +2171,36 @@ export function redactSecretKey(input: string): string {
   return result;
 }
 
+
+// ── Issue #441: subscribeToActivityFeed standalone utility ───────────────────
+
+/**
+ * Standalone utility that merges events from multiple streams into a single
+ * activity feed — useful for non-OOP usage patterns.
+ *
+ * Internally delegates to `client.subscribeToActivityFeed`, making this a
+ * thin convenience wrapper.
+ *
+ * @param client    - A connected `SoroStreamClient` instance.
+ * @param streamIds - Stream IDs to watch.
+ * @param callback  - Invoked with each activity feed entry as events arrive.
+ * @returns A `StreamSubscription` — call `.unsubscribe()` to stop watching.
+ *
+ * @example
+ * ```ts
+ * import { subscribeToActivityFeed } from '@sorostream/sdk';
+ *
+ * const feed = subscribeToActivityFeed(client, ['42', '43'], (entry) => {
+ *   console.log(`[${entry.type}] stream ${entry.streamId}`);
+ * });
+ * // later:
+ * feed.unsubscribe();
+ * ```
+ */
+export function subscribeToActivityFeed(
+  client: { subscribeToActivityFeed(streamIds: string[], callback: (entry: import('./types.js').StreamActivityFeedEntry) => void): import('./types.js').StreamSubscription },
+  streamIds: string[],
+  callback: (entry: import('./types.js').StreamActivityFeedEntry) => void,
+): import('./types.js').StreamSubscription {
+  return client.subscribeToActivityFeed(streamIds, callback);
+}

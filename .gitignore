@@ -32,14 +32,12 @@ yarn-error.log*
 .env
 .env.*
 
-# Bun lock file (local only)
+# lock files (keep package-lock.json, ignore others)
 bun.lockb
+yarn.lock
+pnpm-lock.yaml
 
-# vitest / jest snapshot files — generated automatically, not committed
-test/__snapshots__/
-**/__snapshots__/
-*.snap
-
-# integrity manifest (generated during build, not committed)
-dist/integrity-manifest.json
-
+# temp files
+*.tmp
+*.temp
+.cache/
