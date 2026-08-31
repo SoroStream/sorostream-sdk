@@ -34,7 +34,12 @@ yarn-error.log*
 
 # Bun lock file (local only)
 bun.lockb
+
 # vitest / jest snapshot files — generated automatically, not committed
 test/__snapshots__/
 **/__snapshots__/
 *.snap
+
+# integrity manifest (generated during build, not committed)
+dist/integrity-manifest.json
+

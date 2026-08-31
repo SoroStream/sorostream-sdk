@@ -1,6 +1,6 @@
 // ── Issue #338: Plugin registry with ordered execution ──────────────────────
 
-import type { SoroStreamPlugin, IPluginRegistry } from './types.js';
+import type { SoroStreamPlugin, IPluginRegistry, MiddlewareContext } from './types.js';
 
 /**
  * Plugin registry with topological ordering via before/after constraints.
@@ -48,6 +48,47 @@ export class PluginRegistry implements IPluginRegistry {
 
   unregister(plugin: SoroStreamPlugin): boolean {
     return this.entries.delete(plugin);
+  }
+
+  /**
+   * Runs the `before` hook on all registered plugins in topological order.
+   * If a plugin's hook throws, execution stops and the error propagates,
+   * preventing the downstream operation from running.
+   *
+   * @param operation - Name of the SDK method being invoked (e.g. `"createStream"`).
+   * @param context   - {@link MiddlewareContext} passed to each hook.
+   */
+  async runBefore(operation: string, context: MiddlewareContext): Promise<void> {
+    const plugins = this.list();
+    for (const plugin of plugins) {
+      if (typeof plugin.before === 'function') {
+        await plugin.before({ ...context, method: operation });
+      }
+    }
+  }
+
+  /**
+   * Runs the `after` hook on all registered plugins in topological order.
+   * Errors thrown by individual hooks are caught and do not prevent subsequent
+   * hooks from running; they are surfaced as console warnings to avoid
+   * disrupting the caller's result.
+   *
+   * @param operation - Name of the SDK method that just completed.
+   * @param context   - {@link MiddlewareContext} passed to each hook.
+   * @param result    - Return value produced by the operation.
+   */
+  async runAfter(operation: string, context: MiddlewareContext, result: unknown): Promise<void> {
+    const plugins = this.list();
+    for (const plugin of plugins) {
+      if (typeof plugin.after === 'function') {
+        try {
+          await plugin.after({ ...context, method: operation }, result);
+        } catch (err) {
+          // After-hooks should not break the caller's result
+          console.warn('[SoroStream SDK] Plugin after-hook threw an error:', err);
+        }
+      }
+    }
   }
 
   /** Returns all registered plugins in topological order. */

@@ -48,6 +48,8 @@
   },
   "scripts": {
     "build": "tsup src/index.ts src/wallets.ts src/mock.ts src/testing.ts src/simulator.ts --format cjs,esm --dts --clean && npm run validate-exports",
+    "postbuild": "npm run generate-integrity",
+    "generate-integrity": "node scripts/generate-integrity-manifest.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
