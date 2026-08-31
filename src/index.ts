@@ -25,7 +25,8 @@ export { MockSoroStreamClient, SoroStreamSandbox } from './mock.js';
 export { StreamSimulator } from './simulator.js';
 export type { StreamExpiryCallback } from './simulator.js';
 
-export { WebhookForwarder } from './webhook.js';
+export { WebhookForwarder, WebhookEmitter } from './webhook.js';
+export type { WebhookEmitterConfig, WebhookEmitterPayload } from './webhook.js';
 export {
   toStroops,
   formatUSDC,
@@ -72,6 +73,7 @@ export {
   decodeStreamId,
   getStreamHealth,
   simulateStream,
+  subscribeToActivityFeed,
 } from './utils.js';
 export type { StreamMetadataFields, SimulateStreamParams, StreamSimulationResult, StreamSimulationSnapshot } from './utils.js';
 export { templates } from './templates.js';
@@ -238,6 +240,7 @@ export type {
   StreamActivityEntry,
   StreamActivityType,
   GetActivityLogOptions,
+  StreamActivityFeedEntry,
   StreamFilterCriteria,
   StreamFilter,
   StreamSortField,
@@ -267,7 +270,8 @@ export type {
 } from './types.js';
 
 export { ConnectionPoolExhaustedError, RecipientValidationError } from './errors.js';
-export { SanitizingLogger } from './logger.js';
+export { SanitizingLogger, NoopLogger, ConsoleLogger, createLogger } from './logger.js';
+export type { Logger, LogLevel, CreateLoggerOptions } from './logger.js';
 export {
   StreamStateMachine,
   InvalidStateTransitionError,
