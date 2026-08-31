@@ -1161,6 +1161,26 @@ export interface GetActivityLogOptions {
   cursor?: string;
 }
 
+/**
+ * A single entry in a merged multi-stream activity feed (issue #441).
+ * Produced by `subscribeToActivityFeed` when an event arrives for any of the
+ * watched streams.
+ */
+export interface StreamActivityFeedEntry {
+  /** ID of the stream that emitted this event. */
+  streamId: string;
+  /** Type of on-chain event. */
+  type: StreamEventType;
+  /** Transaction hash. */
+  txHash: string;
+  /** Raw ledger number. */
+  ledger: number;
+  /** Unix timestamp (ms) of the ledger close. */
+  timestamp: number;
+  /** Event-specific data payload. */
+  data: Record<string, unknown>;
+}
+
 // ── Issue #73: Stream snapshot export/import ─────────────────────────────────
 
 /** A history entry recording a past event on a stream. */
@@ -1568,6 +1588,24 @@ export interface SoroStreamClientConfig {
   transport?: any;
   /** RPC version setting ('v1' | 'v2' | 'auto'). */
   rpcVersion?: 'v1' | 'v2' | 'auto';
+  /**
+   * Optional structured logger for SDK diagnostic messages (issue #437).
+   *
+   * When provided, the SDK emits `debug` / `info` messages for RPC calls,
+   * retries, and state transitions through this logger. Use `createLogger()`
+   * from `@sorostream/sdk` to construct a ready-to-use logger, or pass any
+   * object that satisfies the `Logger` interface (pino, winston, console, …).
+   *
+   * @example
+   * ```ts
+   * import { SoroStreamClient, createLogger } from '@sorostream/sdk';
+   * const client = new SoroStreamClient({
+   *   contractId: '...',
+   *   logger: createLogger({ minLevel: 'debug' }),
+   * });
+   * ```
+   */
+  logger?: import('./logger.js').Logger;
 }
 
 /** Portfolio statistics aggregated across all of an address's streams. Issue #336. */
