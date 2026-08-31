@@ -36,6 +36,10 @@ export {
   isFederationAddress,
   resolveFederationAddress,
   calculateFlowRate,
+  toRatePerSecond,
+  fromRatePerSecond,
+  rateCalculator,
+  toRatePerMonth,
   timeUntilStreamEnd,
   claimableNow,
   calculateVestingSchedule,
@@ -75,7 +79,7 @@ export {
   simulateStream,
   subscribeToActivityFeed,
 } from './utils.js';
-export type { StreamMetadataFields, SimulateStreamParams, StreamSimulationResult, StreamSimulationSnapshot } from './utils.js';
+export type { StreamMetadataFields, SimulateStreamParams, StreamSimulationResult, StreamSimulationSnapshot, RateUnit } from './utils.js';
 export { templates } from './templates.js';
 export { serializeStream, deserializeStream, buildUnsignedXdr } from './serialization.js';
 export type { SerializedStream } from './serialization.js';
@@ -297,3 +301,12 @@ export type { FeeRetryMiddlewareOptions } from './feeRetryMiddleware.js';
 export { createFederationPlugin } from './federationPlugin.js';
 export type { FederationPluginOptions } from './federationPlugin.js';
 export type { PaginatedEvents, StreamEvent as IndexerStreamEvent, StreamEventType as IndexerStreamEventType } from './indexer.js';
+
+// ── Issue #515: Multi-network client ────────────────────────────────────────
+export { MultiNetworkClient, MultiNetworkConfigError, MultiNetworkNotFoundError } from './multiNetwork.js';
+export type { NetworkConfig, NetworkedStream, MultiNetworkStreams } from './multiNetwork.js';
+
+// ── Issue #526: Bundle integrity manifest ───────────────────────────────────
+export { computeSha256, generateIntegrityManifest, verifyFileIntegrity, verifyManifest } from './bundleIntegrity.js';
+export type { IntegrityEntry, IntegrityManifest } from './bundleIntegrity.js';
+

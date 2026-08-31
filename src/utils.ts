@@ -371,6 +371,66 @@ export function fromRatePerSecond(stroopsPerSecond: bigint, unit: RateUnit = 'se
   return stroopsPerSecond * unitSeconds;
 }
 
+/** Seconds in one calendar month (30-day approximation). */
+const SECONDS_PER_MONTH = 2_592_000n; // 30n * 24n * 3600n
+
+/**
+ * Converts a stroop-per-second on-chain flow rate into a monthly amount
+ * using a 30-day month approximation.
+ *
+ * @param stroopsPerSecond - The raw on-chain flow rate in stroops/second.
+ * @returns Stroops that would flow in one 30-day month. Returns `0n` if the
+ *          rate is zero; never throws.
+ *
+ * @example
+ * ```ts
+ * const monthly = toRatePerMonth(stream.flowRate);
+ * console.log(formatUSDC(monthly)); // e.g. "300.0000000"
+ * ```
+ */
+export function toRatePerMonth(stroopsPerSecond: bigint): bigint {
+  if (stroopsPerSecond <= 0n) return 0n;
+  return stroopsPerSecond * SECONDS_PER_MONTH;
+}
+
+/**
+ * Converts an amount expressed per `fromUnit` into an equivalent amount per
+ * `toUnit` using integer arithmetic.
+ *
+ * Useful for displaying a per-day rate as a per-second on-chain value, or
+ * vice-versa. When the conversion involves a division that rounds to zero,
+ * `0n` is returned rather than throwing.
+ *
+ * @param amount   - Amount in `fromUnit` (e.g. stroops per day).
+ * @param fromUnit - The time unit `amount` is expressed in.
+ * @param toUnit   - The target time unit.
+ * @returns The converted amount in `toUnit`. Returns `0n` if the integer
+ *          result rounds to zero.
+ *
+ * @example
+ * ```ts
+ * // Convert 86 400 stroops/day → stroops/second
+ * const perSec = rateCalculator(86_400n, "day", "second"); // 1n
+ *
+ * // Convert 1 stroops/second → stroops/hour
+ * const perHour = rateCalculator(1n, "second", "hour"); // 3600n
+ * ```
+ */
+export function rateCalculator(amount: bigint, fromUnit: RateUnit, toUnit: RateUnit): bigint {
+  if (amount <= 0n) return 0n;
+  const fromSeconds = RATE_UNIT_SECONDS[fromUnit];
+  const toSeconds = RATE_UNIT_SECONDS[toUnit];
+  // amount / fromSeconds gives stroops-per-second; × toSeconds gives per-toUnit
+  const perSecond = amount / fromSeconds;
+  if (perSecond === 0n) {
+    // amount is smaller than one fromUnit-second-equivalent; scale differently
+    // to avoid losing everything: compute (amount * toSeconds) / fromSeconds
+    const result = (amount * toSeconds) / fromSeconds;
+    return result < 0n ? 0n : result;
+  }
+  return perSecond * toSeconds;
+}
+
 /**
  * Returns true when the stream's end time has passed.
  *

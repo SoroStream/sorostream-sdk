@@ -1632,6 +1632,19 @@ export interface IPluginRegistry {
   ): void;
   list(): SoroStreamPlugin[];
   unregister(plugin: SoroStreamPlugin): boolean;
+  /**
+   * Runs the `before` hook of all registered plugins in topological order.
+   * @param operation - Name of the operation being invoked.
+   * @param context   - Arguments / context for the operation.
+   */
+  runBefore(operation: string, context: MiddlewareContext): Promise<void>;
+  /**
+   * Runs the `after` hook of all registered plugins in topological order.
+   * @param operation - Name of the operation that just completed.
+   * @param context   - Arguments / context for the operation.
+   * @param result    - Return value produced by the operation.
+   */
+  runAfter(operation: string, context: MiddlewareContext, result: unknown): Promise<void>;
 }
 
 /** Partial configuration update accepted by `updateConfig`. */
