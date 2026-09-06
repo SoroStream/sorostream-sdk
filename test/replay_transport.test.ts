@@ -29,7 +29,9 @@ function makeBaseTransport(): RpcTransportAdapter {
     serverURL: new URL('https://soroban-testnet.stellar.org'),
     getAccount: vi.fn().mockResolvedValue({ id: 'GABC', sequence: '1' }),
     getHealth: vi.fn().mockResolvedValue({ status: 'healthy' }),
-    getLatestLedger: vi.fn().mockResolvedValue({ id: 'ledger1', sequence: 100, protocolVersion: 21 }),
+    getLatestLedger: vi
+      .fn()
+      .mockResolvedValue({ id: 'ledger1', sequence: 100, protocolVersion: 21 }),
     getTransaction: vi.fn().mockResolvedValue({ status: 'SUCCESS' }),
     simulateTransaction: vi.fn().mockResolvedValue({ result: { retval: '' }, latestLedger: 100 }),
     prepareTransaction: vi.fn().mockResolvedValue({ toXDR: () => 'prepared-xdr' }),

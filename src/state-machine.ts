@@ -4,14 +4,7 @@ import type { Stream } from './types.js';
 export type StreamState = 'Active' | 'Cancelled' | 'Completed' | 'Paused';
 
 export type StreamAction =
-  | 'withdraw'
-  | 'cancel'
-  | 'topUp'
-  | 'updateFlowRate'
-  | 'pause'
-  | 'resume'
-  | 'transfer'
-  | 'split';
+  'withdraw' | 'cancel' | 'topUp' | 'updateFlowRate' | 'pause' | 'resume' | 'transfer' | 'split';
 
 /**
  * Thrown when an operation is requested on a stream in a state where that operation is invalid (issue #429).

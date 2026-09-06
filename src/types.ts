@@ -48,10 +48,7 @@ export interface SoroStreamEmitter<TData = Record<string, unknown>> {
    * Subscribe to a specific stream lifecycle event by type.
    * Returns a {@link StreamSubscription} — call `.unsubscribe()` to stop.
    */
-  on(
-    eventType: StreamEventType,
-    callback: (event: StreamEvent<TData>) => void,
-  ): StreamSubscription;
+  on(eventType: StreamEventType, callback: (event: StreamEvent<TData>) => void): StreamSubscription;
 
   /**
    * Subscribe to all stream lifecycle events regardless of type.

@@ -40,7 +40,7 @@ function makeStream(overrides: Partial<Stream> = {}): Stream {
     recipient: 'GRECIPIENT0000000000000000000000000000000000000000000000000',
     token: 'GTOKEN000000000000000000000000000000000000000000000000000000',
     deposit: 3_600_000n, // 1 stroop/sec × 3600 sec
-    flowRate: 1_000n,    // 1000 stroops/sec
+    flowRate: 1_000n, // 1000 stroops/sec
     startTime: now - 100,
     endTime: now + 3500,
     lastWithdrawTime: now - 100,
@@ -126,16 +126,11 @@ describe('Issue #385: onStreamCompleted callback', () => {
     const onCompleted = vi.fn();
     const onTick = vi.fn();
 
-    const unsubscribe = watchClaimable(
-      stream,
-      vi.fn().mockResolvedValue(0n),
-      onTick,
-      {
-        tickMs: 100,
-        reconcileMs: 10_000,
-        onStreamCompleted: onCompleted,
-      },
-    );
+    const unsubscribe = watchClaimable(stream, vi.fn().mockResolvedValue(0n), onTick, {
+      tickMs: 100,
+      reconcileMs: 10_000,
+      onStreamCompleted: onCompleted,
+    });
 
     vi.advanceTimersByTime(500);
     expect(onCompleted).not.toHaveBeenCalled();
@@ -149,12 +144,10 @@ describe('Issue #385: onStreamCompleted callback', () => {
     const onTick = vi.fn();
 
     // Should not throw even without the option
-    const unsubscribe = watchClaimable(
-      stream,
-      vi.fn().mockResolvedValue(0n),
-      onTick,
-      { tickMs: 100, reconcileMs: 10_000 },
-    );
+    const unsubscribe = watchClaimable(stream, vi.fn().mockResolvedValue(0n), onTick, {
+      tickMs: 100,
+      reconcileMs: 10_000,
+    });
 
     vi.advanceTimersByTime(2000);
     // Just making sure no error is thrown
@@ -171,12 +164,11 @@ describe('Issue #385: onStreamCompleted callback', () => {
     const onCompleted = vi.fn();
     const onTick = vi.fn();
 
-    const unsubscribe = watchClaimable(
-      stream,
-      vi.fn().mockResolvedValue(0n),
-      onTick,
-      { tickMs: 100, reconcileMs: 10_000, onStreamCompleted: onCompleted },
-    );
+    const unsubscribe = watchClaimable(stream, vi.fn().mockResolvedValue(0n), onTick, {
+      tickMs: 100,
+      reconcileMs: 10_000,
+      onStreamCompleted: onCompleted,
+    });
 
     // Advance at least one tick.
     vi.advanceTimersByTime(200);
@@ -236,9 +228,33 @@ describe('Issue #386: aggregateStreams utility', () => {
   it('excludes cancelled and completed streams from TVL and averageRate', () => {
     const now = Math.floor(Date.now() / 1000);
     const streams: Stream[] = [
-      makeStream({ id: '1', deposit: 1_000_000n, flowRate: 100n, startTime: now + 60, lastWithdrawTime: now + 60, endTime: now + 9999, status: 'Active' }),
-      makeStream({ id: '2', deposit: 500_000n, flowRate: 50n, startTime: now + 60, lastWithdrawTime: now + 60, endTime: now + 9999, status: 'Cancelled' }),
-      makeStream({ id: '3', deposit: 200_000n, flowRate: 20n, startTime: now + 60, lastWithdrawTime: now + 60, endTime: now + 9999, status: 'Completed' }),
+      makeStream({
+        id: '1',
+        deposit: 1_000_000n,
+        flowRate: 100n,
+        startTime: now + 60,
+        lastWithdrawTime: now + 60,
+        endTime: now + 9999,
+        status: 'Active',
+      }),
+      makeStream({
+        id: '2',
+        deposit: 500_000n,
+        flowRate: 50n,
+        startTime: now + 60,
+        lastWithdrawTime: now + 60,
+        endTime: now + 9999,
+        status: 'Cancelled',
+      }),
+      makeStream({
+        id: '3',
+        deposit: 200_000n,
+        flowRate: 20n,
+        startTime: now + 60,
+        lastWithdrawTime: now + 60,
+        endTime: now + 9999,
+        status: 'Completed',
+      }),
     ];
 
     const result = aggregateStreams(streams);

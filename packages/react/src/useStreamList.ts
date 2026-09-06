@@ -2,10 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { SoroStreamClient, Stream, StreamFilterCriteria } from '@sorostream/sdk';
 
 /** How to specify which streams to load. */
-export type StreamListSource =
-  | { ids: string[] }
-  | { sender: string }
-  | { recipient: string };
+export type StreamListSource = { ids: string[] } | { sender: string } | { recipient: string };
 
 export interface UseStreamListOptions {
   /** Poll interval in milliseconds. Set to 0 to disable polling. Default: 0. */
@@ -68,56 +65,57 @@ export function useStreamList(
   // Stable serialized key to detect source identity changes
   const sourceKey = source == null ? 'null' : JSON.stringify(source);
 
-  const fetchStreams = useCallback(async (
-    activeClient: SoroStreamClient,
-    activeSource: StreamListSource,
-    signal: AbortSignal,
-  ): Promise<void> => {
-    setLoading(true);
-    setError(null);
+  const fetchStreams = useCallback(
+    async (
+      activeClient: SoroStreamClient,
+      activeSource: StreamListSource,
+      signal: AbortSignal,
+    ): Promise<void> => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      let result: Stream[];
-      const currentFilter = filterRef.current;
+      try {
+        let result: Stream[];
+        const currentFilter = filterRef.current;
 
-      if ('ids' in activeSource) {
-        const { ids } = activeSource;
-        if (ids.length === 0) {
-          result = [];
-        } else if (typeof (activeClient as any).getStreams === 'function') {
-          // Batch fetch if available (issue #427)
-          result = await (activeClient as any).getStreams(ids);
+        if ('ids' in activeSource) {
+          const { ids } = activeSource;
+          if (ids.length === 0) {
+            result = [];
+          } else if (typeof (activeClient as any).getStreams === 'function') {
+            // Batch fetch if available (issue #427)
+            result = await (activeClient as any).getStreams(ids);
+          } else {
+            const settled = await Promise.all(ids.map((id) => activeClient.getStream(id)));
+            result = settled;
+          }
+        } else if ('sender' in activeSource) {
+          result = unwrapStreams(await activeClient.getStreamsBySender(activeSource.sender));
         } else {
-          const settled = await Promise.all(ids.map((id) => activeClient.getStream(id)));
-          result = settled;
+          result = unwrapStreams(
+            await activeClient.getStreamsByRecipient(
+              activeSource.recipient,
+              undefined,
+              currentFilter,
+            ),
+          );
         }
-      } else if ('sender' in activeSource) {
-        result = unwrapStreams(
-          await activeClient.getStreamsBySender(activeSource.sender),
-        );
-      } else {
-        result = unwrapStreams(
-          await activeClient.getStreamsByRecipient(
-            activeSource.recipient,
-            undefined,
-            currentFilter,
-          ),
-        );
-      }
 
-      if (!signal.aborted) {
-        setStreams(result);
-        setLoading(false);
+        if (!signal.aborted) {
+          setStreams(result);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (!signal.aborted) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setStreams([]);
+          setLoading(false);
+        }
       }
-    } catch (err) {
-      if (!signal.aborted) {
-        setError(err instanceof Error ? err : new Error(String(err)));
-        setStreams([]);
-        setLoading(false);
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [],
+  );
 
   // Track fetch trigger count for manual refetch support
   const [fetchTick, setFetchTick] = useState(0);
@@ -151,8 +149,8 @@ export function useStreamList(
       controller.abort();
       if (timerId !== null) clearInterval(timerId);
     };
-  // sourceKey is the stable serialized representation of `source`
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // sourceKey is the stable serialized representation of `source`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, sourceKey, intervalMs, fetchStreams, fetchTick]);
 
   return { streams, loading, error, refetch };

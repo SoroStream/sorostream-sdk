@@ -1953,8 +1953,7 @@ export function getStreamHealth(stream: Stream, now?: number): StreamHealthResul
 
   // Remaining balance = deposit − (flowRate × elapsed since start, capped at deposit)
   const streamedSoFar = stream.flowRate * BigInt(elapsedSeconds);
-  const remainingBalance =
-    stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
+  const remainingBalance = stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
 
   const secondsSinceLastWithdrawal =
     stream.lastWithdrawTime > 0 ? Math.max(0, nowSecs - stream.lastWithdrawTime) : 0;
@@ -1964,8 +1963,7 @@ export function getStreamHealth(stream: Stream, now?: number): StreamHealthResul
 
   // Check for stall: recipient hasn't withdrawn in > 10 % of stream duration
   const stallThreshold = Math.max(60, Math.floor(duration * 0.1));
-  const isStalled =
-    stream.lastWithdrawTime > 0 && secondsSinceLastWithdrawal > stallThreshold;
+  const isStalled = stream.lastWithdrawTime > 0 && secondsSinceLastWithdrawal > stallThreshold;
   if (isStalled) {
     const penalty = Math.min(40, Math.floor((secondsSinceLastWithdrawal / stallThreshold) * 20));
     score -= penalty;
@@ -2167,10 +2165,12 @@ export interface StreamMetadataFields {
 export function redactSecretKey(input: string): string {
   if (!input) return input;
   let result = input.replace(/\bS[A-Z2-7]{55}\b/g, '[REDACTED_SECRET_KEY]');
-  result = result.replace(/\b(secretKey|secretSeed|privateKey|mnemonic|secret|seed)\s*[:=]\s*["']?[^"'\s,]+["']?/gi, '$1=[REDACTED_SECRET]');
+  result = result.replace(
+    /\b(secretKey|secretSeed|privateKey|mnemonic|secret|seed)\s*[:=]\s*["']?[^"'\s,]+["']?/gi,
+    '$1=[REDACTED_SECRET]',
+  );
   return result;
 }
-
 
 // ── Issue #441: subscribeToActivityFeed standalone utility ───────────────────
 
@@ -2198,7 +2198,12 @@ export function redactSecretKey(input: string): string {
  * ```
  */
 export function subscribeToActivityFeed(
-  client: { subscribeToActivityFeed(streamIds: string[], callback: (entry: import('./types.js').StreamActivityFeedEntry) => void): import('./types.js').StreamSubscription },
+  client: {
+    subscribeToActivityFeed(
+      streamIds: string[],
+      callback: (entry: import('./types.js').StreamActivityFeedEntry) => void,
+    ): import('./types.js').StreamSubscription;
+  },
   streamIds: string[],
   callback: (entry: import('./types.js').StreamActivityFeedEntry) => void,
 ): import('./types.js').StreamSubscription {

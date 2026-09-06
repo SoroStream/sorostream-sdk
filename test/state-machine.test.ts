@@ -227,7 +227,9 @@ describe('StreamStateMachine class & transition guards (Issue #429)', () => {
     expect(StreamStateMachine.getNextState('Active', 'cancel')).toBe('Cancelled');
     expect(StreamStateMachine.getNextState('Active', 'pause')).toBe('Paused');
     expect(StreamStateMachine.getNextState('Paused', 'resume')).toBe('Active');
-    expect(StreamStateMachine.getNextState('Active', 'withdraw', { isFullyWithdrawn: true })).toBe('Completed');
+    expect(StreamStateMachine.getNextState('Active', 'withdraw', { isFullyWithdrawn: true })).toBe(
+      'Completed',
+    );
   });
 
   it('returns valid actions for each state', () => {
@@ -236,4 +238,3 @@ describe('StreamStateMachine class & transition guards (Issue #429)', () => {
     expect(StreamStateMachine.getValidActions('Completed')).toEqual([]);
   });
 });
-

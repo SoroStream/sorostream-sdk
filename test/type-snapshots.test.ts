@@ -36,10 +36,20 @@ describe('public API type shapes', () => {
     // guards this test.
     spawnSync(
       'npx',
-      ['tsc', '--project', 'tsconfig.json', '--declaration', '--emitDeclarationOnly', '--outDir', outDir],
+      [
+        'tsc',
+        '--project',
+        'tsconfig.json',
+        '--declaration',
+        '--emitDeclarationOnly',
+        '--outDir',
+        outDir,
+      ],
       { stdio: 'pipe' },
     );
-    const missing = PUBLIC_ENTRY_POINTS.filter((entry) => !existsSync(join(outDir, `${entry}.d.ts`)));
+    const missing = PUBLIC_ENTRY_POINTS.filter(
+      (entry) => !existsSync(join(outDir, `${entry}.d.ts`)),
+    );
     if (missing.length > 0) {
       throw new Error(`tsc did not emit declaration files for: ${missing.join(', ')}`);
     }

@@ -13,7 +13,7 @@ describe('simulateStream (issue #399)', () => {
   it('returns the correct flow rate and timeline', () => {
     const result = simulateStream({ amount, durationSeconds });
 
-    expect(result.totalAmount).toBe(amount / BigInt(durationSeconds) * BigInt(durationSeconds));
+    expect(result.totalAmount).toBe((amount / BigInt(durationSeconds)) * BigInt(durationSeconds));
     expect(result.flowRate).toBe(amount / BigInt(durationSeconds));
     expect(result.durationSeconds).toBe(durationSeconds);
     expect(result.endTime - result.startTime).toBe(durationSeconds);
@@ -61,9 +61,7 @@ describe('simulateStream (issue #399)', () => {
   });
 
   it('throws on zero amount', () => {
-    expect(() => simulateStream({ amount: 0n, durationSeconds })).toThrow(
-      /amount must be > 0/,
-    );
+    expect(() => simulateStream({ amount: 0n, durationSeconds })).toThrow(/amount must be > 0/);
   });
 
   it('throws on zero durationSeconds', () => {

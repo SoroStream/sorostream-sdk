@@ -158,7 +158,9 @@ export class StreamIndexer {
       .filter((e): e is StreamEvent => e !== null);
 
     const lastEvent = events[events.length - 1];
-    const nextCursor = lastEvent ? (lastEvent.pagingToken || lastEvent.id || response.cursor) : response.cursor;
+    const nextCursor = lastEvent
+      ? lastEvent.pagingToken || lastEvent.id || response.cursor
+      : response.cursor;
     const limit = filter.limit ?? 100;
     const hasMore = events.length >= limit;
 

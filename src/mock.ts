@@ -134,12 +134,12 @@ export class MockSoroStreamClient {
       return {
         dryRun: true,
         simulated: true,
-        expectedFee: "100",
-        minResourceFee: "100",
+        expectedFee: '100',
+        minResourceFee: '100',
         result: {
-          id: "mock-sim-id",
+          id: 'mock-sim-id',
           events: [],
-          minResourceFee: "100",
+          minResourceFee: '100',
         } as any,
         params,
       } as any;
@@ -420,10 +420,7 @@ export class MockSoroStreamClient {
 
   private streamDelegates = new Map<string, Set<string>>();
 
-  async grantDelegate(
-    streamId: string,
-    delegate: string,
-  ): Promise<{ txHash: string }> {
+  async grantDelegate(streamId: string, delegate: string): Promise<{ txHash: string }> {
     if (!this.streams.has(streamId)) throw new Error(`Stream not found: ${streamId}`);
     if (!this.streamDelegates.has(streamId)) {
       this.streamDelegates.set(streamId, new Set());
@@ -432,10 +429,7 @@ export class MockSoroStreamClient {
     return { txHash: `mock-tx-grant-stream-delegate-${streamId}-${delegate}` };
   }
 
-  async revokeDelegateFromStream(
-    streamId: string,
-    delegate: string,
-  ): Promise<{ txHash: string }> {
+  async revokeDelegateFromStream(streamId: string, delegate: string): Promise<{ txHash: string }> {
     if (!this.streams.has(streamId)) throw new Error(`Stream not found: ${streamId}`);
     this.streamDelegates.get(streamId)?.delete(delegate);
     return { txHash: `mock-tx-revoke-stream-delegate-${streamId}-${delegate}` };

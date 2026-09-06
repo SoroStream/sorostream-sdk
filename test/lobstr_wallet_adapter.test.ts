@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { LobstrWalletAdapter, createLobstrWalletAdapter, createLobstrAdapter } from '../src/wallet.js';
+import {
+  LobstrWalletAdapter,
+  createLobstrWalletAdapter,
+  createLobstrAdapter,
+} from '../src/wallet.js';
 
 describe('Issue #431: Lobstr wallet adapter', () => {
   const originalWindow = (globalThis as any).window;
@@ -53,7 +57,9 @@ describe('Issue #431: Lobstr wallet adapter', () => {
     const adapter = createLobstrWalletAdapter({});
     expect(await adapter.isConnected()).toBe(false);
     await expect(adapter.getPublicKey()).rejects.toThrow('Lobstr wallet provider is not available');
-    await expect(adapter.signTransaction('xdr', 'testnet')).rejects.toThrow('Lobstr wallet provider is not available');
+    await expect(adapter.signTransaction('xdr', 'testnet')).rejects.toThrow(
+      'Lobstr wallet provider is not available',
+    );
   });
 
   it('supports event listener registration methods', () => {

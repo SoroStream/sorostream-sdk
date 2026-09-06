@@ -42,7 +42,8 @@ describe('Issue #382 — projectCost', () => {
 
   it('is purely multiplicative: projectCost(rate, d1) + projectCost(rate, d2) ≤ projectCost(rate, d1+d2)', () => {
     const rate = 11n;
-    const d1 = 1000, d2 = 2000;
+    const d1 = 1000,
+      d2 = 2000;
     const split = projectCost(rate, d1) + projectCost(rate, d2);
     const combined = projectCost(rate, d1 + d2);
     // Equal because no rounding involved

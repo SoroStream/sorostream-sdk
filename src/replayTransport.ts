@@ -281,24 +281,34 @@ export const ReplayTransport = {
 
       getFixture: () => parsed,
 
-      getAccount: (_address: string) => Promise.resolve().then(() => queue.next<Account>('getAccount')),
+      getAccount: (_address: string) =>
+        Promise.resolve().then(() => queue.next<Account>('getAccount')),
 
-      getHealth: () => Promise.resolve().then(() => queue.next<rpc.Api.GetHealthResponse>('getHealth')),
+      getHealth: () =>
+        Promise.resolve().then(() => queue.next<rpc.Api.GetHealthResponse>('getHealth')),
 
       getLatestLedger: () =>
-        Promise.resolve().then(() => queue.next<rpc.Api.GetLatestLedgerResponse>('getLatestLedger')),
+        Promise.resolve().then(() =>
+          queue.next<rpc.Api.GetLatestLedgerResponse>('getLatestLedger'),
+        ),
 
       getTransaction: (_hash: string) =>
         Promise.resolve().then(() => queue.next<rpc.Api.GetTransactionResponse>('getTransaction')),
 
       simulateTransaction: (_tx: Transaction | FeeBumpTransaction) =>
-        Promise.resolve().then(() => queue.next<rpc.Api.SimulateTransactionResponse>('simulateTransaction')),
+        Promise.resolve().then(() =>
+          queue.next<rpc.Api.SimulateTransactionResponse>('simulateTransaction'),
+        ),
 
       prepareTransaction: (_tx: Transaction | FeeBumpTransaction) =>
-        Promise.resolve().then(() => queue.next<Transaction | FeeBumpTransaction>('prepareTransaction')),
+        Promise.resolve().then(() =>
+          queue.next<Transaction | FeeBumpTransaction>('prepareTransaction'),
+        ),
 
       sendTransaction: (_tx: Transaction | FeeBumpTransaction) =>
-        Promise.resolve().then(() => queue.next<rpc.Api.SendTransactionResponse>('sendTransaction')),
+        Promise.resolve().then(() =>
+          queue.next<rpc.Api.SendTransactionResponse>('sendTransaction'),
+        ),
 
       getEvents: (_req: RpcTransportGetEventsRequest) =>
         Promise.resolve().then(() => queue.next<rpc.Api.GetEventsResponse>('getEvents')),

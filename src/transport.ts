@@ -210,12 +210,20 @@ export function createPooledRpcTransport(
   rpcUrl: string,
   options?: PooledRpcTransportOptions & rpc.Server.Options,
 ): RpcTransportAdapter & {
-  getPoolStats(): { poolSize: number; activeRequests: number; totalRequests: number; reusedConnections: number };
+  getPoolStats(): {
+    poolSize: number;
+    activeRequests: number;
+    totalRequests: number;
+    reusedConnections: number;
+  };
 } {
   const poolSize = Math.max(1, options?.poolSize ?? 4);
   const serverOpts = { allowHttp: false, ...options };
   let currentUrl = rpcUrl;
-  let servers: rpc.Server[] = Array.from({ length: poolSize }, () => new rpc.Server(currentUrl, serverOpts));
+  let servers: rpc.Server[] = Array.from(
+    { length: poolSize },
+    () => new rpc.Server(currentUrl, serverOpts),
+  );
   let roundRobinIndex = 0;
   let activeRequests = 0;
   let totalRequests = 0;

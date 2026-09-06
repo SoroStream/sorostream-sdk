@@ -76,7 +76,8 @@ export function isTransientRpcError(err: unknown): boolean {
     const obj = err as Record<string, unknown>;
 
     // HTTP status code checks
-    const status = obj['status'] ?? (obj['response'] as Record<string, unknown> | undefined)?.['status'];
+    const status =
+      obj['status'] ?? (obj['response'] as Record<string, unknown> | undefined)?.['status'];
     if (typeof status === 'number') {
       if (status === 429 || status === 502 || status === 503 || status === 504) {
         return true;

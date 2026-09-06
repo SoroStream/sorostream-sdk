@@ -38,7 +38,12 @@ import type { StorageAdapter, SoroStreamAdapters, FetchAdapter } from './adapter
 import { SoroStreamVersionError } from './errors.js';
 import type { TransactionHistoryOptions, TransactionHistoryPage } from './horizon.js';
 import { getTransactionHistory, getAddressActivity } from './horizon.js';
-import { createDefaultRpcTransport, createRetryingRpcTransport, createPooledRpcTransport, type PooledRpcTransportOptions } from './transport.js';
+import {
+  createDefaultRpcTransport,
+  createRetryingRpcTransport,
+  createPooledRpcTransport,
+  type PooledRpcTransportOptions,
+} from './transport.js';
 import type { RpcTransportAdapter } from './transport.js';
 import { createRpcCompatTransport } from './rpc-compat.js';
 import type { RpcVersionDetectedPayload } from './rpc-compat.js';
@@ -714,10 +719,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    */
   private readonly _emittedTxHashes = new Set<string>();
   /** Issue #516: "any" subscribers — receive every stream event type. */
-  private readonly _anySubscribers = new Map<
-    string,
-    (event: StreamEvent<TEventData>) => void
-  >();
+  private readonly _anySubscribers = new Map<string, (event: StreamEvent<TEventData>) => void>();
   private _anySubscriberCounter = 0;
   /** Event bus used to emit SDK lifecycle events. Issue #212. */
   private eventBus: IEventBus;
@@ -2330,11 +2332,17 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     params?: Partial<BuildUnsignedXdrParams>,
   ): Promise<string> {
     const sender = params?.sourceAccount
-      ? (typeof params.sourceAccount === "string" ? params.sourceAccount : params.sourceAccount.accountId())
-      : (this.walletAdapter ? await this.walletAdapter.getPublicKey() : undefined);
+      ? typeof params.sourceAccount === 'string'
+        ? params.sourceAccount
+        : params.sourceAccount.accountId()
+      : this.walletAdapter
+        ? await this.walletAdapter.getPublicKey()
+        : undefined;
 
     if (!sender) {
-      throw new Error("sourceAccount or a connected wallet adapter is required to build unsigned XDR");
+      throw new Error(
+        'sourceAccount or a connected wallet adapter is required to build unsigned XDR',
+      );
     }
 
     return buildUnsignedXdr(operation, {
@@ -2355,7 +2363,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       if (params.amount <= 0n) throw new InsufficientAmountError();
       await this.validateCliff(params.cliffSeconds ?? 0);
 
-      this.logger.info(`createStream: creating stream for recipient ${params.recipient}, amount=${params.amount}, duration=${params.durationSeconds}s`);
+      this.logger.info(
+        `createStream: creating stream for recipient ${params.recipient}, amount=${params.amount}, duration=${params.durationSeconds}s`,
+      );
 
       // Issue #231: Warn (or throw when strict:true) if the caller provides a
       // nonce field but the contract does not support it.
@@ -2453,7 +2463,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         const simResult = await this.simulateOp(operation);
         const isSuccess = rpc.Api.isSimulationSuccess(simResult);
         const minFee = isSuccess
-          ? String((simResult as rpc.Api.SimulateTransactionSuccessResponse).minResourceFee ?? BASE_FEE)
+          ? String(
+              (simResult as rpc.Api.SimulateTransactionSuccessResponse).minResourceFee ?? BASE_FEE,
+            )
           : BASE_FEE;
         return {
           dryRun: true,
@@ -3783,7 +3795,10 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     // Dispatch to event-type-specific `on()` subscribers via the event bus.
     // Re-use the existing InMemoryEventBus so `subscribeEvents` listeners
     // also fire when `emit` is called.
-    this.eventBus.emit(`stream.${event.type.toLowerCase()}` as string, event as unknown as Record<string, unknown>);
+    this.eventBus.emit(
+      `stream.${event.type.toLowerCase()}` as string,
+      event as unknown as Record<string, unknown>,
+    );
   }
 
   /**
@@ -4147,9 +4162,8 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     // 3. Start a new request and register it synchronously in claimableInflight
     //    so that getMultipleStreamBalances (and other concurrent getClaimable
     //    callers) can join it before the first await yields.
-    const p = this.requestDedup.dedupe(
-      dedupKey('getClaimable', this.network, streamId),
-      async (): Promise<bigint> => {
+    const p = this.requestDedup
+      .dedupe(dedupKey('getClaimable', this.network, streamId), async (): Promise<bigint> => {
         const result = await withRetry(
           () =>
             this.simulateOp(
@@ -4173,10 +4187,10 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
 
         this.claimableCache.set(streamId, value);
         return value;
-      },
-    ).finally(() => {
-      this.claimableInflight.delete(streamId);
-    });
+      })
+      .finally(() => {
+        this.claimableInflight.delete(streamId);
+      });
 
     this.claimableInflight.set(streamId, p);
     return p;
@@ -4569,7 +4583,6 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     };
   }
 
-
   /**
    * Returns all streams matching a given namespace (issue #274).
    *
@@ -4960,7 +4973,10 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       ...overrides,
     };
 
-    return (await this.createStream(params, signal, options)) as { streamId: string; txHash: string };
+    return (await this.createStream(params, signal, options)) as {
+      streamId: string;
+      txHash: string;
+    };
   }
 
   // ── Bulk operations ───────────────────────────────────────────────────────
@@ -5308,7 +5324,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
 
   private registerLifecycleHook(
     eventType: StreamEventType,
-    callback?: (event: StreamEvent) => void
+    callback?: (event: StreamEvent) => void,
   ): void {
     if (!callback) return;
     this.getEventPoller().subscribe(`hooks:${eventType}`, {
@@ -5531,9 +5547,8 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   ): Promise<import('./indexer.js').PaginatedEvents> {
     const { StreamIndexer } = await import('./indexer.js');
     const indexer = new StreamIndexer(this.server, this.contract.contractId());
-    const opts = typeof optionsOrCursor === 'string'
-      ? { cursor: optionsOrCursor, limit }
-      : optionsOrCursor;
+    const opts =
+      typeof optionsOrCursor === 'string' ? { cursor: optionsOrCursor, limit } : optionsOrCursor;
     return indexer.getStreamHistory(streamId, opts);
   }
 
@@ -5641,8 +5656,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       return { rpcReachable: true, contractReachable, latencyMs };
     } catch (err: unknown) {
       const latencyMs = Date.now() - start;
-      const message =
-        err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error ? err.message : String(err);
       return {
         rpcReachable: false,
         contractReachable: false,
@@ -5818,20 +5832,12 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     // gracefully to no compression in that case).
     let compressor: { write(data: string): void; end(): Promise<void> } | null = null;
 
-    if (
-      format === 'ndjson' &&
-      options?.writable &&
-      compression &&
-      compression !== 'none'
-    ) {
+    if (format === 'ndjson' && options?.writable && compression && compression !== 'none') {
       try {
         const zlib = await import('zlib');
         const dest = options.writable;
 
-        const zlibStream =
-          compression === 'gzip'
-            ? zlib.createGzip()
-            : zlib.createDeflate();
+        const zlibStream = compression === 'gzip' ? zlib.createGzip() : zlib.createDeflate();
 
         // Pipe compressed bytes into the destination writable.
         zlibStream.on('data', (chunk: Buffer) => {

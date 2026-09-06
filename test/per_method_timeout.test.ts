@@ -58,13 +58,9 @@ describe('Issue #434: Configurable per-method request timeout', () => {
     vi.spyOn(client, 'getClaimable').mockResolvedValue(100n);
 
     const start = Date.now();
-    await expect(
-      client.withdraw(
-        { streamId: '1' },
-        undefined,
-        { timeoutMs: 150 },
-      ),
-    ).rejects.toThrow('Transaction confirmation timed out after 150ms');
+    await expect(client.withdraw({ streamId: '1' }, undefined, { timeoutMs: 150 })).rejects.toThrow(
+      'Transaction confirmation timed out after 150ms',
+    );
 
     const elapsed = Date.now() - start;
     expect(elapsed).toBeLessThan(5000);
@@ -105,11 +101,7 @@ describe('Issue #434: Configurable per-method request timeout', () => {
     });
 
     await expect(
-      client.cancelStream(
-        { streamId: '2' },
-        undefined,
-        { timeout: 100 },
-      ),
+      client.cancelStream({ streamId: '2' }, undefined, { timeout: 100 }),
     ).rejects.toThrow('Transaction confirmation timed out after 100ms');
   });
 });

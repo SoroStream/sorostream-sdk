@@ -54,9 +54,9 @@ describe('isTransientRpcError (#363)', () => {
 describe('withRetry transientOnly option (#363)', () => {
   it('does not retry non-transient errors when transientOnly: true', async () => {
     const fn = vi.fn().mockRejectedValue(new Error('Contract error: bad params'));
-    await expect(
-      withRetry(fn, { maxAttempts: 3, transientOnly: true })
-    ).rejects.toThrow('Contract error: bad params');
+    await expect(withRetry(fn, { maxAttempts: 3, transientOnly: true })).rejects.toThrow(
+      'Contract error: bad params',
+    );
     // Should only be called once — non-transient, no retries
     expect(fn).toHaveBeenCalledTimes(1);
   });
@@ -72,10 +72,7 @@ describe('withRetry transientOnly option (#363)', () => {
   });
 
   it('retries all errors by default (backwards compatible)', async () => {
-    const fn = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('Any error'))
-      .mockResolvedValue('ok');
+    const fn = vi.fn().mockRejectedValueOnce(new Error('Any error')).mockResolvedValue('ok');
     const result = await withRetry(fn, { maxAttempts: 3, baseDelayMs: 0 });
     expect(result).toBe('ok');
     expect(fn).toHaveBeenCalledTimes(2);
@@ -84,9 +81,7 @@ describe('withRetry transientOnly option (#363)', () => {
   it('uses custom shouldRetry predicate', async () => {
     const fn = vi.fn().mockRejectedValue(new Error('special error'));
     const shouldRetry = vi.fn().mockReturnValue(false);
-    await expect(
-      withRetry(fn, { maxAttempts: 3, shouldRetry })
-    ).rejects.toThrow('special error');
+    await expect(withRetry(fn, { maxAttempts: 3, shouldRetry })).rejects.toThrow('special error');
     expect(fn).toHaveBeenCalledTimes(1);
     expect(shouldRetry).toHaveBeenCalledTimes(1);
   });

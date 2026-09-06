@@ -2,17 +2,21 @@
  * Tests for Issue #393: Multi-network client configuration.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { MultiNetworkClient, MultiNetworkConfigError, MultiNetworkNotFoundError } from '../src/multiNetwork.js';
+import {
+  MultiNetworkClient,
+  MultiNetworkConfigError,
+  MultiNetworkNotFoundError,
+} from '../src/multiNetwork.js';
 import type { NetworkConfig } from '../src/multiNetwork.js';
 import type { WalletAdapter, Stream } from '../src/types.js';
 import { nativeToScVal, rpc } from '@stellar/stellar-sdk';
 
 afterEach(() => vi.restoreAllMocks());
 
-const VALID_CONTRACT_TESTNET  = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
-const VALID_CONTRACT_MAINNET  = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
+const VALID_CONTRACT_TESTNET = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
+const VALID_CONTRACT_MAINNET = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
 const VALID_ACCOUNT = 'GAXXZ5XSL2VTQPGWB3LPU5273HSJXMK7VHLZTF2XKW65QFZVA3XKULQZ';
-const RECIPIENT     = 'GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF';
+const RECIPIENT = 'GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF';
 
 function makeAdapter(): WalletAdapter {
   return {
@@ -24,8 +28,19 @@ function makeAdapter(): WalletAdapter {
 
 function makeConfigs(extra?: Partial<NetworkConfig>): NetworkConfig[] {
   return [
-    { network: 'testnet', contractId: VALID_CONTRACT_TESTNET, walletAdapter: makeAdapter(), skipVersionCheck: true, ...extra },
-    { network: 'mainnet', contractId: VALID_CONTRACT_MAINNET, walletAdapter: makeAdapter(), skipVersionCheck: true },
+    {
+      network: 'testnet',
+      contractId: VALID_CONTRACT_TESTNET,
+      walletAdapter: makeAdapter(),
+      skipVersionCheck: true,
+      ...extra,
+    },
+    {
+      network: 'mainnet',
+      contractId: VALID_CONTRACT_MAINNET,
+      walletAdapter: makeAdapter(),
+      skipVersionCheck: true,
+    },
   ];
 }
 
@@ -48,19 +63,22 @@ function makeStream(id: string, sender: string): Stream {
 function makeStreamScVal(stream: Stream): rpc.Api.SimulateTransactionSuccessResponse {
   return {
     result: {
-      retval: nativeToScVal({
-        id: stream.id,
-        sender: stream.sender,
-        recipient: stream.recipient,
-        token: stream.token,
-        deposit: Number(stream.deposit),
-        flow_rate: Number(stream.flowRate),
-        start_time: stream.startTime,
-        end_time: stream.endTime,
-        last_withdraw_time: stream.lastWithdrawTime,
-        status: stream.status,
-        auto_renew: stream.autoRenew,
-      }, { type: 'map' }),
+      retval: nativeToScVal(
+        {
+          id: stream.id,
+          sender: stream.sender,
+          recipient: stream.recipient,
+          token: stream.token,
+          deposit: Number(stream.deposit),
+          flow_rate: Number(stream.flowRate),
+          start_time: stream.startTime,
+          end_time: stream.endTime,
+          last_withdraw_time: stream.lastWithdrawTime,
+          status: stream.status,
+          auto_renew: stream.autoRenew,
+        },
+        { type: 'map' },
+      ),
     },
     latestLedger: 100,
   } as unknown as rpc.Api.SimulateTransactionSuccessResponse;
@@ -94,7 +112,12 @@ function makeStreamsScVal(streams: Stream[]): rpc.Api.SimulateTransactionSuccess
 describe('MultiNetworkClient – construction', () => {
   it('constructs with a single network', () => {
     const multi = new MultiNetworkClient([
-      { network: 'testnet', contractId: VALID_CONTRACT_TESTNET, walletAdapter: makeAdapter(), skipVersionCheck: true },
+      {
+        network: 'testnet',
+        contractId: VALID_CONTRACT_TESTNET,
+        walletAdapter: makeAdapter(),
+        skipVersionCheck: true,
+      },
     ]);
     expect(multi.networks).toEqual(['testnet']);
     multi.destroy();
@@ -116,8 +139,18 @@ describe('MultiNetworkClient – construction', () => {
     expect(
       () =>
         new MultiNetworkClient([
-          { network: 'testnet', contractId: VALID_CONTRACT_TESTNET, walletAdapter: makeAdapter(), skipVersionCheck: true },
-          { network: 'testnet', contractId: VALID_CONTRACT_TESTNET, walletAdapter: makeAdapter(), skipVersionCheck: true },
+          {
+            network: 'testnet',
+            contractId: VALID_CONTRACT_TESTNET,
+            walletAdapter: makeAdapter(),
+            skipVersionCheck: true,
+          },
+          {
+            network: 'testnet',
+            contractId: VALID_CONTRACT_TESTNET,
+            walletAdapter: makeAdapter(),
+            skipVersionCheck: true,
+          },
         ]),
     ).toThrow(MultiNetworkConfigError);
   });
@@ -128,7 +161,9 @@ describe('MultiNetworkClient – construction', () => {
 describe('MultiNetworkClient.getClient', () => {
   let multi: MultiNetworkClient;
 
-  beforeEach(() => { multi = new MultiNetworkClient(makeConfigs()); });
+  beforeEach(() => {
+    multi = new MultiNetworkClient(makeConfigs());
+  });
   afterEach(() => multi.destroy());
 
   it('returns the correct SoroStreamClient for a configured network', () => {
@@ -145,7 +180,9 @@ describe('MultiNetworkClient.getClient', () => {
 describe('MultiNetworkClient.hasNetwork', () => {
   let multi: MultiNetworkClient;
 
-  beforeEach(() => { multi = new MultiNetworkClient(makeConfigs()); });
+  beforeEach(() => {
+    multi = new MultiNetworkClient(makeConfigs());
+  });
   afterEach(() => multi.destroy());
 
   it('returns true for configured networks', () => {
@@ -193,12 +230,20 @@ describe('MultiNetworkClient.getStreamsByRecipientAllNetworks', () => {
     const mainnetStream = makeStream('2', 'MAINNET_SENDER_' + VALID_ACCOUNT.slice(0, 20));
 
     const testnetClient = multi.getClient('testnet');
-    vi.spyOn((testnetClient as any).contract, 'call').mockImplementation(() => ({ build: () => ({}) }));
-    vi.spyOn(testnetClient as any, 'simulateOp').mockResolvedValue(makeStreamsScVal([testnetStream]));
+    vi.spyOn((testnetClient as any).contract, 'call').mockImplementation(() => ({
+      build: () => ({}),
+    }));
+    vi.spyOn(testnetClient as any, 'simulateOp').mockResolvedValue(
+      makeStreamsScVal([testnetStream]),
+    );
 
     const mainnetClient = multi.getClient('mainnet');
-    vi.spyOn((mainnetClient as any).contract, 'call').mockImplementation(() => ({ build: () => ({}) }));
-    vi.spyOn(mainnetClient as any, 'simulateOp').mockResolvedValue(makeStreamsScVal([mainnetStream]));
+    vi.spyOn((mainnetClient as any).contract, 'call').mockImplementation(() => ({
+      build: () => ({}),
+    }));
+    vi.spyOn(mainnetClient as any, 'simulateOp').mockResolvedValue(
+      makeStreamsScVal([mainnetStream]),
+    );
 
     const { results, allStreams } = await multi.getStreamsByRecipientAllNetworks(RECIPIENT);
 
@@ -212,11 +257,15 @@ describe('MultiNetworkClient.getStreamsByRecipientAllNetworks', () => {
     const multi = new MultiNetworkClient(makeConfigs());
 
     const testnetClient = multi.getClient('testnet');
-    vi.spyOn((testnetClient as any).contract, 'call').mockImplementation(() => ({ build: () => ({}) }));
+    vi.spyOn((testnetClient as any).contract, 'call').mockImplementation(() => ({
+      build: () => ({}),
+    }));
     vi.spyOn(testnetClient as any, 'simulateOp').mockRejectedValue(new Error('RPC down'));
 
     const mainnetClient = multi.getClient('mainnet');
-    vi.spyOn((mainnetClient as any).contract, 'call').mockImplementation(() => ({ build: () => ({}) }));
+    vi.spyOn((mainnetClient as any).contract, 'call').mockImplementation(() => ({
+      build: () => ({}),
+    }));
     vi.spyOn(mainnetClient as any, 'simulateOp').mockResolvedValue(makeStreamsScVal([]));
 
     const { results, allStreams } = await multi.getStreamsByRecipientAllNetworks(RECIPIENT);
@@ -237,7 +286,9 @@ describe('MultiNetworkClient.getStreamsBySenderAllNetworks', () => {
     for (const network of ['testnet', 'mainnet'] as const) {
       const client = multi.getClient(network);
       vi.spyOn((client as any).contract, 'call').mockImplementation(() => ({ build: () => ({}) }));
-      vi.spyOn(client as any, 'simulateOp').mockResolvedValue(makeStreamsScVal([makeStream('1', VALID_ACCOUNT)]));
+      vi.spyOn(client as any, 'simulateOp').mockResolvedValue(
+        makeStreamsScVal([makeStream('1', VALID_ACCOUNT)]),
+      );
     }
 
     const { allStreams } = await multi.getStreamsBySenderAllNetworks(VALID_ACCOUNT);
@@ -255,7 +306,9 @@ describe('MultiNetworkClient.findStreamAcrossNetworks', () => {
     for (const network of ['testnet', 'mainnet'] as const) {
       const client = multi.getClient(network);
       vi.spyOn((client as any).contract, 'call').mockImplementation(() => ({ build: () => ({}) }));
-      vi.spyOn(client as any, 'simulateOp').mockResolvedValue(makeStreamScVal(makeStream('99', VALID_ACCOUNT)));
+      vi.spyOn(client as any, 'simulateOp').mockResolvedValue(
+        makeStreamScVal(makeStream('99', VALID_ACCOUNT)),
+      );
     }
 
     const found = await multi.findStreamAcrossNetworks('99');
@@ -284,9 +337,7 @@ describe('MultiNetworkClient.findStreamAcrossNetworks', () => {
 describe('MultiNetworkClient.destroy', () => {
   it('calls destroy on every underlying client', () => {
     const multi = new MultiNetworkClient(makeConfigs());
-    const destroySpies = multi.networks.map((n) =>
-      vi.spyOn(multi.getClient(n), 'destroy'),
-    );
+    const destroySpies = multi.networks.map((n) => vi.spyOn(multi.getClient(n), 'destroy'));
     multi.destroy();
     for (const spy of destroySpies) {
       expect(spy).toHaveBeenCalledOnce();

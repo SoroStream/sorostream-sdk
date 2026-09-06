@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createPooledRpcTransport } from "../src/transport.js";
-import { ConnectionPool } from "../src/connectionPool.js";
-import { SoroStreamClient } from "../src/SoroStreamClient.js";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createPooledRpcTransport } from '../src/transport.js';
+import { ConnectionPool } from '../src/connectionPool.js';
+import { SoroStreamClient } from '../src/SoroStreamClient.js';
 
-describe("Issue #435: RPC connection pooling for improved throughput", () => {
-  const rpcUrl = "https://soroban-testnet.stellar.org";
+describe('Issue #435: RPC connection pooling for improved throughput', () => {
+  const rpcUrl = 'https://soroban-testnet.stellar.org';
 
-  it("instantiates pooled transport with default and custom pool sizes", () => {
+  it('instantiates pooled transport with default and custom pool sizes', () => {
     const defaultTransport = createPooledRpcTransport(rpcUrl);
     expect(defaultTransport).toBeDefined();
     expect(defaultTransport.getPoolStats().poolSize).toBe(4);
@@ -15,35 +15,35 @@ describe("Issue #435: RPC connection pooling for improved throughput", () => {
     expect(customTransport.getPoolStats().poolSize).toBe(8);
   });
 
-  it("exposes all RpcTransportAdapter methods", () => {
+  it('exposes all RpcTransportAdapter methods', () => {
     const transport = createPooledRpcTransport(rpcUrl, { poolSize: 2 });
-    expect(typeof transport.getAccount).toBe("function");
-    expect(typeof transport.getHealth).toBe("function");
-    expect(typeof transport.getLatestLedger).toBe("function");
-    expect(typeof transport.getTransaction).toBe("function");
-    expect(typeof transport.simulateTransaction).toBe("function");
-    expect(typeof transport.prepareTransaction).toBe("function");
-    expect(typeof transport.sendTransaction).toBe("function");
-    expect(typeof transport.getEvents).toBe("function");
+    expect(typeof transport.getAccount).toBe('function');
+    expect(typeof transport.getHealth).toBe('function');
+    expect(typeof transport.getLatestLedger).toBe('function');
+    expect(typeof transport.getTransaction).toBe('function');
+    expect(typeof transport.simulateTransaction).toBe('function');
+    expect(typeof transport.prepareTransaction).toBe('function');
+    expect(typeof transport.sendTransaction).toBe('function');
+    expect(typeof transport.getEvents).toBe('function');
     expect(transport.serverURL).toBeDefined();
-    expect(transport.serverURL?.toString()).toContain("soroban-testnet.stellar.org");
+    expect(transport.serverURL?.toString()).toContain('soroban-testnet.stellar.org');
   });
 
-  it("re-initializes pool on init hook when rpcUrl changes", async () => {
+  it('re-initializes pool on init hook when rpcUrl changes', async () => {
     const transport = createPooledRpcTransport(rpcUrl, { poolSize: 3 });
-    const newUrl = "https://soroban-mainnet.stellar.org";
-    await transport.init?.({ network: "mainnet", rpcUrl: newUrl });
-    expect(transport.serverURL?.toString()).toContain("soroban-mainnet.stellar.org");
+    const newUrl = 'https://soroban-mainnet.stellar.org';
+    await transport.init?.({ network: 'mainnet', rpcUrl: newUrl });
+    expect(transport.serverURL?.toString()).toContain('soroban-mainnet.stellar.org');
   });
 
-  it("cleans up resources on teardown", async () => {
+  it('cleans up resources on teardown', async () => {
     const transport = createPooledRpcTransport(rpcUrl, { poolSize: 3 });
     await transport.teardown?.();
     expect(transport.getPoolStats().poolSize).toBe(0);
     expect(transport.getPoolStats().activeRequests).toBe(0);
   });
 
-  it("tracks active, total, and reused requests in pool stats", async () => {
+  it('tracks active, total, and reused requests in pool stats', async () => {
     const transport = createPooledRpcTransport(rpcUrl, { poolSize: 2 });
     expect(transport.getPoolStats()).toEqual({
       poolSize: 2,
@@ -53,11 +53,11 @@ describe("Issue #435: RPC connection pooling for improved throughput", () => {
     });
   });
 
-  it("ConnectionPool allows acquiring RPC servers for request execution", () => {
+  it('ConnectionPool allows acquiring RPC servers for request execution', () => {
     const pool = new ConnectionPool({
       poolSize: 3,
       rpcUrl,
-      contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
     });
 
     const { server, release } = pool.acquireServer();
@@ -70,10 +70,10 @@ describe("Issue #435: RPC connection pooling for improved throughput", () => {
     pool.destroy();
   });
 
-  it("SoroStreamClient initializes with useConnectionPooling option", () => {
+  it('SoroStreamClient initializes with useConnectionPooling option', () => {
     const client = new SoroStreamClient({
-      network: "testnet",
-      contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+      network: 'testnet',
+      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
       useConnectionPooling: true,
       poolSize: 5,
     });

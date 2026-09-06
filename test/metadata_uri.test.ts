@@ -18,9 +18,7 @@ describe('Issue #388 — buildMetadataUri', () => {
   });
 
   it('builds URI with a single field', () => {
-    expect(buildMetadataUri({ label: 'Q3 payout' })).toBe(
-      'sorostream:v1?label=Q3%20payout',
-    );
+    expect(buildMetadataUri({ label: 'Q3 payout' })).toBe('sorostream:v1?label=Q3%20payout');
   });
 
   it('builds URI with multiple fields', () => {
@@ -89,9 +87,7 @@ describe('Issue #388 — parseMetadataUri', () => {
   });
 
   it('decodes URL-encoded values', () => {
-    const result = parseMetadataUri(
-      'sorostream:v1?url=https%3A%2F%2Fexample.com',
-    );
+    const result = parseMetadataUri('sorostream:v1?url=https%3A%2F%2Fexample.com');
     expect(result.url).toBe('https://example.com');
   });
 

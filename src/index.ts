@@ -13,7 +13,11 @@ export type {
   SoroStreamAdapters,
 } from './adapters.js';
 
-export { createDefaultRpcTransport, createRetryingRpcTransport, createPooledRpcTransport } from './transport.js';
+export {
+  createDefaultRpcTransport,
+  createRetryingRpcTransport,
+  createPooledRpcTransport,
+} from './transport.js';
 export type {
   RpcTransportAdapter,
   RpcTransportInitContext,
@@ -85,7 +89,13 @@ export {
   parseMetadataUri,
   withFeeBump,
 } from './utils.js';
-export type { StreamMetadataFields, SimulateStreamParams, StreamSimulationResult, StreamSimulationSnapshot, RateUnit } from './utils.js';
+export type {
+  StreamMetadataFields,
+  SimulateStreamParams,
+  StreamSimulationResult,
+  StreamSimulationSnapshot,
+  RateUnit,
+} from './utils.js';
 export { templates } from './templates.js';
 export { serializeStream, deserializeStream, buildUnsignedXdr } from './serialization.js';
 export type { SerializedStream } from './serialization.js';
@@ -282,10 +292,7 @@ export type {
 export { ConnectionPoolExhaustedError, RecipientValidationError } from './errors.js';
 export { SanitizingLogger, NoopLogger, ConsoleLogger, createLogger } from './logger.js';
 export type { Logger, LogLevel, CreateLoggerOptions } from './logger.js';
-export {
-  StreamStateMachine,
-  InvalidStateTransitionError,
-} from './state-machine.js';
+export { StreamStateMachine, InvalidStateTransitionError } from './state-machine.js';
 export type { StreamState, StreamAction } from './state-machine.js';
 export {
   AlbedoWalletAdapter,
@@ -298,7 +305,12 @@ export {
   createLedgerWalletAdapter,
   createLedgerAdapter,
 } from './wallet.js';
-export type { AlbedoWalletAdapterConfig, LobstrWalletAdapterConfig, LedgerWalletAdapterConfig, RequestOptions } from './types.js';
+export type {
+  AlbedoWalletAdapterConfig,
+  LobstrWalletAdapterConfig,
+  LedgerWalletAdapterConfig,
+  RequestOptions,
+} from './types.js';
 export { PluginRegistry } from './pluginRegistry.js';
 export { getPortfolioStats } from './portfolioAnalytics.js';
 export { scheduleFeeBumpMonitor } from './feeBump.js';
@@ -306,13 +318,25 @@ export { createFeeRetryMiddleware, FeeRetryError } from './feeRetryMiddleware.js
 export type { FeeRetryMiddlewareOptions } from './feeRetryMiddleware.js';
 export { createFederationPlugin } from './federationPlugin.js';
 export type { FederationPluginOptions } from './federationPlugin.js';
-export type { PaginatedEvents, StreamEvent as IndexerStreamEvent, StreamEventType as IndexerStreamEventType } from './indexer.js';
+export type {
+  PaginatedEvents,
+  StreamEvent as IndexerStreamEvent,
+  StreamEventType as IndexerStreamEventType,
+} from './indexer.js';
 
 // ── Issue #515: Multi-network client ────────────────────────────────────────
-export { MultiNetworkClient, MultiNetworkConfigError, MultiNetworkNotFoundError } from './multiNetwork.js';
+export {
+  MultiNetworkClient,
+  MultiNetworkConfigError,
+  MultiNetworkNotFoundError,
+} from './multiNetwork.js';
 export type { NetworkConfig, NetworkedStream, MultiNetworkStreams } from './multiNetwork.js';
 
 // ── Issue #526: Bundle integrity manifest ───────────────────────────────────
-export { computeSha256, generateIntegrityManifest, verifyFileIntegrity, verifyManifest } from './bundleIntegrity.js';
+export {
+  computeSha256,
+  generateIntegrityManifest,
+  verifyFileIntegrity,
+  verifyManifest,
+} from './bundleIntegrity.js';
 export type { IntegrityEntry, IntegrityManifest } from './bundleIntegrity.js';
-

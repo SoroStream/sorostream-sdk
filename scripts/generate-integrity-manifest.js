@@ -68,4 +68,6 @@ const manifest = {
 };
 
 fs.writeFileSync(OUT_FILE, JSON.stringify(manifest, null, 2) + '\n');
-console.log(`[integrity] Manifest written → ${path.relative(ROOT, OUT_FILE)} (${files.length} file${files.length === 1 ? '' : 's'})`);
+console.log(
+  `[integrity] Manifest written → ${path.relative(ROOT, OUT_FILE)} (${files.length} file${files.length === 1 ? '' : 's'})`,
+);

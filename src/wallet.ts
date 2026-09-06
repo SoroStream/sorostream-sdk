@@ -634,13 +634,15 @@ export class LedgerWalletAdapter implements WalletAdapter {
     if (this.transportType === 'webhid') {
       // @ts-ignore
       const mod = await import('@ledgerhq/hw-transport-webhid').catch(() => null);
-      if (!mod) throw new Error('WebHID transport (@ledgerhq/hw-transport-webhid) is not available');
+      if (!mod)
+        throw new Error('WebHID transport (@ledgerhq/hw-transport-webhid) is not available');
       const TransportWebHID = (mod as any).default ?? mod;
       this.transport = await TransportWebHID.create();
     } else {
       // @ts-ignore
       const mod = await import('@ledgerhq/hw-transport-webusb').catch(() => null);
-      if (!mod) throw new Error('WebUSB transport (@ledgerhq/hw-transport-webusb) is not available');
+      if (!mod)
+        throw new Error('WebUSB transport (@ledgerhq/hw-transport-webusb) is not available');
       const TransportWebUSB = (mod as any).default ?? mod;
       this.transport = await TransportWebUSB.create();
     }
@@ -658,7 +660,8 @@ export class LedgerWalletAdapter implements WalletAdapter {
     try {
       if (this.transport) return true;
       if (typeof window !== 'undefined') {
-        const nav = (window as any).navigator || (typeof navigator !== 'undefined' ? navigator : null);
+        const nav =
+          (window as any).navigator || (typeof navigator !== 'undefined' ? navigator : null);
         if (nav && ('usb' in nav || 'hid' in nav)) {
           return true;
         }
@@ -674,7 +677,7 @@ export class LedgerWalletAdapter implements WalletAdapter {
     try {
       const app = await this.getAppInstance();
       const result = await app.getPublicKey(this.bip32Path);
-      const key = typeof result === 'string' ? result : (result.publicKey || result.address);
+      const key = typeof result === 'string' ? result : result.publicKey || result.address;
       if (!key) throw new Error('Failed to retrieve public key from Ledger device');
       this.publicKey = key;
       return key;
@@ -827,7 +830,7 @@ export class AlbedoWalletAdapter implements WalletAdapter {
 
   private getProvider(): any {
     if (this.provider) return this.provider;
-    if (typeof window !== "undefined" && (window as any).albedo) {
+    if (typeof window !== 'undefined' && (window as any).albedo) {
       return (window as any).albedo;
     }
     return null;
@@ -837,7 +840,7 @@ export class AlbedoWalletAdapter implements WalletAdapter {
     if (this.publicKey) return true;
     const provider = this.getProvider();
     if (!provider) return false;
-    if (typeof provider.isConnected === "function") {
+    if (typeof provider.isConnected === 'function') {
       return await provider.isConnected();
     }
     return true;
@@ -847,19 +850,19 @@ export class AlbedoWalletAdapter implements WalletAdapter {
     if (this.publicKey) return this.publicKey;
     const provider = this.getProvider();
     if (!provider) {
-      throw new Error("Albedo wallet provider is not available");
+      throw new Error('Albedo wallet provider is not available');
     }
-    if (typeof provider.publicKey === "function") {
+    if (typeof provider.publicKey === 'function') {
       const res = await provider.publicKey();
-      const key = typeof res === "string" ? res : res?.pubkey ?? res?.publicKey ?? res?.address;
+      const key = typeof res === 'string' ? res : (res?.pubkey ?? res?.publicKey ?? res?.address);
       if (key) {
         this.publicKey = key;
         return key;
       }
     }
-    if (typeof provider.getPublicKey === "function") {
+    if (typeof provider.getPublicKey === 'function') {
       const key = await provider.getPublicKey();
-      if (typeof key === "string" && key) {
+      if (typeof key === 'string' && key) {
         this.publicKey = key;
         return key;
       }
@@ -869,54 +872,54 @@ export class AlbedoWalletAdapter implements WalletAdapter {
         return k;
       }
     }
-    if (typeof provider.getAccount === "function") {
+    if (typeof provider.getAccount === 'function') {
       const acc = await provider.getAccount();
-      const key = typeof acc === "string" ? acc : acc?.address ?? acc?.publicKey ?? acc?.pubkey;
+      const key = typeof acc === 'string' ? acc : (acc?.address ?? acc?.publicKey ?? acc?.pubkey);
       if (key) {
         this.publicKey = key;
         return key;
       }
     }
-    throw new Error("Albedo wallet provider did not return a valid public key");
+    throw new Error('Albedo wallet provider did not return a valid public key');
   }
 
   async signTransaction(xdrStr: string, network: Network): Promise<string> {
     const provider = this.getProvider();
     if (!provider) {
-      throw new Error("Albedo wallet provider is not available");
+      throw new Error('Albedo wallet provider is not available');
     }
     const networkPassphrase = NETWORK_PASSPHRASES[network] ?? network;
-    const albedoNetwork = network === "mainnet" ? "public" : (network ?? "testnet");
+    const albedoNetwork = network === 'mainnet' ? 'public' : (network ?? 'testnet');
 
-    if (typeof provider.tx === "function") {
+    if (typeof provider.tx === 'function') {
       const res = await provider.tx({
         xdr: xdrStr,
         network: albedoNetwork,
         networkPassphrase,
       });
-      if (typeof res === "string") return res;
+      if (typeof res === 'string') return res;
       if (res?.signed_envelope_xdr) return res.signed_envelope_xdr;
       if (res?.signedTxXdr) return res.signedTxXdr;
       if (res?.xdr) return res.xdr;
     }
-    if (typeof provider.signTransaction === "function") {
+    if (typeof provider.signTransaction === 'function') {
       const res = await provider.signTransaction(xdrStr, {
         networkPassphrase,
         network,
       });
-      if (typeof res === "string") return res;
+      if (typeof res === 'string') return res;
       if (res?.signed_envelope_xdr) return res.signed_envelope_xdr;
       if (res?.signedTxXdr) return res.signedTxXdr;
       if (res?.xdr) return res.xdr;
     }
-    if (typeof provider.sign === "function") {
+    if (typeof provider.sign === 'function') {
       const res = await provider.sign(xdrStr, { networkPassphrase, network });
-      if (typeof res === "string") return res;
+      if (typeof res === 'string') return res;
       if (res?.signed_envelope_xdr) return res.signed_envelope_xdr;
       if (res?.signedTxXdr) return res.signedTxXdr;
       if (res?.xdr) return res.xdr;
     }
-    throw new Error("Albedo wallet failed to sign transaction");
+    throw new Error('Albedo wallet failed to sign transaction');
   }
 
   onNetworkChange(callback: (network: Network) => void): () => void {
@@ -987,7 +990,7 @@ export class LobstrWalletAdapter implements WalletAdapter {
     }
     if (typeof provider.getAccount === 'function') {
       const acc = await provider.getAccount();
-      const key = typeof acc === 'string' ? acc : acc?.address ?? acc?.publicKey;
+      const key = typeof acc === 'string' ? acc : (acc?.address ?? acc?.publicKey);
       if (key) {
         this.publicKey = key;
         return key;

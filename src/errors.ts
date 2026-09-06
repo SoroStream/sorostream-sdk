@@ -12,7 +12,10 @@ export class SoroStreamError extends Error {
 
 export class ConnectionPoolExhaustedError extends SoroStreamError {
   constructor(message?: string) {
-    super(message ?? 'Connection pool exhausted: maximum subscription limit reached across all connections');
+    super(
+      message ??
+        'Connection pool exhausted: maximum subscription limit reached across all connections',
+    );
     this.name = 'ConnectionPoolExhaustedError';
   }
 }

@@ -2,7 +2,9 @@ import { useState, useCallback } from 'react';
 import type { SoroStreamClient, WithdrawParams } from '@sorostream/sdk';
 
 export interface UseWithdrawResult {
-  withdraw: (streamIdOrParams: string | WithdrawParams) => Promise<{ txHash: string; amount: string }>;
+  withdraw: (
+    streamIdOrParams: string | WithdrawParams,
+  ) => Promise<{ txHash: string; amount: string }>;
   submitting: boolean;
   error: Error | null;
   txHash: string | null;
@@ -54,9 +56,7 @@ export function useWithdraw(client: SoroStreamClient | null): UseWithdrawResult 
       }
 
       const params: WithdrawParams =
-        typeof streamIdOrParams === 'string'
-          ? { streamId: streamIdOrParams }
-          : streamIdOrParams;
+        typeof streamIdOrParams === 'string' ? { streamId: streamIdOrParams } : streamIdOrParams;
 
       setSubmitting(true);
       setError(null);

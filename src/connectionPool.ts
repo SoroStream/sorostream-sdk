@@ -75,7 +75,7 @@ export class ConnectionPool {
     if (best.subscriptions >= this.maxSubs) {
       this._emit({ type: 'pool:full' });
       throw new ConnectionPoolExhaustedError(
-        `Connection pool exhausted: all ${this.slots.length} connection slots reached capacity (${this.maxSubs} subs/connection)`
+        `Connection pool exhausted: all ${this.slots.length} connection slots reached capacity (${this.maxSubs} subs/connection)`,
       );
     }
 
@@ -114,7 +114,6 @@ export class ConnectionPool {
     };
   }
 
-
   /**
    * Acquires the least-loaded RPC server instance from the pool for executing a request (issue #435).
    */
@@ -136,7 +135,7 @@ export class ConnectionPool {
         released = true;
         slot.subscriptions = Math.max(0, slot.subscriptions - 1);
         if (this.slots.every((s) => s.subscriptions === 0)) {
-          this._emit({ type: "pool:drain" });
+          this._emit({ type: 'pool:drain' });
         }
       },
     };
