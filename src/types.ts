@@ -1727,3 +1727,12 @@ export interface BuildUnsignedXdrParams {
   delegator?: string;
   [key: string]: any;
 }
+
+export interface CreateStreamDryRunResult {
+  dryRun: true;
+  simulated: boolean;
+  expectedFee: string;
+  minResourceFee: string;
+  result: unknown;
+  params: CreateStreamParams;
+}

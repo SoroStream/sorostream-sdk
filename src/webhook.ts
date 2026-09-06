@@ -214,7 +214,7 @@ export class WebhookEmitter {
   private async checkStream(streamId: string): Promise<void> {
     let stream: { status?: unknown } & Record<string, unknown>;
     try {
-      stream = (await this.client.getStream(streamId)) as typeof stream;
+      stream = (await this.client.getStream(streamId)) as unknown as typeof stream;
     } catch {
       // Stream not found or transient network error — skip this cycle
       return;

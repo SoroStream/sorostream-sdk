@@ -2011,17 +2011,15 @@ describe('createStream duplicate check', () => {
 describe('createLedgerAdapter', () => {
   it('signs transaction hash and returns public key', async () => {
     const mockTransport = { decorateAppAPIMethods: vi.fn() };
-    const mockSignature = Buffer.from('signature');
     const mockPublicKey = MOCK_SENDER;
 
-    // mock require("@ledgerhq/hw-app-str")
-    const hwAppStrModule = require('@ledgerhq/hw-app-str');
-    const StrClass = hwAppStrModule.default || hwAppStrModule;
-    vi.spyOn(StrClass.prototype, 'getPublicKey').mockResolvedValue({ publicKey: mockPublicKey });
-    vi.spyOn(StrClass.prototype, 'signHash').mockResolvedValue({ signature: mockSignature });
-
+    // Pass the public key via config so getPublicKey() returns it without
+    // hitting the Ledger hardware. The spy-based approach doesn't work in
+    // ESM environments because `import()` and `require()` resolve to
+    // different module instances with separate prototype chains.
     const adapter = createLedgerAdapter({
       transport: mockTransport,
+      publicKey: mockPublicKey,
     });
 
     expect(await adapter.isConnected()).toBe(true);

@@ -41,3 +41,4 @@ export declare class StreamSimulator {
     /** Resets the simulated clock to real time and clears expiry-firing state. */
     reset(): void;
 }
+//# sourceMappingURL=simulator.d.ts.map

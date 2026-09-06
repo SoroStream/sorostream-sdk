@@ -734,7 +734,7 @@ export function createLedgerWalletAdapter(config?: LedgerWalletAdapterConfig): W
 }
 
 /** Alias for createLedgerWalletAdapter. */
-export function createLedgerAdapter(config: { transport?: unknown }): WalletAdapter {
+export function createLedgerAdapter(config: LedgerWalletAdapterConfig): WalletAdapter {
   return new LedgerWalletAdapter(config);
 }
 

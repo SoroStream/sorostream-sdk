@@ -2204,3 +2204,140 @@ export function subscribeToActivityFeed(
 ): import('./types.js').StreamSubscription {
   return client.subscribeToActivityFeed(streamIds, callback);
 }
+
+// ── Issue #382: projectCost ───────────────────────────────────────────────────
+/**
+ * Returns the total cost in stroops for a stream running at `ratePerSecond`
+ * for `durationSeconds` seconds.
+ */
+export function projectCost(ratePerSecond: bigint, durationSeconds: number): bigint {
+  if (ratePerSecond <= 0n) throw new Error('ratePerSecond must be > 0');
+  if (durationSeconds <= 0) throw new Error('durationSeconds must be > 0');
+  return ratePerSecond * BigInt(Math.floor(durationSeconds));
+}
+
+// ── Issue #436: calculateStreamDelta ─────────────────────────────────────────
+/**
+ * Returns the increase in claimable amount since `previousClaimable` was
+ * recorded. Returns 0 when the stream is Paused, Cancelled, or Completed,
+ * and when the current claimable is not greater than the previous value.
+ */
+export function calculateStreamDelta(
+  stream: Stream,
+  previousClaimable: bigint,
+  now?: number,
+): bigint {
+  if (stream.status !== 'Active') return 0n;
+  const current = claimableNow(stream, now);
+  const delta = current - previousClaimable;
+  return delta > 0n ? delta : 0n;
+}
+
+// ── Issue #397: batchGetStreamHealth ─────────────────────────────────────────
+/**
+ * Runs {@link getStreamHealth} on each stream and returns a combined result
+ * with per-stream entries and an aggregate summary.
+ */
+export function batchGetStreamHealth(
+  streams: Stream[],
+  now?: number,
+): {
+  entries: Array<{ streamId: string; health: StreamHealthResult }>;
+  summary: {
+    total: number;
+    healthy: number;
+    warning: number;
+    critical: number;
+    completed: number;
+    cancelled: number;
+  };
+} {
+  const entries = streams.map((s) => ({ streamId: s.id, health: getStreamHealth(s, now) }));
+  const summary = {
+    total: entries.length,
+    healthy: entries.filter((e) => e.health.status === 'healthy').length,
+    warning: entries.filter((e) => e.health.status === 'warning').length,
+    critical: entries.filter((e) => e.health.status === 'critical').length,
+    completed: entries.filter((e) => e.health.status === 'completed').length,
+    cancelled: entries.filter((e) => e.health.status === 'cancelled').length,
+  };
+  return { entries, summary };
+}
+
+// ── Issue #388: buildMetadataUri / parseMetadataUri ──────────────────────────
+const METADATA_URI_PREFIX = 'sorostream:v1?';
+const METADATA_URI_MAX_BYTES = 128;
+
+/**
+ * Serialises a flat key→value map into a `sorostream:v1?` URI.
+ * Keys are sorted alphabetically; undefined and empty-string values are omitted.
+ * Returns an empty string when no fields survive the filter.
+ * Throws when the resulting URI body exceeds {@link METADATA_URI_MAX_BYTES} bytes.
+ */
+export function buildMetadataUri(fields: Record<string, string | undefined>): string {
+  const pairs = Object.keys(fields)
+    .sort()
+    .filter((k) => fields[k] !== undefined && fields[k] !== '')
+    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(fields[k]!)}`);
+  if (pairs.length === 0) return '';
+  const body = pairs.join('&');
+  if (new TextEncoder().encode(body).length > METADATA_URI_MAX_BYTES) {
+    throw new Error(`Metadata URI body exceeds ${METADATA_URI_MAX_BYTES} bytes`);
+  }
+  return `${METADATA_URI_PREFIX}${body}`;
+}
+
+/**
+ * Parses a `sorostream:v1?` URI (or a plain query string for backward
+ * compatibility) back into a key→value map. Returns an empty object for
+ * unrecognised or malformed input.
+ */
+export function parseMetadataUri(uri: string): Record<string, string> {
+  if (!uri) return {};
+  let qs: string;
+  if (uri.startsWith(METADATA_URI_PREFIX)) {
+    qs = uri.slice(METADATA_URI_PREFIX.length);
+  } else if (uri.startsWith('sorostream:')) {
+    // sorostream:v1 without query string
+    return {};
+  } else if (uri.includes('://') || uri.startsWith('http')) {
+    // Non-sorostream URI
+    return {};
+  } else {
+    // Plain query string (backward-compat)
+    qs = uri;
+  }
+  if (!qs) return {};
+  const result: Record<string, string> = {};
+  for (const pair of qs.split('&')) {
+    const eqIdx = pair.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = decodeURIComponent(pair.slice(0, eqIdx));
+    const value = decodeURIComponent(pair.slice(eqIdx + 1));
+    result[key] = value;
+  }
+  return result;
+}
+
+// ── Issue #387: withFeeBump ───────────────────────────────────────────────────
+/**
+ * Wraps an inner transaction (or its base64 XDR) in a Stellar fee-bump
+ * envelope signed by `feeSource`.
+ */
+export function withFeeBump(
+  inner: Transaction | string,
+  feeSource: string,
+  opts?: { networkPassphrase?: string; baseFee?: number },
+): FeeBumpTransaction {
+  const passphrase = opts?.networkPassphrase ?? Networks.TESTNET;
+  const tx =
+    typeof inner === 'string'
+      ? (TransactionBuilder.fromXDR(inner, passphrase) as Transaction)
+      : inner;
+  return TransactionBuilder.buildFeeBumpTransaction(
+    feeSource,
+    String(opts?.baseFee ?? 100),
+    tx,
+    passphrase,
+  ) as FeeBumpTransaction;
+}

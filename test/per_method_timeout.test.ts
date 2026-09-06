@@ -24,10 +24,12 @@ function makeValidTxXdr(): string {
   return tx.toXDR();
 }
 
-function makeMockAdapter(validXdr: string): WalletAdapter {
+function makeMockAdapter(_validXdr: string): WalletAdapter {
   return {
     getPublicKey: vi.fn().mockResolvedValue(VALID_ACCOUNT),
-    signTransaction: vi.fn().mockResolvedValue(validXdr),
+    // Echo back whatever XDR is sent for signing — assertEnvelopeUnmutated
+    // requires the signed envelope to describe the same transaction.
+    signTransaction: vi.fn().mockImplementation((xdr: string) => Promise.resolve(xdr)),
     isConnected: vi.fn().mockResolvedValue(true),
   };
 }

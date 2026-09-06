@@ -207,3 +207,4 @@ export declare class SoroStreamSandbox extends MockSoroStreamClient {
     getStreamsBySender(sender: string, pagination?: PaginationParams, filter?: StreamFilterCriteria): Promise<Stream[] | PaginatedStreams>;
     getStreamsByRecipient(recipient: string, pagination?: PaginationParams, filter?: StreamFilterCriteria): Promise<Stream[] | PaginatedStreams>;
 }
+//# sourceMappingURL=mock.d.ts.map

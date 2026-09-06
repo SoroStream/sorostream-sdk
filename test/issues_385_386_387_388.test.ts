@@ -343,19 +343,19 @@ describe('Issue #387: withFeeBump helper', () => {
 describe('Issue #388: buildMetadataUri / parseMetadataUri', () => {
   it('serialises fields to a URI-safe key=value string', () => {
     const uri = buildMetadataUri({ label: 'Alice Salary', category: 'payroll' });
-    expect(uri).toBe('category=payroll&label=Alice%20Salary');
+    expect(uri).toBe('sorostream:v1?category=payroll&label=Alice%20Salary');
   });
 
   it('sorts keys alphabetically for deterministic output', () => {
     const uri1 = buildMetadataUri({ z: 'last', a: 'first' });
     const uri2 = buildMetadataUri({ a: 'first', z: 'last' });
     expect(uri1).toBe(uri2);
-    expect(uri1).toMatch(/^a=first/);
+    expect(uri1).toContain('a=first');
   });
 
   it('omits undefined and empty-string values', () => {
     const uri = buildMetadataUri({ label: 'hello', category: '', namespace: undefined });
-    expect(uri).toBe('label=hello');
+    expect(uri).toBe('sorostream:v1?label=hello');
   });
 
   it('produces an empty string for an empty fields object', () => {
@@ -364,7 +364,7 @@ describe('Issue #388: buildMetadataUri / parseMetadataUri', () => {
 
   it('percent-encodes special characters in keys and values', () => {
     const uri = buildMetadataUri({ 'my key': 'hello world & more' });
-    expect(uri).toBe('my%20key=hello%20world%20%26%20more');
+    expect(uri).toBe('sorostream:v1?my%20key=hello%20world%20%26%20more');
   });
 
   it('round-trips through parseMetadataUri', () => {

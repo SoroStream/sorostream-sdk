@@ -187,10 +187,12 @@ import type {
   BatchStreamsResult,
   ObserveStreamOptions,
   StreamCostBreakdown,
+  BuildUnsignedXdrParams,
 } from './types.js';
 import { withRetry, type RetryOptions } from './retry.js';
 import type { EventPollerOptions, StreamRetryPolicy } from './events.js';
 import { calculateVestingSchedule, streamToJSON, formatUSDC } from './utils.js';
+import { buildUnsignedXdr } from './serialization.js';
 import { checkPeerDependencies } from './peerDependencies.js';
 import { PluginRegistry } from './pluginRegistry.js';
 import { getPortfolioStats } from './portfolioAnalytics.js';
@@ -442,6 +444,14 @@ export interface SoroStreamClientOptions {
   rpcRetry?: RetryOptions;
   /** Opt-in localStorage caching of last known stream state (issue #470). */
   cacheStreamState?: boolean;
+  /** Optional response caching configuration for read-only RPC calls (issue #528). */
+  cacheOptions?: import('./types.js').CacheConfigOptions;
+  /**
+   * Optional structured logger for SDK diagnostic messages (issue #437).
+   * Use `createLogger()` from `@sorostream/sdk` or pass any object with
+   * `debug`, `info`, `warn`, and `error` methods.
+   */
+  logger?: import('./logger.js').Logger;
 }
 
 function nativeToStream(raw: Record<string, unknown>): Stream {
@@ -3962,7 +3972,14 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     if (!Array.isArray(ids)) {
       throw new TypeError('getStreams: `ids` must be an array of stream IDs');
     }
-    const requested = ids.map((id) => String(id));
+    // Validate each ID: must be a non-empty numeric string
+    for (const id of ids) {
+      if (!id || !/^\d+$/.test(String(id))) {
+        throw new SoroStreamError(`getStreams: invalid stream ID "${id}"`);
+      }
+    }
+    // Deduplicate while preserving order
+    const requested = [...new Set(ids.map((id) => String(id)))];
 
     if (requested.length === 0) {
       return { streams: [], missing: [], cached: [], rpcCalls: 0 };
@@ -4122,9 +4139,15 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     const cached = this.claimableCache.get(streamId);
     if (cached !== undefined) return cached;
 
-    // 2. Deduplication (issue #426): concurrent callers join the in-flight call
-    //    instead of each starting their own.
-    return this.requestDedup.dedupe(
+    // 2. Join an existing in-flight request (from getClaimable or
+    //    getMultipleStreamBalances) so concurrent callers share one RPC call.
+    const existing = this.claimableInflight.get(streamId);
+    if (existing !== undefined) return existing;
+
+    // 3. Start a new request and register it synchronously in claimableInflight
+    //    so that getMultipleStreamBalances (and other concurrent getClaimable
+    //    callers) can join it before the first await yields.
+    const p = this.requestDedup.dedupe(
       dedupKey('getClaimable', this.network, streamId),
       async (): Promise<bigint> => {
         const result = await withRetry(
@@ -4148,12 +4171,15 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
           }
         }
 
-        // On success: populate the TTL cache so the next burst of callers
-        // doesn't need to wait for a new RPC round-trip.
         this.claimableCache.set(streamId, value);
         return value;
       },
-    );
+    ).finally(() => {
+      this.claimableInflight.delete(streamId);
+    });
+
+    this.claimableInflight.set(streamId, p);
+    return p;
   }
 
   /**

@@ -78,6 +78,12 @@ export {
   getStreamHealth,
   simulateStream,
   subscribeToActivityFeed,
+  projectCost,
+  calculateStreamDelta,
+  batchGetStreamHealth,
+  buildMetadataUri,
+  parseMetadataUri,
+  withFeeBump,
 } from './utils.js';
 export type { StreamMetadataFields, SimulateStreamParams, StreamSimulationResult, StreamSimulationSnapshot, RateUnit } from './utils.js';
 export { templates } from './templates.js';
