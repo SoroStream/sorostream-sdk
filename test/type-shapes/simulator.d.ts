@@ -23,22 +23,22 @@ export type StreamExpiryCallback = (stream: Stream) => void;
  * math without requiring a live RPC connection.
  */
 export declare class StreamSimulator {
-  private clockOffsetSeconds;
-  private expiryCallbacks;
-  private firedExpiry;
-  /** Current simulated unix timestamp (seconds). */
-  now(): number;
-  /**
-   * Advances the simulated clock by `seconds`. Any stream in `streams` whose
-   * `endTime` is newly crossed fires its registered expiry callback exactly
-   * once.
-   */
-  advance(seconds: number, streams?: Stream[]): void;
-  /** Registers a callback fired the first time `advance` crosses the stream's `endTime`. */
-  onExpire(streamId: string, callback: StreamExpiryCallback): void;
-  /** Computes the claimable amount for a stream at the simulator's current simulated time. */
-  claimableAt(stream: Stream): bigint;
-  /** Resets the simulated clock to real time and clears expiry-firing state. */
-  reset(): void;
+    private clockOffsetSeconds;
+    private expiryCallbacks;
+    private firedExpiry;
+    /** Current simulated unix timestamp (seconds). */
+    now(): number;
+    /**
+     * Advances the simulated clock by `seconds`. Any stream in `streams` whose
+     * `endTime` is newly crossed fires its registered expiry callback exactly
+     * once.
+     */
+    advance(seconds: number, streams?: Stream[]): void;
+    /** Registers a callback fired the first time `advance` crosses the stream's `endTime`. */
+    onExpire(streamId: string, callback: StreamExpiryCallback): void;
+    /** Computes the claimable amount for a stream at the simulator's current simulated time. */
+    claimableAt(stream: Stream): bigint;
+    /** Resets the simulated clock to real time and clears expiry-firing state. */
+    reset(): void;
 }
 //# sourceMappingURL=simulator.d.ts.map
