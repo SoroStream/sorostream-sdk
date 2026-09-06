@@ -2233,7 +2233,14 @@ export function calculateStreamDelta(
   now?: number,
 ): bigint {
   if (stream.status !== 'Active') return 0n;
-  const current = claimableNow(stream, now);
+  let current: bigint;
+  if (now === undefined) {
+    current = claimableNow(stream);
+  } else {
+    const effectiveNow = Math.min(now, stream.endTime);
+    const elapsed = Math.max(0, effectiveNow - stream.lastWithdrawTime);
+    current = stream.flowRate * BigInt(elapsed);
+  }
   const delta = current - previousClaimable;
   return delta > 0n ? delta : 0n;
 }
