@@ -2,7 +2,6 @@
 import { Command } from 'commander';
 import type { GlobalOptions } from './commands.js';
 import {
-  cmdCreate,
   cmdGet,
   cmdList,
   cmdWithdraw,
@@ -10,6 +9,7 @@ import {
   cmdTopUp,
   cmdClaimable,
   cmdForecast,
+  cmdStreamCreate,
 } from './commands.js';
 import { cmdAnalyze } from './analyze.js';
 
@@ -28,18 +28,23 @@ program
     process.env.SOROSTREAM_SECRET,
   );
 
-// --- create ----------------------------------------------------------------
+// --- stream create ---------------------------------------------------------
 program
-  .command('create')
+  .command('stream create')
   .description('Create a new payment stream')
-  .requiredOption('--recipient <address>', 'Recipient Stellar address')
-  .requiredOption('--token <address>', 'Token contract address (e.g. USDC)')
-  .requiredOption('--amount <usdc>', 'Amount in USDC (e.g. 100.50)')
-  .requiredOption('--duration <seconds>', 'Duration in seconds', parseInt)
+  .option('--recipient <address>', 'Recipient Stellar address')
+  .option('--token <address>', 'Token contract address (e.g. USDC)')
+  .option('--amount <usdc>', 'Amount in USDC (e.g. 100.50)')
+  .option('--duration <seconds>', 'Duration in seconds', parseInt)
   .option('--auto-renew', 'Enable auto-renewal', false)
+  .option(
+    '--json',
+    'Read all params from flags non-interactively (for CI use)',
+    false,
+  )
   .action(async (opts) => {
     const global = program.opts<GlobalOptions>();
-    await cmdCreate({ ...global, ...opts });
+    await cmdStreamCreate({ ...global, ...opts });
   });
 
 // --- list ------------------------------------------------------------------
