@@ -5,52 +5,43 @@ export interface UseWithdrawResult {
   withdraw: (
     streamIdOrParams: string | WithdrawParams,
   ) => Promise<{ txHash: string; amount: string }>;
-  submitting: boolean;
+  loading: boolean;
   error: Error | null;
-  txHash: string | null;
-  amount: string | null;
-  reset: () => void;
+  txResult: { txHash: string; amount: string } | null;
 }
 
 /**
  * React hook for withdrawing claimable funds from a SoroStream.
  *
- * Tracks submission state so buttons can be disabled while the transaction
- * is in flight. Errors are both captured in `error` and re-thrown so both
- * `try`/`catch` patterns and state-driven error display work.
+ * Returns `{ withdraw, loading, error, txResult }`. `loading` is true from call
+ * initiation until confirmation, `error` is set when the transaction fails,
+ * and `txResult` holds the `{ txHash, amount }` on success.
  *
  * @param client - A connected `SoroStreamClient` instance (or null).
- * @returns `{ withdraw, submitting, error, txHash, amount, reset }`
+ * @returns `{ withdraw, loading, error, txResult }`
  *
  * @example
  * ```tsx
- * const { withdraw, submitting, error, txHash } = useWithdraw(client);
+ * const { withdraw, loading, error, txResult } = useWithdraw(client);
  *
  * return (
- *   <button disabled={submitting} onClick={() => withdraw("42").catch(() => {})}>
- *     {submitting ? "Withdrawing…" : "Withdraw"}
+ *   <button disabled={loading} onClick={() => withdraw("42").catch(() => {})}>
+ *     {loading ? "Withdrawing…" : "Withdraw"}
  *   </button>
  * );
  * ```
  */
 export function useWithdraw(client: SoroStreamClient | null): UseWithdrawResult {
-  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [amount, setAmount] = useState<string | null>(null);
-
-  const reset = useCallback(() => {
-    setError(null);
-    setTxHash(null);
-    setAmount(null);
-  }, []);
+  const [txResult, setTxResult] = useState<{ txHash: string; amount: string } | null>(null);
 
   const withdraw = useCallback(
     async (
       streamIdOrParams: string | WithdrawParams,
     ): Promise<{ txHash: string; amount: string }> => {
       if (!client) {
-        const err = new Error('useWithdraw: no SoroStreamClient provided');
+        const err = new Error('useWithdraw: no SoroStream client provided');
         setError(err);
         throw err;
       }
@@ -58,24 +49,23 @@ export function useWithdraw(client: SoroStreamClient | null): UseWithdrawResult 
       const params: WithdrawParams =
         typeof streamIdOrParams === 'string' ? { streamId: streamIdOrParams } : streamIdOrParams;
 
-      setSubmitting(true);
+      setLoading(true);
       setError(null);
 
       try {
         const result = await client.withdraw(params);
-        setTxHash(result.txHash);
-        setAmount(result.amount);
+        setTxResult(result);
         return result;
       } catch (err) {
         const wrapped = err instanceof Error ? err : new Error(String(err));
         setError(wrapped);
         throw wrapped;
       } finally {
-        setSubmitting(false);
+        setLoading(false);
       }
     },
     [client],
   );
 
-  return { withdraw, submitting, error, txHash, amount, reset };
+  return { withdraw, loading, error, txResult };
 }
