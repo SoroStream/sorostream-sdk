@@ -262,3 +262,115 @@ describe('Drain flow integration test', () => {
     ]);
   });
 });
+
+describe('Issue #558 — drainFlow', () => {
+  it('returns success when cancel and withdraw both succeed', async () => {
+    const adapter = makeMockAdapter();
+    const client = new SoroStreamClient({
+      network: 'testnet',
+      contractId: VALID_CONTRACT,
+      walletAdapter: adapter,
+      skipPeerCheck: true,
+    });
+
+    (client as any).getClaimable = vi.fn().mockResolvedValue(500n);
+    (client as any).getStream = vi.fn().mockResolvedValue({
+      id: '42',
+      sender: VALID_ACCOUNT,
+      recipient: VALID_ACCOUNT,
+      token: VALID_CONTRACT,
+      deposit: 1000n,
+      flowRate: 1n,
+      startTime: Math.floor(Date.now() / 1000) - 100,
+      endTime: Math.floor(Date.now() / 1000) + 100,
+      lastWithdrawTime: Math.floor(Date.now() / 1000) - 100,
+      status: 'Active',
+      autoRenew: false,
+    });
+
+    const order: string[] = [];
+    (client as any).buildAndSubmit = vi.fn().mockImplementation(async (op, _signal, _feeBump, name) => {
+      order.push(name);
+      return { txHash: `${name}-tx`, ledger: 1 };
+    });
+
+    const result = await client.drainFlow({ streamId: '42' });
+
+    expect(result.ok).toBe(true);
+    expect(order).toEqual(['cancelStream', 'withdraw']);
+    if (result.ok) {
+      expect(result.cancelTxHash).toBe('cancelStream-tx');
+      expect(result.withdrawTxHash).toBe('withdraw-tx');
+      expect(result.amount).toBe('500');
+    }
+  });
+
+  it('returns partial failure when cancel succeeds but withdraw fails', async () => {
+    const adapter = makeMockAdapter();
+    const client = new SoroStreamClient({
+      network: 'testnet',
+      contractId: VALID_CONTRACT,
+      walletAdapter: adapter,
+      skipPeerCheck: true,
+    });
+
+    (client as any).getClaimable = vi.fn().mockResolvedValue(500n);
+    (client as any).getStream = vi.fn().mockResolvedValue({
+      id: '42',
+      sender: VALID_ACCOUNT,
+      recipient: VALID_ACCOUNT,
+      token: VALID_CONTRACT,
+      deposit: 1000n,
+      flowRate: 1n,
+      startTime: Math.floor(Date.now() / 1000) - 100,
+      endTime: Math.floor(Date.now() / 1000) + 100,
+      lastWithdrawTime: Math.floor(Date.now() / 1000) - 100,
+      status: 'Active',
+      autoRenew: false,
+    });
+
+    const order: string[] = [];
+    (client as any).buildAndSubmit = vi.fn().mockImplementation(async (op, _signal, _feeBump, name) => {
+      order.push(name);
+      if (name === 'withdraw') {
+        throw new Error('withdraw failed');
+      }
+      return { txHash: `${name}-tx`, ledger: 1 };
+    });
+
+    const result = await client.drainFlow({ streamId: '42' });
+
+    expect(result.ok).toBe(false);
+    expect(order).toEqual(['cancelStream', 'withdraw']);
+    if (!result.ok) {
+      expect(result.cancelResult.txHash).toBe('cancelStream-tx');
+      expect(result.withdrawError.message).toBe('withdraw failed');
+    }
+  });
+
+  it('returns success with zero amount when claimable is zero', async () => {
+    const adapter = makeMockAdapter();
+    const client = new SoroStreamClient({
+      network: 'testnet',
+      contractId: VALID_CONTRACT,
+      walletAdapter: adapter,
+      skipPeerCheck: true,
+    });
+
+    (client as any).getClaimable = vi.fn().mockResolvedValue(0n);
+
+    const order: string[] = [];
+    (client as any).buildAndSubmit = vi.fn().mockImplementation(async (op, _signal, _feeBump, name) => {
+      order.push(name);
+      return { txHash: `${name}-tx`, ledger: 1 };
+    });
+
+    const result = await client.drainFlow({ streamId: '42' });
+
+    expect(result.ok).toBe(true);
+    expect(order).toEqual(['cancelStream']);
+    if (result.ok) {
+      expect(result.amount).toBe('0');
+    }
+  });
+});
