@@ -408,3 +408,33 @@ export class SdkNetworkError extends SoroStreamError {
     this.statusCode = statusCode;
   }
 }
+
+/**
+ * Thrown when a connected wallet reports a network that does not match the
+ * client's configured network (issue #559).
+ *
+ * For example, the client is configured for `mainnet` but the connected
+ * wallet (e.g. Freighter) is set to `testnet`. The error message names both
+ * networks so callers can surface a clear mismatch to the user.
+ *
+ * Handlers that prefer to react instead of throw can subscribe to the
+ * `wallet:network-mismatch` event bus event via
+ * `client.on('wallet:network-mismatch', handler)`.
+ */
+export class NetworkMismatchError extends SoroStreamError {
+  /** The network the client is configured to use. */
+  readonly expected: string;
+  /** The network the connected wallet is actually on. */
+  readonly actual: string;
+
+  constructor(expected: string, actual: string) {
+    super(
+      `Wallet network mismatch: client is configured for "${expected}" but the ` +
+        `connected wallet reports "${actual}". Pass the matching network to the ` +
+        `client constructor, or switch the wallet's network.`,
+    );
+    this.name = 'NetworkMismatchError';
+    this.expected = expected;
+    this.actual = actual;
+  }
+}

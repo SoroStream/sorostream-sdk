@@ -554,6 +554,16 @@ export interface WalletAdapter {
   signTransaction(xdr: string, network: Network): Promise<string>;
   isConnected(): Promise<boolean>;
   /**
+   * Optional: report the network the wallet itself is currently pointed at
+   * (issue #559). Used by the client during `connect()` to detect a mismatch
+   * between the configured network and the wallet's actual network.
+   *
+   * Adapters that cannot determine the wallet's network (server-side keypair
+   * adapters, etc.) simply omit this method — the client then cannot perform
+   * network-mismatch detection and proceeds without it.
+   */
+  getNetwork?(): Promise<Network>;
+  /**
    * Optional: subscribe to wallet-initiated network changes (issue #215).
    * Called with the new network whenever the connected wallet switches
    * networks mid-session (e.g. the user changes networks in the Freighter
@@ -1342,6 +1352,8 @@ export interface SoroStreamEventMap {
   'stream.cancelled': StreamCancelledEventPayload;
   'rpc.error': RpcErrorEventPayload;
   walletAdapterChanged: WalletAdapterChangedEventPayload;
+  'wallet:switched': WalletSwitchedEventPayload;
+  'wallet:network-mismatch': WalletNetworkMismatchEventPayload;
   cacheInvalidated: CacheInvalidatedEventPayload;
   requestDeduplicated: RequestDeduplicatedEventPayload;
 }
@@ -1373,6 +1385,40 @@ export interface WalletAdapterChangedEventPayload {
   identifier: string;
   /** The previous wallet adapter. */
   previousAdapter: WalletAdapter;
+}
+
+/**
+ * Payload emitted on the `"wallet:switched"` event bus event when
+ * {@link SoroStreamClient.setWalletAdapter} replaces the active signing
+ * provider (issue #562).
+ *
+ * In-flight write operations that were initiated under the previous wallet
+ * still complete with that wallet; only new operations use the new one.
+ */
+export interface WalletSwitchedEventPayload {
+  /** Stellar address of the wallet that was replaced. */
+  previous: string | null;
+  /** Stellar address of the newly active wallet. */
+  next: string | null;
+  /** Identifier for the new adapter, if provided. */
+  identifier?: string;
+}
+
+/**
+ * Payload emitted on the `"wallet:network-mismatch"` event bus event when a
+ * connected wallet reports a network that differs from the client's
+ * configured network (issue #559).
+ *
+ * Subscribing to this event lets callers handle the mismatch gracefully
+ * instead of having the SDK throw a {@link NetworkMismatchError}.
+ */
+export interface WalletNetworkMismatchEventPayload {
+  /** The network the client is configured to use. */
+  expected: Network;
+  /** The network the connected wallet is actually on. */
+  actual: Network;
+  /** The adapter whose network was checked. */
+  adapter: WalletAdapter;
 }
 
 /** Configuration options for KmsWalletAdapter (issue #306). */

@@ -49,7 +49,8 @@ import { createRpcCompatTransport } from './rpc-compat.js';
 import type { RpcVersionDetectedPayload } from './rpc-compat.js';
 import { waitForLedger } from './readConsistency.js';
 import { assertEnvelopeUnmutated } from './xdrValidation.js';
-import { PriorityRequestQueue } from './request-queue.js';
+import { createRequestQueue, PriorityRequestQueue } from './request-queue.js';
+import { NetworkMismatchError } from './errors.js';
 import { RequestDeduplicator, dedupKey, type RequestDedupStats } from './requestDeduplicator.js';
 import { LocalStorageStreamCache } from './streamStateCache.js';
 import { SoroStreamObservable, shareLatest } from './observable.js';
@@ -183,6 +184,8 @@ import type {
   FeeBumpMonitoringOptions,
   IPluginRegistry,
   WalletAdapterChangedPayload,
+  SoroStreamEventMap,
+  WalletSwitchedEventPayload,
   SoroStreamConfigUpdate,
   ConfigUpdatedEvent,
   RecipientTrustScore,
@@ -425,6 +428,19 @@ export interface SoroStreamClientOptions {
   offlineQueue?: boolean;
   /** Maximum entries in the offline write queue (default: from DEFAULT_QUEUE_OPTIONS). */
   maxQueueSize?: number;
+  /**
+   * Opt-in rate-limit-aware request queue (issue #265).
+   *
+   * When provided, every SDK RPC call is routed through a
+   * {@link PriorityRequestQueue} that caps concurrent in-flight requests and
+   * drains higher-priority lanes first. Each call can additionally declare a
+   * per-request priority (`"high"`, `"normal"`, `"low"`) so latency-sensitive
+   * work (health checks, user-initiated withdrawals) jumps ahead of
+   * background polling (issue #566).
+   *
+   * Disabled by default — existing clients are unaffected until they opt in.
+   */
+  requestQueue?: import('./request-queue.js').RequestQueueConfig;
   /** RPC protocol version to use. Defaults to "auto" (issue #272). */
   rpcVersion?: 'v1' | 'v2' | 'auto';
   /** Set to `false` to disable telemetry emission (issue #270). Default: true. */
@@ -451,6 +467,18 @@ export interface SoroStreamClientOptions {
   cacheStreamState?: boolean;
   /** Optional response caching configuration for read-only RPC calls (issue #528). */
   cacheOptions?: import('./types.js').CacheConfigOptions;
+  /**
+   * Read-your-own-writes (RYOW) consistency window in milliseconds (issue #564).
+   *
+   * After any write mutation, a subsequent `getStream` for the same stream
+   * bypasses the TTL cache for one request so callers never observe stale
+   * pre-write state from a lagging RPC node. The bypass applies only to the
+   * first read after the write and expires after this window.
+   *
+   * Defaults to 5 000 ms (5 seconds). Set to `0` to disable the bypass
+   * entirely (reads always use the cache).
+   */
+  readConsistencyWindowMs?: number;
   /**
    * Optional structured logger for SDK diagnostic messages (issue #437).
    * Use `createLogger()` from `@sorostream/sdk` or pass any object with
@@ -670,8 +698,8 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   private readonly persistentStreamCache: LocalStorageStreamCache | null;
   // Issue #260: offline write queue (undefined when not enabled)
   private offlineQueue?: OfflineWriteQueue;
-  // Issue #265: priority request queue (undefined when not configured)
-  private requestQueue?: PriorityRequestQueue;
+  // Issue #265: priority request queue (null when not configured)
+  private requestQueue: PriorityRequestQueue | null = null;
   // Issue #464: client-side write rate limiter (undefined when not configured)
   private readonly writeRateLimiter?: WriteRateLimiter;
   /**
@@ -690,8 +718,16 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   // Issue #271: read-your-own-writes consistency
   // Maps streamId → confirmed ledger sequence of the last mutation for that stream.
   private readonly _lastWriteLedger = new Map<string, number>();
+  // Issue #564: read-your-own-writes cache bypass.
+  // Maps streamId → wall-clock timestamp (ms) of the most recent write to that
+  // stream. A subsequent `getStream` for the same stream bypasses the TTL
+  // cache for one request while the write is within the bypass window, so a
+  // lagging RPC node can't serve stale pre-write state.
+  private readonly _lastWriteAt = new Map<string, number>();
   // The configured RYOW wait timeout (0 = disabled).
   private readonly ryowTimeoutMs: number;
+  // The configured RYOW cache-bypass window in ms (0 = disabled).
+  private readonly ryowBypassWindowMs: number;
 
   /** TTL cache: streamId → resolved claimable amount */
   private readonly claimableCache = new Cache<string, bigint>(STREAM_CACHE_TTL_MS);
@@ -871,6 +907,15 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         this.eventBus.emit('requestDeduplicated', { key, network: this.network });
       },
     });
+    // Issue #265 / #565: opt-in rate-limit-aware request queue with priority
+    // lanes. When configured, every SDK RPC call is routed through it and a
+    // `rateLimitDelayed` event fires whenever a request waits in queue.
+    this.requestQueue = createRequestQueue(options.requestQueue);
+    if (this.requestQueue) {
+      this.requestQueue.onDelayed = (payload) => {
+        this.eventBus.emit('rateLimitDelayed', payload);
+      };
+    }
     // Issue #427: default batch size for getStreams().
     this.batchReadSize = Math.max(1, options.batchReadSize ?? 50);
     this.validateCliff =
@@ -899,6 +944,9 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         : null;
     // Issue #271: RYOW timeout (0 = disabled for zero-overhead backward compat)
     this.ryowTimeoutMs = options.ryowTimeoutMs ?? 10_000;
+    // Issue #564: RYOW cache-bypass window. Defaults to 5 s after the last
+    // write; set to 0 to disable the bypass entirely.
+    this.ryowBypassWindowMs = options.readConsistencyWindowMs ?? 5_000;
     // Issue #203: token metadata cache (10-minute default TTL)
     this.tokenMetadataCache = new Cache<string, TokenMetadata>(
       options.tokenMetadataTtlMs ?? 600_000,
@@ -1005,7 +1053,13 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    *
    * Preserves all read-side cache and event subscriptions. Only the signing
    * provider is replaced. Existing pending transactions remain tied to the
-   * previous adapter.
+   * previous adapter — each write captures the active adapter *before* it is
+   * enqueued, so a hot-swap mid-flight never re-signs an in-flight operation
+   * with the new wallet (issue #562).
+   *
+   * Emits the legacy `walletAdapterChanged` event synchronously, and — when the
+   * previous/next adapters can report a public key — the `wallet:switched`
+   * event with `{ previous, next }` addresses (issue #562).
    *
    * @param adapter - The new wallet adapter to use for signing.
    * @param identifier - Optional identifier for the new adapter (emitted in the event).
@@ -1016,7 +1070,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    * client.setWalletAdapter(ledgerAdapter, "ledger");
    * ```
    */
-  setWalletAdapter(adapter: WalletAdapter, identifier?: string): void {
+  async setWalletAdapter(adapter: WalletAdapter, identifier?: string): Promise<void> {
     const previousAdapter = this.walletAdapter;
     this.walletAdapter = adapter;
 
@@ -1039,12 +1093,91 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       });
     }
 
-    // Emit walletAdapterChanged event (issue #261)
+    // Emit walletAdapterChanged event (issue #261) — synchronous, so existing
+    // listeners observe the swap immediately.
     this.eventBus.emit('walletAdapterChanged', {
       adapter: adapter,
       identifier: identifier ?? 'unknown',
       previousAdapter,
     });
+
+    // Issue #562: emit wallet:switched with the resolved Stellar addresses.
+    // Resolving keys is async, so this may fire after the synchronous
+    // walletAdapterChanged event. Failures are swallowed — the adapter is
+    // already swapped regardless.
+    this._resolveWalletSwitchAddresses(previousAdapter, adapter, identifier).then((payload) => {
+      this.eventBus.emit('wallet:switched', payload);
+    });
+  }
+
+  /**
+   * Resolves the previous/next Stellar addresses for the
+   * `wallet:switched` event (issue #562). Returns `null` for an address that
+   * cannot be resolved instead of throwing, so the swap always notifies.
+   */
+  private async _resolveWalletSwitchAddresses(
+    previousAdapter: WalletAdapter | undefined,
+    nextAdapter: WalletAdapter,
+    identifier?: string,
+  ): Promise<import('./types.js').WalletSwitchedEventPayload> {
+    const readAddress = async (adapter?: WalletAdapter): Promise<string | null> => {
+      if (!adapter) return null;
+      try {
+        return await adapter.getPublicKey();
+      } catch {
+        return null;
+      }
+    };
+    return {
+      previous: await readAddress(previousAdapter),
+      next: await readAddress(nextAdapter),
+      identifier,
+    };
+  }
+
+  /**
+   * Detects whether the connected wallet reports a network that differs from
+   * the client's configured network (issue #559).
+   *
+   * Adapters without a `getNetwork()` method are skipped — the client cannot
+   * perform mismatch detection for them and proceeds normally.
+   *
+   * When a mismatch is detected the SDK emits a `wallet:network-mismatch` event
+   * (so handlers can react gracefully) and then throws a
+   * {@link NetworkMismatchError} naming both networks. Listeners that want to
+   * handle the mismatch themselves should stop propagation by removing their
+   * handler before the throw reaches them — the throw is the default behaviour
+   * for callers that did not register a handler.
+   *
+   * @param adapter - The adapter whose network to check.
+   * @throws {NetworkMismatchError} When the wallet's network differs from the
+   *   client's configured network and no `wallet:network-mismatch` handler
+   *   intercepted it.
+   */
+  checkWalletNetwork(adapter: WalletAdapter): Promise<void> {
+    return this._checkWalletNetwork(adapter);
+  }
+
+  private async _checkWalletNetwork(adapter: WalletAdapter): Promise<void> {
+    if (typeof adapter.getNetwork !== 'function') return;
+
+    let actual: Network;
+    try {
+      actual = await adapter.getNetwork();
+    } catch {
+      // The adapter failed to report its network — don't block on it.
+      return;
+    }
+
+    if (actual === this.network) return;
+
+    this.eventBus.emit('wallet:network-mismatch', {
+      expected: this.network,
+      actual,
+      adapter,
+    });
+
+    throw new NetworkMismatchError(this.network, actual);
   }
 
   /**
@@ -1316,6 +1449,25 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    */
   getNetworkVersion(): number {
     return this.networkVersion;
+  }
+
+  /**
+   * Returns a snapshot of the configured request queue's current depth and
+   * in-flight counts per priority lane.
+   *
+   * Returns `null` when no `requestQueue` was configured on this client —
+   * in that case every RPC call runs immediately with no queueing.
+   *
+   * Issue #265 / #566.
+   *
+   * @example
+   * ```ts
+   * const stats = client.getQueueStats();
+   * if (stats) console.log(stats.write.queued, 'write ops waiting');
+   * ```
+   */
+  getQueueStats(): import('./request-queue.js').QueueStats | null {
+    return this.requestQueue?.getStats() ?? null;
   }
 
   /**
@@ -1691,6 +1843,39 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   }
 
   /**
+   * Records that a write mutation for `streamId` just completed (issue #564).
+   *
+   * Subsequent `getStream` calls for the same stream bypass the TTL cache for
+   * one request while within the configured RYOW bypass window, so a lagging
+   * RPC node can't serve stale pre-write state. The ledger-sequence record
+   * (used by `_waitForStreamLedger`) is also refreshed here.
+   *
+   * @param streamId - The stream that was mutated.
+   * @param ledger   - The ledger sequence returned by the confirmed transaction.
+   */
+  private _recordWriteTimestamp(streamId: string, ledger: number): void {
+    if (this.ryowBypassWindowMs === 0) return;
+    this._lastWriteAt.set(streamId, Date.now());
+    this._recordWriteLedger(streamId, ledger);
+  }
+
+  /**
+   * Returns `true` when a subsequent read for `streamId` should bypass the
+   * TTL cache because a write to that stream completed within the RYOW
+   * bypass window (issue #564).
+   *
+   * The bypass applies to the first read after the write; once the read
+   * proceeds (whether it hits the cache or the network) the record is
+   * cleared so later reads are not penalised.
+   */
+  private _shouldBypassCache(streamId: string): boolean {
+    if (this.ryowBypassWindowMs === 0) return false;
+    const lastWriteAt = this._lastWriteAt.get(streamId);
+    if (lastWriteAt === undefined) return false;
+    return Date.now() - lastWriteAt < this.ryowBypassWindowMs;
+  }
+
+  /**
    * If a previous write has been recorded for `streamId`, waits until the
    * Soroban RPC reports a ledger at or above the write's confirmed sequence
    * before the subsequent read proceeds.  Clears the record once the wait
@@ -1814,6 +1999,16 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   ): Promise<{ txHash: string; ledger: number }> {
     const opStart = Date.now();
     try {
+      // Issue #559: verify the connected wallet is on the client's network
+      // before doing any work. Adapters without getNetwork() are skipped.
+      if (this.walletAdapter) {
+        await this._checkWalletNetwork(this.walletAdapter);
+      }
+      // Issue #562: capture the *active* signing adapter up front, before the
+      // write is enqueued. A wallet hot-swap that lands while the write is
+      // waiting in the queue must not silently re-sign with the new wallet —
+      // the operation that was initiated under wallet A completes with wallet A.
+      const signingAdapter = this.requireWalletAdapter();
       await this.writeRateLimiter?.acquire(operationName ?? 'write');
       return await this.enqueueOp('write', () =>
         this.buildAndSubmitInner(
@@ -1824,6 +2019,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
           operationName,
           memo,
           timeoutMs,
+          signingAdapter,
         ),
       );
     } catch (err) {
@@ -1841,9 +2037,15 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     operationName?: string,
     memo?: string | MemoHash,
     timeoutMs?: number,
+    /**
+     * Adapter to sign with. Passed explicitly (rather than read from
+     * `this.walletAdapter`) so a hot-swap that occurs while this write is
+     * queued does not change which wallet the operation is signed with.
+     * Issue #562.
+     */
+    adapter: WalletAdapter = this.requireWalletAdapter(),
   ): Promise<{ txHash: string; ledger: number }> {
     const effectiveTimeoutMs = timeoutMs ?? this.txTimeoutMs;
-    const adapter = this.requireWalletAdapter();
     const publicKey = await adapter.getPublicKey();
 
     const account = await withRetry(
@@ -1969,11 +2171,21 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     operationName = 'batch',
   ): Promise<string> {
     await this.writeRateLimiter?.acquire(operationName);
-    return this.enqueueOp('write', () => this.buildAndSubmitBatchInner(operations));
+    // Issue #559: verify the connected wallet is on the client's network
+    // before doing any work. Adapters without getNetwork() are skipped.
+    if (this.walletAdapter) {
+      await this._checkWalletNetwork(this.walletAdapter);
+    }
+    // Issue #562: capture the active adapter before queueing so a hot-swap
+    // mid-flight does not re-sign the batch with the new wallet.
+    const signingAdapter = this.requireWalletAdapter();
+    return this.enqueueOp('write', () => this.buildAndSubmitBatchInner(operations, signingAdapter));
   }
 
-  private async buildAndSubmitBatchInner(operations: xdr.Operation[]): Promise<string> {
-    const adapter = this.requireWalletAdapter();
+  private async buildAndSubmitBatchInner(
+    operations: xdr.Operation[],
+    adapter: WalletAdapter = this.requireWalletAdapter(),
+  ): Promise<string> {
     const publicKey = await adapter.getPublicKey();
 
     const account = await withRetry(() => this.server.getAccount(publicKey), this.submitRetry);
@@ -2073,9 +2285,17 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    * @param lane - `"write"` for transaction submission, `"read"` for
    *               simulate/query calls. Write requests are drained ahead of
    *               read requests when the queue is at capacity.
+   * @param priority - Per-request priority (issue #566). `"high"` items jump
+   *   ahead of `"normal"`/`"low"` items in the queue. Defaults to `"normal"`.
    */
-  private enqueueOp<T>(lane: 'write' | 'read', fn: () => Promise<T>): Promise<T> {
-    return this.requestQueue ? this.requestQueue.enqueue(lane, fn) : fn();
+  private enqueueOp<T>(
+    lane: 'write' | 'read',
+    fn: () => Promise<T>,
+    priority?: 'high' | 'normal' | 'low',
+  ): Promise<T> {
+    return this.requestQueue
+      ? this.requestQueue.enqueue(lane, fn, priority ? { priority } : undefined)
+      : fn();
   }
 
   /**
@@ -2492,6 +2712,10 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       const latest = streams[streams.length - 1];
       if (!latest) throw new StreamNotFoundError('(unknown — post-creation fetch returned empty)');
 
+      // Issue #271 / #564: record the confirmed ledger and the write timestamp
+      // so a subsequent getStream for the new stream bypasses the cache.
+      this._recordWriteTimestamp(latest.id, ledger);
+
       // Issue #274: store namespace in the off-chain registry
       if (params.namespace) {
         this.namespaceRegistry.set(latest.id, params.namespace);
@@ -2612,22 +2836,26 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       ) as unknown as { txHash: string; amount: string };
     }
 
-    const feeBump = this.resolveFeeBump(options?.feeBump);
-    const { txHash } = await this.buildAndSubmit(
-      operation,
-      signal,
-      feeBump,
-      'withdraw',
-      options?.memo,
-      options?.timeoutMs ?? options?.timeout,
-    );
+const feeBump = this.resolveFeeBump(options?.feeBump);
+      const { txHash, ledger } = await this.buildAndSubmit(
+        operation,
+        signal,
+        feeBump,
+        'withdraw',
+        options?.memo,
+        options?.timeoutMs ?? options?.timeout,
+      );
 
-    // Issue #212: notify subscribers of the custom event bus.
-    this.eventBus.emit('stream.withdrawn', {
-      streamId: params.streamId,
-      amount: claimable.toString(),
-      txHash,
-    });
+      // Issue #271 / #564: record the confirmed ledger and write timestamp so
+      // a subsequent getStream for the withdrawn stream bypasses the cache.
+      this._recordWriteTimestamp(params.streamId, ledger);
+
+      // Issue #212: notify subscribers of the custom event bus.
+      this.eventBus.emit('stream.withdrawn', {
+        streamId: params.streamId,
+        amount: claimable.toString(),
+        txHash,
+      });
 
     return { txHash, amount: claimable.toString() };
   }
@@ -2760,18 +2988,22 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       ) as unknown as { txHash: string };
     }
 
-    const feeBump = this.resolveFeeBump(options?.feeBump);
-    const { txHash } = await this.buildAndSubmit(
-      operation,
-      signal,
-      feeBump,
-      'cancelStream',
-      options?.memo,
-      options?.timeoutMs ?? options?.timeout,
-    );
+const feeBump = this.resolveFeeBump(options?.feeBump);
+      const { txHash, ledger } = await this.buildAndSubmit(
+        operation,
+        signal,
+        feeBump,
+        'cancelStream',
+        options?.memo,
+        options?.timeoutMs ?? options?.timeout,
+      );
 
-    // Issue #212: notify subscribers of the custom event bus.
-    this.eventBus.emit('stream.cancelled', { streamId: params.streamId, txHash });
+      // Issue #271 / #564: record the confirmed ledger and write timestamp so
+      // a subsequent getStream for the cancelled stream bypasses the cache.
+      this._recordWriteTimestamp(params.streamId, ledger);
+
+      // Issue #212: notify subscribers of the custom event bus.
+      this.eventBus.emit('stream.cancelled', { streamId: params.streamId, txHash });
 
     return { txHash };
   }
@@ -3563,29 +3795,66 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   }
 
   /**
-   * Subscribe to a specific stream lifecycle event type.
+   * Subscribe to a stream lifecycle event or an SDK lifecycle event.
    *
-   * @param eventType - The lifecycle event type to listen for.
-   * @param callback - Invoked with the matching event.
-   * @returns A `StreamSubscription` — call `.unsubscribe()` to stop listening.
+   * Two overloads:
+   * - Pass a {@link StreamEventType} and a stream-event handler to receive
+   *   on-chain events via the event poller. Returns a `StreamSubscription`.
+   * - Pass an event name from {@link SoroStreamEventMap} (e.g.
+   *   `"wallet:switched"`, `"rpc.error"`, `"rateLimitDelayed"`,
+   *   `"wallet:network-mismatch"`) and a lifecycle handler. Returns an
+   *   unsubscribe function.
    *
    * @example
    * ```ts
+   * // Stream lifecycle event
    * const sub = client.on("StreamCreated", (event) => {
    *   console.log("Stream created:", event.streamId);
    * });
-   * // later: sub.unsubscribe();
+   * sub.unsubscribe();
+   *
+   * // SDK lifecycle event
+   * client.on("wallet:switched", ({ previous, next }) => {
+   *   console.log(`Wallet switched from ${previous} to ${next}`);
+   * });
    * ```
    */
+  on<E extends keyof SoroStreamEventMap>(
+    event: E,
+    handler: (payload: SoroStreamEventMap[E]) => void,
+  ): () => void;
   on(
     eventType: StreamEventType,
     callback: (event: StreamEvent<TEventData>) => void,
-  ): StreamSubscription {
-    return this.subscribeEvents({}, (event) => {
-      if (event.type === eventType) {
-        callback(event);
-      }
-    });
+  ): StreamSubscription;
+  on(
+    eventType: StreamEventType | (keyof SoroStreamEventMap),
+    handlerOrCallback: ((payload: unknown) => void) | ((event: StreamEvent<TEventData>) => void),
+  ): (() => void) | StreamSubscription {
+    // Stream lifecycle events are dispatched through the event poller.
+    const streamEventTypes: Set<string> = new Set([
+      'StreamCreated',
+      'StreamWithdrawn',
+      'StreamCancelled',
+      'StreamCompleted',
+      'StreamToppedUp',
+      'StreamPaused',
+      'StreamResumed',
+      'StreamTransferred',
+      'WithdrawalMade',
+    ]);
+    if (streamEventTypes.has(eventType as string)) {
+      return this.subscribeEvents({}, (event) => {
+        if (event.type === (eventType as StreamEventType)) {
+          (handlerOrCallback as (event: StreamEvent<TEventData>) => void)(event);
+        }
+      });
+    }
+    // SDK lifecycle events are dispatched through the event bus.
+    return this.eventBus.on(
+      eventType as string,
+      handlerOrCallback as (data: unknown) => void,
+    );
   }
 
   /**
@@ -3935,8 +4204,16 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     // not stale relative to the mutation (read-your-own-writes consistency).
     await this._waitForStreamLedger(streamId);
 
+    // Issue #564: read-your-own-writes cache bypass. If a write to this
+    // stream completed within the bypass window, skip the TTL cache for this
+    // single read so a lagging RPC node can't serve stale pre-write state.
+    // The record is cleared after the first read so later reads are not
+    // penalised.
+    const bypassCache =
+      !options?.refresh && this._shouldBypassCache(streamId);
+
     // 1. Fast path: serve from TTL cache.
-    if (!options?.refresh) {
+    if (!options?.refresh && !bypassCache) {
       const cached = this.streamCache.get(cacheKey);
       if (cached) return cached;
     }
@@ -3946,6 +4223,10 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     return this.requestDedup.dedupe(
       dedupKey('getStream', networkAtCallTime, streamId),
       async () => {
+        // Issue #564: consume the bypass record after this read so later
+        // reads are not penalised — the bypass applies to exactly one read.
+        if (bypassCache) this._lastWriteAt.delete(streamId);
+
         this.logger.debug(`getStream: fetching stream ${streamId} via RPC`);
         const result = await withRetry(
           () =>
@@ -4007,12 +4288,24 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     // Issue #271: honour read-your-own-writes for every requested stream.
     await Promise.all(requested.map((id) => this._waitForStreamLedger(id)));
 
+    // Issue #564: bypass the TTL cache for streams that were written to
+    // within the RYOW window (read-your-own-writes consistency).
+    const bypassIds = new Set<string>();
+    if (useCache) {
+      for (const id of requested) {
+        if (this._shouldBypassCache(id)) bypassIds.add(id);
+      }
+    }
+
     const resolved = new Map<string, Stream>();
     const cached: string[] = [];
     const toFetch: string[] = [];
 
     for (const id of requested) {
-      const hit = useCache ? this.streamCache.get(`${networkAtCallTime}:${id}`) : undefined;
+      const bypass = bypassIds.has(id);
+      const hit = !bypass && useCache
+        ? this.streamCache.get(`${networkAtCallTime}:${id}`)
+        : undefined;
       if (hit) {
         resolved.set(id, hit);
         cached.push(id);
@@ -4035,7 +4328,11 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
             dedupKey('getStreams', networkAtCallTime, chunk.join(',')),
             async () => {
               rpcCalls++;
-              return this._fetchStreamChunk(chunk, networkAtCallTime, options);
+              const streams = await this._fetchStreamChunk(chunk, networkAtCallTime, options);
+              // Issue #564: consume the bypass record after the first read so
+              // later reads are not penalised.
+              for (const s of streams) this._lastWriteAt.delete(s.id);
+              return streams;
             },
           ),
         ),
