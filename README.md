@@ -44,6 +44,150 @@ const claimable = await client.getClaimable(streamId);
 await client.withdraw({ streamId });
 ```
 
+## Usage Examples
+
+### 1. Create a Stream
+
+```typescript
+import { SoroStreamClient, createFreighterAdapter, toStroops } from "@sorostream/sdk";
+
+async function main() {
+  const walletAdapter = await createFreighterAdapter();
+  const client = new SoroStreamClient({
+    network: "testnet",
+    contractId: "YOUR_CONTRACT_ID",
+    walletAdapter,
+  });
+
+  const { streamId, txHash } = await client.createStream({
+    recipient: "GRECIPIENT_ADDRESS",
+    token: "GUSDC_TOKEN_ADDRESS",
+    amount: toStroops("100"),
+    durationSeconds: 30 * 24 * 60 * 60, // 30 days
+    autoRenew: false,
+  });
+
+  console.log(`Stream created with ID: ${streamId}`);
+}
+
+main().catch(console.error);
+```
+
+### 2. Withdraw from a Stream
+
+```typescript
+import { SoroStreamClient, createFreighterAdapter } from "@sorostream/sdk";
+
+async function main() {
+  const walletAdapter = await createFreighterAdapter();
+  const client = new SoroStreamClient({
+    network: "testnet",
+    contractId: "YOUR_CONTRACT_ID",
+    walletAdapter,
+  });
+
+  // Replace with your stream ID
+  const streamId = "YOUR_STREAM_ID";
+
+  const { txHash, amount } = await client.withdraw({ streamId });
+
+  console.log(`Withdrew ${amount} stroops in transaction: ${txHash}`);
+}
+
+main().catch(console.error);
+```
+
+### 3. List Streams by Sender
+
+```typescript
+import { SoroStreamClient, createFreighterAdapter } from "@sorostream/sdk";
+
+async function main() {
+  const walletAdapter = await createFreighterAdapter();
+  const client = new SoroStreamClient({
+    network: "testnet",
+    contractId: "YOUR_CONTRACT_ID",
+    walletAdapter,
+  });
+
+  const senderAddress = "GSENDER_ADDRESS"; // Replace with the sender's address
+  const streams = await client.getStreamsBySender(senderAddress);
+
+  console.log(`Found ${streams.length} streams for sender ${senderAddress}:`);
+  console.log(streams);
+}
+
+main().catch(console.error);
+```
+
+### 4. Watch Claimable Balance
+
+```typescript
+import { SoroStreamClient, createFreighterAdapter, toStroops, watchClaimable, formatUSDC } from "@sorostream/sdk";
+
+async function main() {
+  const walletAdapter = await createFreighterAdapter();
+  const client = new SoroStreamClient({
+    network: "testnet",
+    contractId: "YOUR_CONTRACT_ID",
+    walletAdapter,
+  });
+
+  // First, create a stream to watch (replace with your own parameters or use an existing streamId)
+  const { streamId } = await client.createStream({
+    recipient: "GRECIPIENT_ADDRESS",
+    token: "GUSDC_TOKEN_ADDRESS",
+    amount: toStroops("100"),
+    durationSeconds: 30 * 24 * 60 * 60, // 30 days
+    autoRenew: false,
+  });
+
+  // Get the stream object (required by watchClaimable)
+  const stream = await client.getStream(streamId);
+
+  // Set up the watcher
+  const unsubscribe = watchClaimable(
+    stream,
+    (balance) => {
+      console.log(`Claimable balance: ${formatUSDC(balance)} USDC`);
+    },
+    {
+      // Optional: adjust the polling interval (default is 1000ms)
+      // intervalMs: 5000,
+    }
+  );
+
+  console.log(`Watching claimable balance for stream ${streamId}. Press Ctrl+C to stop.`);
+
+  // To stop watching later, call: unsubscribe();
+}
+
+main().catch(console.error);
+```
+
+### 5. Cancel a Stream
+
+```typescript
+import { SoroStreamClient, createFreighterAdapter } from "@sorostream/sdk";
+
+async function main() {
+  const walletAdapter = await createFreighterAdapter();
+  const client = new SoroStreamClient({
+    network: "testnet",
+    contractId: "YOUR_CONTRACT_ID",
+    walletAdapter,
+  });
+
+  // Replace with your stream ID
+  const streamId = "YOUR_STREAM_ID";
+
+  const { txHash } = await client.cancelStream({ streamId });
+
+  console.log(`Stream cancelled in transaction: ${txHash}`);
+}
+
+main().catch(console.error);
+```
 ## API Reference
 
 ### `SoroStreamClient`

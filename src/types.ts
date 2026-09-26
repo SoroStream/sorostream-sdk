@@ -292,6 +292,30 @@ export interface CancelStreamParams {
   streamId: string;
 }
 
+/** Parameters for draining a stream (issue #558). */
+export interface DrainFlowParams {
+  /** Stream ID to drain. */
+  streamId: string;
+}
+
+/** Result of a successful drainFlow operation (issue #558). */
+export interface DrainFlowSuccess {
+  ok: true;
+  cancelTxHash: string;
+  withdrawTxHash: string;
+  amount: string;
+}
+
+/** Result of a partial drainFlow failure (issue #558). */
+export interface DrainFlowPartialFailure {
+  ok: false;
+  cancelResult: { txHash: string };
+  withdrawError: Error;
+}
+
+/** Result of a drainFlow operation (issue #558). */
+export type DrainFlowResult = DrainFlowSuccess | DrainFlowPartialFailure;
+
 /** Parameters for topping up a stream. */
 export interface TopUpParams {
   /** Stream ID to top up. */
@@ -330,6 +354,20 @@ export interface StreamCostBreakdown {
    * (stroops / 10_000_000).
    */
   totalInAsset: string;
+}
+
+export interface SimulateStreamResult {
+  /** Estimated fee in stroops from the simulation response. */
+  fee: number;
+  /** Transaction footprint returned by the Soroban RPC simulation. */
+  footprint: {
+    readOnly: unknown[];
+    readWrite: unknown[];
+  };
+  /** Whether the simulation succeeded. */
+  isValid: boolean;
+  /** Error details when `isValid` is `false`. */
+  error?: string;
 }
 
 /** Result of batch cancellation. */
@@ -1445,6 +1483,8 @@ export interface LobstrWalletAdapterConfig {
   publicKey?: string;
   /** Optional custom Lobstr provider object or window.lobstr reference. */
   provider?: any;
+  /** Optional WalletConnect v2 config used when the browser extension is absent (issue #561). */
+  walletConnect?: WalletConnectV2AdapterConfig;
 }
 
 /** Configuration options for LedgerWalletAdapter (issue #432). */
@@ -1573,6 +1613,14 @@ export interface SoroStreamClientConfig {
   circuitBreaker?: CircuitBreakerOptions;
   /** Maximum time in ms to wait for a transaction to confirm (default: 120000). */
   txTimeoutMs?: number;
+  /**
+   * Per-method timeout overrides in ms (issue #565).
+   * `read` applies to getStream/getClaimable/simulate reads.
+   * `write` applies to create/withdraw/cancel/topUp/etc.
+   * `simulate` applies to simulateTransaction calls.
+   * Each method-specific value falls back to `txTimeoutMs` when omitted.
+   */
+  timeouts?: { read?: number; write?: number; simulate?: number };
   /** Retry policy for read methods (getStream, getClaimable, etc.). */
   readRetry?: Omit<RetryOptions, 'signal'>;
   /** Retry policy for transaction submission RPC calls. */
@@ -1729,6 +1777,54 @@ export interface StreamHealthResult {
   /** Human-readable diagnostics messages (empty when status is healthy). */
   diagnostics: string[];
 }
+
+/** Cost breakdown for a single stream (issue #556). */
+export interface ProjectStreamCost {
+  /** Stream ID. */
+  streamId: string;
+  /** Token contract address. */
+  token: string;
+  /** Projected total cost in stroops (flowRate × duration). */
+  projectedCost: bigint;
+  /** Already withdrawn amount in stroops. */
+  withdrawn: bigint;
+  /** Net remaining cost = projectedCost - withdrawn. */
+  netCost: bigint;
+}
+
+/** Aggregate project cost result (issue #556). */
+export interface ProjectCostResult {
+  /** Total net cost across all streams in stroops. */
+  total: bigint;
+  /** Per-stream cost breakdown. */
+  byStream: ProjectStreamCost[];
+  /** Per-token aggregate. */
+  byToken: TokenAggregate[];
+}
+
+/** Parameters for draining a stream (issue #558). */
+export interface DrainFlowParams {
+  /** Stream ID to drain. */
+  streamId: string;
+}
+
+/** Result of a successful drainFlow operation (issue #558). */
+export interface DrainFlowSuccess {
+  ok: true;
+  cancelTxHash: string;
+  withdrawTxHash: string;
+  amount: string;
+}
+
+/** Result of a partial drainFlow failure (issue #558). */
+export interface DrainFlowPartialFailure {
+  ok: false;
+  cancelResult: { txHash: string };
+  withdrawError: Error;
+}
+
+/** Result of a drainFlow operation (issue #558). */
+export type DrainFlowResult = DrainFlowSuccess | DrainFlowPartialFailure;
 
 /** Parameter options for buildUnsignedXdr helper (issue #438). */
 export interface BuildUnsignedXdrParams {

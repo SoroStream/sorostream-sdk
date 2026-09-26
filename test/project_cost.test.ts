@@ -1,7 +1,7 @@
 /**
  * Tests for issue #382: projectCost utility
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { projectCost, toStroops, calculateFlowRate, formatUSDC } from '../src/utils.js';
 
 describe('Issue #382 — projectCost', () => {
@@ -75,5 +75,90 @@ describe('Issue #382 — projectCost', () => {
   it('exported from the main index', async () => {
     const { projectCost: fn } = await import('../src/index.js');
     expect(typeof fn).toBe('function');
+  });
+});
+
+describe('Issue #556 — client.getProjectCost', () => {
+  it('returns total, byStream, and byToken for 3 known streams', async () => {
+    const { SoroStreamClient } = await import('../src/SoroStreamClient.js');
+    const adapter = {
+      getPublicKey: vi.fn().mockResolvedValue('GSENDER'),
+      signTransaction: vi.fn().mockResolvedValue('signed'),
+      isConnected: vi.fn().mockResolvedValue(true),
+    };
+
+    const client = new SoroStreamClient({
+      network: 'testnet',
+      contractId: 'CONTRACT',
+      walletAdapter: adapter,
+      skipPeerCheck: true,
+    });
+
+    const now = Math.floor(Date.now() / 1000);
+    vi.spyOn(client, 'getStreams').mockResolvedValue([
+      {
+        id: '1',
+        sender: 'GSENDER',
+        recipient: 'GRECIP',
+        token: 'GTOKEN1',
+        deposit: 1000n,
+        flowRate: 10n,
+        startTime: now,
+        endTime: now + 100,
+        lastWithdrawTime: now,
+        status: 'Active',
+        autoRenew: false,
+      },
+      {
+        id: '2',
+        sender: 'GSENDER',
+        recipient: 'GRECIP',
+        token: 'GTOKEN1',
+        deposit: 2000n,
+        flowRate: 20n,
+        startTime: now,
+        endTime: now + 100,
+        lastWithdrawTime: now,
+        status: 'Active',
+        autoRenew: false,
+      },
+      {
+        id: '3',
+        sender: 'GSENDER',
+        recipient: 'GRECIP',
+        token: 'GTOKEN2',
+        deposit: 500n,
+        flowRate: 5n,
+        startTime: now,
+        endTime: now + 100,
+        lastWithdrawTime: now + 50,
+        status: 'Active',
+        autoRenew: false,
+      },
+    ]);
+
+    const result = await client.getProjectCost(['1', '2', '3']);
+
+    expect(result.byStream).toHaveLength(3);
+    expect(result.byToken).toHaveLength(2);
+
+    const stream1 = result.byStream.find((s) => s.streamId === '1')!;
+    expect(stream1.projectedCost).toBe(10n * BigInt(100));
+    expect(stream1.withdrawn).toBe(0n);
+    expect(stream1.netCost).toBe(stream1.projectedCost);
+
+    const stream3 = result.byStream.find((s) => s.streamId === '3')!;
+    expect(stream3.projectedCost).toBe(5n * BigInt(100));
+    expect(stream3.withdrawn).toBe(5n * BigInt(50));
+    expect(stream3.netCost).toBe(stream3.projectedCost - stream3.withdrawn);
+
+    const token1 = result.byToken.find((t) => t.token === 'GTOKEN1')!;
+    expect(token1.streamCount).toBe(2);
+
+    expect(result.total).toBe(
+      stream1.netCost +
+        result.byStream.find((s) => s.streamId === '2')!.netCost +
+        stream3.netCost
+    );
   });
 });

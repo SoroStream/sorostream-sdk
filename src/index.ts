@@ -148,6 +148,7 @@ export {
   InsufficientAmountError,
   StreamNotFoundError,
   StreamNotActiveError,
+  StreamAlreadyLockedError,
   TransactionFailedError,
   InvalidAddressError,
   AccountNotFoundError,
@@ -165,7 +166,9 @@ export {
   SoroStreamTransportError,
   InsecureRpcUrlError,
   SdkNetworkError,
+  XdrValidationError,
 } from './errors.js';
+export type { XdrValidationErrorCode } from './errors.js';
 export { assertEnvelopeUnmutated } from './xdrValidation.js';
 export { checkPeerDependencies } from './peerDependencies.js';
 export {
@@ -207,6 +210,10 @@ export type {
   EventHandler,
   WithdrawParams,
   CancelStreamParams,
+  DrainFlowParams,
+  DrainFlowResult,
+  ProjectCostResult,
+  ProjectStreamCost,
   TopUpParams,
   TransferStreamParams,
   PauseStreamParams,
@@ -221,6 +228,7 @@ export type {
   WalletAdapterSignResult,
   FeeEstimate,
   StreamCostBreakdown,
+  SimulateStreamResult,
   VestingSchedulePoint,
   VestingScheduleResult,
   WatchClaimableOptions,

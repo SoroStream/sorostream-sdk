@@ -1,0 +1,28 @@
+name: integration-testnet
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'release/**'
+
+jobs:
+  integration-testnet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Run integration suite against Soroban Testnet
+        env:
+          SOROSTREAM_INTEGRATION_CONTRACT_ID: ${{ vars.SOROSTREAM_INTEGRATION_CONTRACT_ID }}
+          SOROSTREAM_INTEGRATION_TOKEN_ID: ${{ vars.SOROSTREAM_INTEGRATION_TOKEN_ID }}
+          TESTNET_SECRET_KEY: ${{ secrets.TESTNET_SECRET_KEY }}
+        run: |
+          bun install
+          bun run test:integration

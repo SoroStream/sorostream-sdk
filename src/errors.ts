@@ -41,10 +41,36 @@ export class StreamNotActiveError extends SoroStreamError {
   }
 }
 
+export class StreamAlreadyLockedError extends SoroStreamError {
+  readonly streamId: string;
+  readonly currentLockUntil: number;
+  readonly requestedLockUntil: number;
+
+  constructor(streamId: string, currentLockUntil: number, requestedLockUntil: number) {
+    super(
+      `Stream ${streamId} is already locked until ${currentLockUntil}. ` +
+        `Cannot set lock to ${requestedLockUntil}.`,
+    );
+    this.name = 'StreamAlreadyLockedError';
+    this.streamId = streamId;
+    this.currentLockUntil = currentLockUntil;
+    this.requestedLockUntil = requestedLockUntil;
+  }
+}
+
 export class TransactionFailedError extends SoroStreamError {
   constructor(details: string) {
     super(`Transaction failed: ${details}`);
     this.name = 'TransactionFailedError';
+  }
+}
+
+export class RateLimitExceededError extends SoroStreamError {
+  constructor(queueDepth: number, queueLimit: number) {
+    super(`Rate limit exceeded: ${queueDepth}/${queueLimit}`);
+    this.name = 'RateLimitExceededError';
+    this.queueDepth = queueDepth;
+    this.queueLimit = queueLimit;
   }
 }
 
@@ -377,6 +403,35 @@ export class TransactionMutatedError extends SoroStreamError {
   constructor(message?: string) {
     super(message || 'Transaction envelope was mutated unexpectedly');
     this.name = 'TransactionMutatedError';
+  }
+}
+
+/** Structured machine-readable codes for {@link XdrValidationError}. */
+export type XdrValidationErrorCode =
+  /** Malformed / undecodable XDR string. */
+  | 'INVALID_XDR'
+  /** The decoded envelope decodes but does not match the submitted transaction. */
+  | 'ENVELOPE_MUTATED'
+  /** The submitted transaction was an unexpected type (e.g. fee-bump). */
+  | 'UNEXPECTED_TRANSACTION_TYPE';
+
+/**
+ * Thrown by XDR envelope validation (`assertEnvelopeUnmutated`, issue #546)
+ * when the signed XDR returned by a wallet adapter cannot be decoded or no
+ * longer describes the transaction that was submitted for signing.
+ *
+ * Extends the SDK's error hierarchy so callers can `instanceof`-check, and
+ * carries a structured {@link XdrValidationErrorCode} field for machine-driven
+ * error handling.
+ */
+export class XdrValidationError extends SoroStreamError {
+  /** Structured machine-readable error code. */
+  readonly code: XdrValidationErrorCode;
+
+  constructor(code: XdrValidationErrorCode, message: string) {
+    super(message);
+    this.name = 'XdrValidationError';
+    this.code = code;
   }
 }
 

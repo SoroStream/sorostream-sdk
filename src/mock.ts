@@ -52,6 +52,7 @@ import type {
   OperationExplanation,
   GetStreamsOptions,
   BatchStreamsResult,
+  SimulateStreamResult,
 } from './types.js';
 import { streamToJSON, filterStreams } from './utils.js';
 import { InsufficientAmountError, SelfStreamError } from './errors.js';
@@ -202,6 +203,44 @@ export class MockSoroStreamClient {
     return { streamId: id, txHash: `mock-tx-create-${id}` };
   }
 
+  async simulateStream(params: CreateStreamParams): Promise<SimulateStreamResult> {
+    if (params.amount <= 0n || params.durationSeconds <= 0) {
+      return {
+        fee: 0,
+        footprint: { readOnly: [], readWrite: [] },
+        isValid: false,
+        error: 'Invalid stream parameters',
+      };
+    }
+    return {
+      fee: 100,
+      footprint: { readOnly: [], readWrite: [] },
+      isValid: true,
+    };
+  }
+
+  async lockUntil(streamId: string, timestamp: Date): Promise<{ txHash: string }> {
+    const stream = this.streams.get(streamId);
+    if (!stream) throw new Error(`Stream not found: ${streamId}`);
+    const lockUntilSec = Math.floor(timestamp.getTime() / 1000);
+    if (stream.lockUntil !== undefined && stream.lockUntil >= lockUntilSec) {
+      throw new Error(
+        `Stream ${streamId} is already locked until ${stream.lockUntil} (requested: ${lockUntilSec})`,
+      );
+    }
+    const now = nowSec();
+    this.streams.set(streamId, { ...stream, lockUntil: lockUntilSec });
+    this.emit({
+      type: 'StreamLocked',
+      streamId,
+      txHash: `mock-tx-lock-${streamId}-${now}`,
+      ledger: 0,
+      timestamp: now,
+      data: { lockUntil: lockUntilSec },
+    });
+    return { txHash: `mock-tx-lock-${streamId}-${now}` };
+  }
+
   async withdraw(
     params: WithdrawParams,
     _signal?: AbortSignal,
@@ -276,9 +315,14 @@ export class MockSoroStreamClient {
     const stream = this.streams.get(params.streamId);
     if (!stream) throw new Error(`Stream not found: ${params.streamId}`);
     if (stream.status !== 'Active') throw new Error('Stream is not active');
+    const now = nowSec();
+    if (stream.lockUntil !== undefined && now < stream.lockUntil) {
+      throw new Error(
+        `Stream ${params.streamId} is locked until ${stream.lockUntil} (now: ${now})`,
+      );
+    }
 
     this.streams.set(params.streamId, { ...stream, status: 'Cancelled' });
-    const now = nowSec();
     this.emit({
       type: 'StreamCancelled',
       streamId: params.streamId,
@@ -1149,6 +1193,22 @@ export class SoroStreamSandbox extends MockSoroStreamClient {
       'getStreamsByRecipient',
       () => super.getStreamsByRecipient(recipient, pagination, filter),
       [recipient, pagination, filter],
+    );
+  }
+
+  override async lockUntil(streamId: string, timestamp: Date): Promise<{ txHash: string }> {
+    return this.recordAndExecute(
+      'lockUntil',
+      () => super.lockUntil(streamId, timestamp),
+      [streamId, timestamp],
+    );
+  }
+
+  override async simulateStream(params: CreateStreamParams): Promise<SimulateStreamResult> {
+    return this.recordAndExecute(
+      'simulateStream',
+      () => super.simulateStream(params),
+      [params],
     );
   }
 }

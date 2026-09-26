@@ -1,0 +1,24 @@
+name: smoke-cjs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke-cjs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build SDK
+        run: bun run build
+
+      - name: Run CJS smoke test
+        run: bun run test:cjs

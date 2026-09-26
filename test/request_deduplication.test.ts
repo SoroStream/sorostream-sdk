@@ -189,6 +189,31 @@ describe('RequestDeduplicator (#426)', () => {
     expect(calls).toBe(2);
   });
 
+  it('removes the entry when a request times out, allowing a fresh request to succeed', async () => {
+    const dedup = new RequestDeduplicator();
+    let callCount = 0;
+    const factory = async (): Promise<number> => {
+      callCount++;
+      if (callCount === 1) {
+        // First call: simulate a timeout by rejecting after 10ms
+        return new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10));
+      } else {
+        // Second call: succeed immediately
+        return Promise.resolve(42);
+      }
+    };
+
+    // First request: should timeout
+    await expect(dedup.dedupe('key', factory)).rejects.toThrow('timeout');
+    // After the first request settles, the entry should be removed
+    expect(dedup.has('key')).toBe(false);
+
+    // Second request: should make a new call and succeed
+    const result = await dedup.dedupe('key', factory);
+    expect(result).toBe(42);
+    expect(callCount).toBe(2);
+  });
+
   it('dedupKey builds order-independent, stable keys', () => {
     expect(dedupKey('getStream', 'testnet', '42')).toBe('getStream|testnet|42');
     expect(dedupKey('q', undefined)).toBe(dedupKey('q', null));

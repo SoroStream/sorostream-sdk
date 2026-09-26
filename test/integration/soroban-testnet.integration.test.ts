@@ -7,6 +7,9 @@
  *   SOROSTREAM_INTEGRATION_CONTRACT_ID=C... npm run test:integration
  *
  * The suite is skipped when SOROSTREAM_INTEGRATION_CONTRACT_ID is unset.
+ *
+ * In CI, set TESTNET_SECRET_KEY to a funded testnet account secret key; the
+ * recipient is still generated randomly and funded via friendbot.
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -21,6 +24,7 @@ const CONTRACT_ID = process.env.SOROSTREAM_INTEGRATION_CONTRACT_ID;
 const TOKEN_ID =
   process.env.SOROSTREAM_INTEGRATION_TOKEN_ID ??
   'CDLZFC3SYJYDVR7P6JC4D2DB51MY5H4M3JVEEOCXN6B7L3EQI7SZZ2B3';
+const TESTNET_SECRET_KEY = process.env.TESTNET_SECRET_KEY;
 
 async function fundAccount(publicKey: string): Promise<void> {
   const res = await fetch(`${FRIENDBOT_URL}?addr=${encodeURIComponent(publicKey)}`);
@@ -32,12 +36,18 @@ async function fundAccount(publicKey: string): Promise<void> {
 describe.skipIf(!CONTRACT_ID)(
   'SoroStreamClient end-to-end live Soroban Testnet integration suite',
   () => {
-    const senderKeypair = Keypair.random();
+    let senderKeypair: Keypair;
     const recipientKeypair = Keypair.random();
     let client: SoroStreamClient;
 
     beforeAll(async () => {
-      await fundAccount(senderKeypair.publicKey());
+      if (TESTNET_SECRET_KEY) {
+        senderKeypair = Keypair.fromSecret(TESTNET_SECRET_KEY);
+      } else {
+        senderKeypair = Keypair.random();
+        await fundAccount(senderKeypair.publicKey());
+      }
+
       await fundAccount(recipientKeypair.publicKey());
 
       // 1. Client initialisation

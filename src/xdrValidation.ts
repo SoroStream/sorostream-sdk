@@ -7,10 +7,14 @@
  * swap operations, amounts, or addresses before signing. This module
  * decodes the signed envelope and compares it against the transaction that
  * was submitted for signing, so a mismatch is caught before broadcast.
+ *
+ * All validation failures are surfaced as {@link XdrValidationError} (issue
+ * #546) with a structured {@link XdrValidationErrorCode}, so callers can
+ * `instanceof`-check for SDK errors without relying on string matching.
  */
 
 import { FeeBumpTransaction, Transaction, TransactionBuilder } from '@stellar/stellar-sdk';
-import { TransactionMutatedError } from './errors.js';
+import { XdrValidationError } from './errors.js';
 
 /**
  * Verifies that `signedXdr` decodes to the same transaction body that was
@@ -22,7 +26,7 @@ import { TransactionMutatedError } from './errors.js';
  * @param prepared - The transaction that was passed to the wallet adapter's `signTransaction`.
  * @param signedXdr - The signed XDR string returned by the wallet adapter.
  * @param networkPassphrase - The network passphrase used to decode `signedXdr`.
- * @throws {TransactionMutatedError} If the signed envelope does not match `prepared`.
+ * @throws {XdrValidationError} If the signed envelope is malformed or does not match `prepared`.
  */
 export function assertEnvelopeUnmutated(
   prepared: Transaction | FeeBumpTransaction,
@@ -30,39 +34,55 @@ export function assertEnvelopeUnmutated(
   networkPassphrase: string,
 ): void {
   if (!(prepared instanceof Transaction)) {
-    throw new TransactionMutatedError(
+    throw new XdrValidationError(
+      'UNEXPECTED_TRANSACTION_TYPE',
       'the transaction submitted for signing is unexpectedly a fee-bump transaction',
     );
   }
 
-  const decoded = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
+  let decoded: Transaction | FeeBumpTransaction;
+  try {
+    decoded = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : `failed to decode signed XDR (${String(err)})`;
+    throw new XdrValidationError('INVALID_XDR', `invalid XDR envelope: ${message}`);
+  }
 
   if (!(decoded instanceof Transaction)) {
-    throw new TransactionMutatedError(
+    throw new XdrValidationError(
+      'UNEXPECTED_TRANSACTION_TYPE',
       'expected a signed transaction but received a fee-bump transaction',
     );
   }
   if (decoded.source !== prepared.source) {
-    throw new TransactionMutatedError(
+    throw new XdrValidationError(
+      'ENVELOPE_MUTATED',
       `source account changed (expected ${prepared.source}, got ${decoded.source})`,
     );
   }
   if (decoded.sequence !== prepared.sequence) {
-    throw new TransactionMutatedError(
+    throw new XdrValidationError(
+      'ENVELOPE_MUTATED',
       `sequence number changed (expected ${prepared.sequence}, got ${decoded.sequence})`,
     );
   }
   if (decoded.fee !== prepared.fee) {
-    throw new TransactionMutatedError(`fee changed (expected ${prepared.fee}, got ${decoded.fee})`);
+    throw new XdrValidationError(
+      'ENVELOPE_MUTATED',
+      `fee changed (expected ${prepared.fee}, got ${decoded.fee})`,
+    );
   }
   if (decoded.operations.length !== prepared.operations.length) {
-    throw new TransactionMutatedError(
+    throw new XdrValidationError(
+      'ENVELOPE_MUTATED',
       `operation count changed (expected ${prepared.operations.length}, got ${decoded.operations.length})`,
     );
   }
   for (let i = 0; i < prepared.operations.length; i++) {
     if (decoded.operations[i]!.type !== prepared.operations[i]!.type) {
-      throw new TransactionMutatedError(
+      throw new XdrValidationError(
+        'ENVELOPE_MUTATED',
         `operation ${i} type changed (expected ${prepared.operations[i]!.type}, got ${decoded.operations[i]!.type})`,
       );
     }
@@ -73,7 +93,8 @@ export function assertEnvelopeUnmutated(
   // amounts and addresses), so any mutation not already caught above will
   // surface here.
   if (!decoded.hash().equals(prepared.hash())) {
-    throw new TransactionMutatedError(
+    throw new XdrValidationError(
+      'ENVELOPE_MUTATED',
       'transaction body does not match the envelope submitted for signing (amount, address, or other operation details differ)',
     );
   }

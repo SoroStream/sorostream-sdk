@@ -11,6 +11,13 @@ export interface PoolEvent {
 export interface ConnectionPoolOptions {
   /** Number of RPC connections to maintain. */
   poolSize: number;
+  /**
+   * Maximum number of connections that can be held concurrently via
+   * {@link ConnectionPool.acquire}. Excess concurrent callers are queued
+   * (FIFO) until a held connection is released (default: `poolSize`).
+   * Issue #539.
+   */
+  maxConnections?: number;
   /** Max concurrent subscriptions per connection before emitting pool:full (default: 10). */
   maxSubscriptionsPerConnection?: number;
   /** Idle connection replacement interval in ms (default: 30000). */
@@ -40,12 +47,19 @@ export class ConnectionPool {
   private readonly contractId: string;
   private readonly listeners = new Set<(e: PoolEvent) => void>();
   private readonly idleTimer: ReturnType<typeof setInterval>;
+  /** Maximum connections held concurrently via {@link acquire} (issue #539). */
+  readonly maxConnections: number;
+  /** Number of connections currently held via {@link acquire}. */
+  private activeConnections = 0;
+  /** FIFO queue of pending {@link acquire} grants waiting for a free connection. */
+  private waiters: Array<() => void> = [];
 
   constructor(options: ConnectionPoolOptions) {
     this.rpcUrl = options.rpcUrl;
     this.contractId = options.contractId;
     this.maxSubs = options.maxSubscriptionsPerConnection ?? 10;
     this.idleTimeoutMs = options.idleTimeoutMs ?? 30_000;
+    this.maxConnections = options.maxConnections ?? options.poolSize;
 
     this.slots = Array.from({ length: options.poolSize }, () => {
       const server = new rpc.Server(options.rpcUrl, { allowHttp: false });
@@ -67,10 +81,7 @@ export class ConnectionPool {
    * Accepts an optional `AbortSignal` to automatically release the slot on abort.
    */
   acquirePoller(options?: { signal?: AbortSignal }): { poller: EventPoller; release: () => void } {
-    let best = this.slots[0]!;
-    for (const slot of this.slots) {
-      if (slot.subscriptions < best.subscriptions) best = slot;
-    }
+    const best = this._leastLoadedSlot();
 
     if (best.subscriptions >= this.maxSubs) {
       this._emit({ type: 'pool:full' });
@@ -118,10 +129,7 @@ export class ConnectionPool {
    * Acquires the least-loaded RPC server instance from the pool for executing a request (issue #435).
    */
   acquireServer(): { server: rpc.Server; release: () => void } {
-    let best = this.slots[0]!;
-    for (const slot of this.slots) {
-      if (slot.subscriptions < best.subscriptions) best = slot;
-    }
+    const best = this._leastLoadedSlot();
 
     best.subscriptions++;
     best.lastActive = Date.now();
@@ -139,6 +147,75 @@ export class ConnectionPool {
         }
       },
     };
+  }
+
+  /**
+   * Atomically acquires a pool connection bounded by `maxConnections`
+   * (issue #539).
+   *
+   * The capacity check and counter increment happen synchronously inside this
+   * call, so it is impossible for concurrent `acquire()` invocations to exceed
+   * `maxConnections`. When the pool is at capacity the caller is queued and
+   * the promise resolves (in FIFO order) as soon as a held connection is
+   * released. Unlike {@link acquirePoller} this never throws for a busy pool —
+   * it waits instead.
+   *
+   * @param options.signal - Optional `AbortSignal`. If the signal fires while
+   *   queued, the returned promise rejects and the queued grant is withdrawn.
+   * @returns A promise resolving with a pooled RPC server and a `release`
+   *   function that frees the slot (and hands it to the next waiter).
+   */
+  acquire(options?: {
+    signal?: AbortSignal;
+  }): Promise<{ server: rpc.Server; release: () => void }> {
+    const signal = options?.signal;
+    if (signal?.aborted) {
+      return Promise.reject(
+        new Error('ConnectionPool.acquire(): aborted before acquiring a connection'),
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      const grant = () => {
+        if (abortHandler) signal!.removeEventListener('abort', abortHandler);
+        const slot = this._leastLoadedSlot();
+        this.activeConnections++;
+        slot.subscriptions++;
+        slot.lastActive = Date.now();
+
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          slot.subscriptions = Math.max(0, slot.subscriptions - 1);
+          this.activeConnections = Math.max(0, this.activeConnections - 1);
+          // Hand the freed slot to the longest-waiting caller (FIFO).
+          const next = this.waiters.shift();
+          if (next) next();
+          if (this.slots.every((s) => s.subscriptions === 0)) {
+            this._emit({ type: 'pool:drain' });
+          }
+        };
+
+        resolve({ server: slot.server, release });
+      };
+
+      let abortHandler: (() => void) | undefined;
+      if (signal && !signal.aborted) {
+        abortHandler = () => {
+          const idx = this.waiters.indexOf(grant);
+          if (idx >= 0) this.waiters.splice(idx, 1);
+          reject(new Error('ConnectionPool.acquire(): aborted while waiting for a connection'));
+        };
+        signal.addEventListener('abort', abortHandler, { once: true });
+      }
+
+      if (this.activeConnections < this.maxConnections) {
+        grant();
+      } else {
+        this.waiters.push(grant);
+      }
+    });
   }
 
   /** Returns current pool connection statistics. */
@@ -164,6 +241,14 @@ export class ConnectionPool {
 
   private _emit(event: PoolEvent): void {
     for (const cb of this.listeners) cb(event);
+  }
+
+  private _leastLoadedSlot(): PoolSlot {
+    let best = this.slots[0]!;
+    for (const slot of this.slots) {
+      if (slot.subscriptions < best.subscriptions) best = slot;
+    }
+    return best;
   }
 
   private _sweepIdle(): void {

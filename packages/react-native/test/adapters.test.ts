@@ -4,14 +4,14 @@
  * matching RN's actual JS runtime) to confirm the SDK does not crash and the
  * audit log round-trips through the AsyncStorage-backed adapter.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Imported from the SDK's source (rather than the `@sorostream/sdk` package
 // name) because npm workspaces does not self-link the monorepo root to
 // satisfy sibling packages' dependency on their own root package name.
 import { SoroStreamClient } from '../../../src/SoroStreamClient.js';
 import type { WalletAdapter } from '../../../src/types.js';
-import { createAsyncStorageAdapter, createReactNativeAdapters } from '../src/index.js';
-import type { AsyncStorageLike } from '../src/index.js';
+import { createAsyncStorageAdapter, createReactNativeAdapters, createFreighterMobileAdapter } from '../src/index.js';
+import type { AsyncStorageLike } = from '../src/index.js';
 
 const VALID_CONTRACT = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
 
@@ -34,6 +34,11 @@ function makeFakeAsyncStorage(): AsyncStorageLike {
   };
 }
 
+// Mock Linking
+const mockLinking = {
+  openURL: vi.fn(),
+};
+
 describe('createAsyncStorageAdapter', () => {
   it('writes are readable immediately (in-memory cache)', () => {
     const adapter = createAsyncStorageAdapter(makeFakeAsyncStorage());
@@ -54,6 +59,61 @@ describe('createAsyncStorageAdapter', () => {
     // Allow the background hydration microtask to resolve.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(adapter.getItem('preexisting')).toBe('hello');
+  });
+});
+
+describe('createFreighterMobileAdapter', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should return a valid WalletAdapter', async () => {
+    const adapter = await createFreighterMobileAdapter();
+    expect(typeof adapter.isConnected).toBe('function');
+    expect(typeof adapter.getPublicKey).toBe('function');
+    expect(typeof adapter.signTransaction).toBe('function');
+  });
+
+  describe('getPublicKey', () => {
+    it('should open the correct deep link URL for testnet', async () => {
+      // Mock Linking.openURL
+      vi.stubGlobal('Linking', mockLinking);
+
+      const adapter = await createFreighterMobileAdapter();
+      await adapter.getPublicKey();
+
+      expect(mockLinking.openURL).toHaveBeenCalledWith(
+        'freighter://sign/public-key?network=testnet'
+      );
+    });
+  });
+
+  describe('signTransaction', () => {
+    it('should open the correct deep link URL for testnet', async () => {
+      // Mock Linking.openURL
+      vi.stubGlobal('Linking', mockLinking);
+
+      const adapter = await createFreighterMobileAdapter();
+      const testXDR = 'test_xdr_string';
+      await adapter.signTransaction(testXDR, 'testnet');
+
+      expect(mockLinking.openURL).toHaveBeenCalledWith(
+        'freighter://sign/sign-tx?network=testnet&xdr=test_xdr_string'
+      );
+    });
+
+    it('should encode the XDR in the URL', async () => {
+      // Mock Linking.openURL
+      vi.stubGlobal('Linking', mockLinking);
+
+      const adapter = await createFreighterMobileAdapter();
+      const testXDR = 'special chars ?&=';
+      await adapter.signTransaction(testXDR, 'testnet');
+
+      expect(mockLinking.openURL).toHaveBeenCalledWith(
+        'freighter://sign/sign-tx?network=testnet&xdr=special%20chars%20%3F%26%3D'
+      );
+    });
   });
 });
 

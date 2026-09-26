@@ -65,6 +65,7 @@
     "docs": "typedoc",
     "validate-exports": "node scripts/validate-exports.js",
     "test:cjs": "node scripts/cjs-smoke-test.js",
+    "check:bundle-size": "node scripts/check-bundle-size.js",
     "prepublishOnly": "npm run validate-exports"
   },
   "keywords": [

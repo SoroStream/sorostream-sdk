@@ -274,6 +274,84 @@ describe('ReplayTransport.replay – playback mode', () => {
   });
 });
 
+// ── Sequential vs parallel replay (issue #544) ─────────────────────────────
+
+describe('ReplayTransport.replay – sequential vs parallel (issue #544)', () => {
+  it('defaults to sequential and resolves concurrent calls in recorded order', async () => {
+    const fixture = makeFixture([
+      { method: 'getAccount', request: {}, response: { id: 'GABC', sequence: '1' } },
+      { method: 'getAccount', request: {}, response: { id: 'GABC', sequence: '2' } },
+      { method: 'getAccount', request: {}, response: { id: 'GABC', sequence: '3' } },
+    ]);
+
+    const transport = ReplayTransport.replay(fixture);
+
+    const [first, second, third] = await Promise.all([
+      transport.getAccount('G1'),
+      transport.getAccount('G2'),
+      transport.getAccount('G3'),
+    ]);
+
+    expect((first as { sequence: string }).sequence).toBe('1');
+    expect((second as { sequence: string }).sequence).toBe('2');
+    expect((third as { sequence: string }).sequence).toBe('3');
+  });
+
+  it('preserves recorded order across interleaved methods under concurrency', async () => {
+    const fixture = makeFixture([
+      { method: 'getHealth', request: {}, response: { status: 'healthy' } },
+      { method: 'getAccount', request: {}, response: { id: 'G1', sequence: '1' } },
+      { method: 'getHealth', request: {}, response: { status: 'degraded' } },
+    ]);
+
+    const transport = ReplayTransport.replay(fixture);
+
+    const firstHealth = transport.getHealth();
+    const firstAccount = transport.getAccount('G1');
+    const secondHealth = transport.getHealth();
+
+    const [h1, a1, h2] = await Promise.all([firstHealth, firstAccount, secondHealth]);
+
+    expect((h1 as { status: string }).status).toBe('healthy');
+    expect((a1 as { id: string }).id).toBe('G1');
+    expect((h2 as { status: string }).status).toBe('degraded');
+  });
+
+  it('explicit sequential: true behaves identically to the default', async () => {
+    const fixture = makeFixture([
+      { method: 'getAccount', request: {}, response: { id: 'GABC', sequence: '1' } },
+      { method: 'getAccount', request: {}, response: { id: 'GABC', sequence: '2' } },
+    ]);
+
+    const transport = ReplayTransport.replay(fixture, { sequential: true });
+
+    const [first, second] = await Promise.all([
+      transport.getAccount('G1'),
+      transport.getAccount('G2'),
+    ]);
+
+    expect((first as { sequence: string }).sequence).toBe('1');
+    expect((second as { sequence: string }).sequence).toBe('2');
+  });
+
+  it('sequential: false enables parallel replay', async () => {
+    const fixture = makeFixture([
+      { method: 'getHealth', request: {}, response: { status: 'healthy' } },
+      { method: 'getAccount', request: {}, response: { id: 'G1', sequence: '1' } },
+    ]);
+
+    const transport = ReplayTransport.replay(fixture, { sequential: false });
+
+    const [health, account] = await Promise.all([
+      transport.getHealth(),
+      transport.getAccount('G1'),
+    ]);
+
+    expect((health as { status: string }).status).toBe('healthy');
+    expect((account as { id: string }).id).toBe('G1');
+  });
+});
+
 // ── ReplayTransport.parse ─────────────────────────────────────────────────
 
 describe('ReplayTransport.parse', () => {

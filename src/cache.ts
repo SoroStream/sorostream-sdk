@@ -1,3 +1,19 @@
+// A monotonic clock for TTL checks that is not affected by system sleep.
+// Uses performance.now() in the browser, process.hrtime in Node.js, and falls back to Date.now().
+const now = (() => {
+  if (typeof performance !== 'undefined' && performance.now) {
+    return () => performance.now();
+  }
+  // Check for Node.js process.hrtime
+  if (typeof process !== 'undefined' && process.hrtime) {
+    return () => {
+      const [seconds, nanoseconds] = process.hrtime();
+      return seconds * 1000 + nanoseconds / 1e6;
+    };
+  }
+  return () => Date.now();
+})();
+
 interface CacheEntry<T> {
   value: T;
   expiresAt: number;
@@ -16,7 +32,7 @@ export class Cache<K, V> {
   get(key: K): V | undefined {
     const entry = this.store.get(key);
     if (!entry) return undefined;
-    if (Date.now() > entry.expiresAt) {
+    if (now() > entry.expiresAt) {
       this.store.delete(key);
       return undefined;
     }
@@ -38,7 +54,7 @@ export class Cache<K, V> {
     }
     this.store.set(key, {
       value,
-      expiresAt: Date.now() + (ttlMs ?? this.defaultTtlMs),
+      expiresAt: now() + (ttlMs ?? this.defaultTtlMs),
     });
   }
 

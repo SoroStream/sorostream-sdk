@@ -7,7 +7,7 @@
  * - Cache is per-client-instance and not shared between instances.
  * - Cache hit, cache miss, and TTL expiry are all covered.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { nativeToScVal, rpc } from '@stellar/stellar-sdk';
 import { SoroStreamClient } from '../src/SoroStreamClient.js';
 import type { WalletAdapter } from '../src/types.js';
@@ -51,7 +51,22 @@ function mockUsdcMetadata(client: SoroStreamClient) {
     .mockResolvedValueOnce(viewResult(7));
 }
 
+let originalPerformanceNow: (() => number) | undefined;
+
+beforeEach(() => {
+  // Store original performance.now
+  originalPerformanceNow = globalThis.performance?.now;
+  // Mock performance.now to return the same as Date.now() when fake timers are active
+  if (globalThis.performance) {
+    globalThis.performance.now = () => Date.now();
+  }
+});
+
 afterEach(() => {
+  // Restore original performance.now
+  if (globalThis.performance && originalPerformanceNow !== undefined) {
+    globalThis.performance.now = originalPerformanceNow;
+  }
   vi.restoreAllMocks();
   vi.useRealTimers();
 });

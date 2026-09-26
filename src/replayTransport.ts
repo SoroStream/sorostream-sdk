@@ -168,6 +168,18 @@ export interface ReplayingRpcTransport extends RpcTransportAdapter {
   getFixture(): FixtureFile;
 }
 
+/** Options for {@link ReplayTransport.replay}. */
+export interface ReplayOptions {
+  /**
+   * When `true` (default), replayed responses resolve in the same order the
+   * requests were recorded, even when calls are issued concurrently (e.g.
+   * through `Promise.all`). Set to `false` for parallel replay, where
+   * concurrent calls are served independently and ordering is not guaranteed.
+   * Issue #544.
+   */
+  sequential?: boolean;
+}
+
 export const ReplayTransport = {
   /**
    * Creates a **recording** transport that forwards all calls to
@@ -252,8 +264,9 @@ export const ReplayTransport = {
    *
    * @param fixture - Either a path to a JSON fixture file (Node only) or a
    *                  pre-parsed {@link FixtureFile} object.
+   * @param options - Replay behaviour options (see {@link ReplayOptions}).
    */
-  replay(fixture: FixtureFile | string): ReplayingRpcTransport {
+  replay(fixture: FixtureFile | string, options: ReplayOptions = {}): ReplayingRpcTransport {
     let parsed: FixtureFile;
 
     if (typeof fixture === 'string') {
@@ -276,42 +289,50 @@ export const ReplayTransport = {
     const queue = new ReplayQueue();
     queue.load(parsed.entries);
 
+    const sequential = options.sequential !== false;
+
+    // Serialisation chain: in sequential mode each response is only handed out
+    // after the previously issued call's response, so concurrent calls still
+    // resolve in recording order (issue #544).
+    let serialised: Promise<void> = Promise.resolve();
+
+    function serve<T>(method: string): Promise<T> {
+      if (sequential) {
+        const next: Promise<T> = serialised.then(() => queue.next<T>(method));
+        // Keep the chain alive even if the caller rejects its response.
+        serialised = next.then(
+          () => undefined,
+          () => undefined,
+        );
+        return next;
+      }
+      return Promise.resolve().then(() => queue.next<T>(method));
+    }
+
     const transport: ReplayingRpcTransport = {
       serverURL: undefined,
 
       getFixture: () => parsed,
 
-      getAccount: (_address: string) =>
-        Promise.resolve().then(() => queue.next<Account>('getAccount')),
+      getAccount: (_address: string) => serve<Account>('getAccount'),
 
-      getHealth: () =>
-        Promise.resolve().then(() => queue.next<rpc.Api.GetHealthResponse>('getHealth')),
+      getHealth: () => serve<rpc.Api.GetHealthResponse>('getHealth'),
 
-      getLatestLedger: () =>
-        Promise.resolve().then(() =>
-          queue.next<rpc.Api.GetLatestLedgerResponse>('getLatestLedger'),
-        ),
+      getLatestLedger: () => serve<rpc.Api.GetLatestLedgerResponse>('getLatestLedger'),
 
-      getTransaction: (_hash: string) =>
-        Promise.resolve().then(() => queue.next<rpc.Api.GetTransactionResponse>('getTransaction')),
+      getTransaction: (_hash: string) => serve<rpc.Api.GetTransactionResponse>('getTransaction'),
 
       simulateTransaction: (_tx: Transaction | FeeBumpTransaction) =>
-        Promise.resolve().then(() =>
-          queue.next<rpc.Api.SimulateTransactionResponse>('simulateTransaction'),
-        ),
+        serve<rpc.Api.SimulateTransactionResponse>('simulateTransaction'),
 
       prepareTransaction: (_tx: Transaction | FeeBumpTransaction) =>
-        Promise.resolve().then(() =>
-          queue.next<Transaction | FeeBumpTransaction>('prepareTransaction'),
-        ),
+        serve<Transaction | FeeBumpTransaction>('prepareTransaction'),
 
       sendTransaction: (_tx: Transaction | FeeBumpTransaction) =>
-        Promise.resolve().then(() =>
-          queue.next<rpc.Api.SendTransactionResponse>('sendTransaction'),
-        ),
+        serve<rpc.Api.SendTransactionResponse>('sendTransaction'),
 
       getEvents: (_req: RpcTransportGetEventsRequest) =>
-        Promise.resolve().then(() => queue.next<rpc.Api.GetEventsResponse>('getEvents')),
+        serve<rpc.Api.GetEventsResponse>('getEvents'),
     };
 
     return transport;

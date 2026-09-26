@@ -24,6 +24,22 @@
         "activeOnly": {
           "type": "boolean",
           "description": "When true, only include streams that are `\"Active\"` and not yet expired."
+        },
+        "startTimeFrom": {
+          "type": "number",
+          "description": "Inclusive lower bound (Unix seconds) on the stream's `startTime`."
+        },
+        "startTimeTo": {
+          "type": "number",
+          "description": "Inclusive upper bound (Unix seconds) on the stream's `startTime`."
+        },
+        "endTimeFrom": {
+          "type": "number",
+          "description": "Inclusive lower bound (Unix seconds) on the stream's `endTime`."
+        },
+        "endTimeTo": {
+          "type": "number",
+          "description": "Inclusive upper bound (Unix seconds) on the stream's `endTime`."
         }
       },
       "additionalProperties": false,
