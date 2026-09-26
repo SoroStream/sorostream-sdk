@@ -1,5 +1,6 @@
 import { SoroStreamClient, toStroops, formatUSDC } from '@sorostream/sdk';
 import { createKeypairAdapter } from './wallet.js';
+import * as readline from 'node:readline';
 
 export interface GlobalOptions {
   network: 'mainnet' | 'testnet' | 'futurenet';
@@ -18,6 +19,100 @@ function createClient(options: GlobalOptions): SoroStreamClient {
     rpcUrl: options.rpc.length > 0 ? options.rpc[0] : undefined,
     transport: options.transport,
   });
+}
+
+export interface StreamCreateOptions extends GlobalOptions {
+  recipient?: string;
+  token?: string;
+  amount?: string;
+  duration?: number;
+  autoRenew?: boolean;
+  /** When true, all params must come from flags (CI use); no interactive prompts. */
+  json?: boolean;
+}
+
+/**
+ * Resolved, validated stream-creation parameters ready for the SDK.
+ */
+interface ResolvedCreateParams {
+  recipient: string;
+  token: string;
+  amount: string;
+  duration: number;
+  autoRenew: boolean;
+}
+
+/**
+ * Prompts the user for the fields required to create a stream, using
+ * Node's built-in `readline` so no extra dependency is needed.
+ *
+ * When `opts.json` is true, every field must already be supplied via flags —
+ * missing values throw an error instead of prompting, so the command is
+ * safe to run non-interactively in CI.
+ */
+export async function resolveCreateParams(
+  opts: StreamCreateOptions,
+): Promise<ResolvedCreateParams> {
+  const recipient = opts.recipient ?? (opts.json ? undefined : await prompt('Recipient address: '));
+  const token = opts.token ?? (opts.json ? undefined : await prompt('Token contract address: '));
+  const amount = opts.amount ?? (opts.json ? undefined : await prompt('Amount in USDC: '));
+  const durationStr =
+    opts.duration !== undefined
+      ? String(opts.duration)
+      : opts.json
+        ? undefined
+        : await prompt('Duration in seconds: ');
+  const autoRenew = opts.autoRenew ?? false;
+
+  if (!recipient || !token || !amount || durationStr === undefined) {
+    throw new Error(
+      'stream create: --json requires --recipient, --token, --amount, and --duration',
+    );
+  }
+
+  const duration = Number(durationStr);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error(`stream create: invalid duration "${durationStr}"`);
+  }
+
+  return { recipient, token, amount, duration, autoRenew };
+}
+
+function prompt(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise<string>((resolve, reject) => {
+    rl.question(question, (answer: string) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+    rl.on('error', reject);
+  });
+}
+
+export async function cmdStreamCreate(opts: StreamCreateOptions): Promise<void> {
+  const client = createClient(opts);
+
+  const params = await resolveCreateParams(opts);
+
+  const result = await client.createStream({
+    recipient: params.recipient,
+    token: params.token,
+    amount: toStroops(params.amount),
+    durationSeconds: params.duration,
+    autoRenew: params.autoRenew,
+  });
+
+  // createStream can return a dry-run description when dryRun is opted into;
+  // the CLI never opts in, so narrow to the { streamId, txHash } shape.
+  if (!result || typeof (result as { streamId?: string }).streamId !== 'string') {
+    throw new Error('stream create: unexpected createStream result shape');
+  }
+
+  // Surface the new stream ID and transaction hash prominently.
+  console.log(JSON.stringify({ streamId: result.streamId, txHash: result.txHash }, null, 2));
 }
 
 export async function cmdCreate(
