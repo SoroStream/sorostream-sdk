@@ -41,6 +41,23 @@ export class StreamNotActiveError extends SoroStreamError {
   }
 }
 
+export class StreamAlreadyLockedError extends SoroStreamError {
+  readonly streamId: string;
+  readonly currentLockUntil: number;
+  readonly requestedLockUntil: number;
+
+  constructor(streamId: string, currentLockUntil: number, requestedLockUntil: number) {
+    super(
+      `Stream ${streamId} is already locked until ${currentLockUntil}. ` +
+        `Cannot set lock to ${requestedLockUntil}.`,
+    );
+    this.name = 'StreamAlreadyLockedError';
+    this.streamId = streamId;
+    this.currentLockUntil = currentLockUntil;
+    this.requestedLockUntil = requestedLockUntil;
+  }
+}
+
 export class TransactionFailedError extends SoroStreamError {
   constructor(details: string) {
     super(`Transaction failed: ${details}`);

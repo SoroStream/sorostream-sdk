@@ -332,6 +332,20 @@ export interface StreamCostBreakdown {
   totalInAsset: string;
 }
 
+export interface SimulateStreamResult {
+  /** Estimated fee in stroops from the simulation response. */
+  fee: number;
+  /** Transaction footprint returned by the Soroban RPC simulation. */
+  footprint: {
+    readOnly: unknown[];
+    readWrite: unknown[];
+  };
+  /** Whether the simulation succeeded. */
+  isValid: boolean;
+  /** Error details when `isValid` is `false`. */
+  error?: string;
+}
+
 /** Result of batch cancellation. */
 export interface BatchCancelResult {
   txHash: string;

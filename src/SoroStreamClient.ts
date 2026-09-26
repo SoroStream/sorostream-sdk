@@ -125,6 +125,7 @@ import {
   SelfStreamError,
   RecipientValidationError,
   StartTimeInPastError,
+  StreamAlreadyLockedError,
 } from './errors.js';
 import type { BulkCreateFailedSlot } from './errors.js';
 import type {
@@ -139,6 +140,7 @@ import type {
   CreateStreamParams,
   CreateStreamDryRunResult,
   FeeEstimate,
+  SimulateStreamResult,
   Network,
   PaginatedStreams,
   PaginationParams,
@@ -3600,6 +3602,45 @@ async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
     const totalInAsset = (totalFee / 10_000_000).toFixed(7);
 
     return { resourceFee, baseFee, totalFee, totalInAsset };
+  }
+
+  /**
+   * Dry-runs a `createStream` transaction via `simulateTransaction` and returns
+   * a structured result without submitting it to the network (issue #555).
+   *
+   * @param params - Same shape as {@link createStream}'s `params`.
+   * @returns `{ fee, footprint, isValid, error? }` where `isValid` indicates
+   * whether the simulation succeeded.
+   */
+  async simulateStream(params: CreateStreamParams): Promise<SimulateStreamResult> {
+    try {
+      const sender = await this.requireWalletAdapter().getPublicKey();
+      const operation = this.encoder.createStream(sender, params);
+      const simResult = await this.simulateOp(operation);
+      const isSuccess = rpc.Api.isSimulationSuccess(simResult);
+      if (isSuccess) {
+        const fee = Number(
+          (simResult as rpc.Api.SimulateTransactionSuccessResponse).minResourceFee ?? 0,
+        );
+        const raw = simResult as any;
+        const footprint = raw.footprint ?? { readOnly: [], readWrite: [] };
+        return { fee, footprint, isValid: true };
+      }
+      const error = (simResult as rpc.Api.SimulateTransactionErrorResponse).error;
+      return {
+        fee: 0,
+        footprint: { readOnly: [], readWrite: [] },
+        isValid: false,
+        error,
+      };
+    } catch (err) {
+      return {
+        fee: 0,
+        footprint: { readOnly: [], readWrite: [] },
+        isValid: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 
   /**
