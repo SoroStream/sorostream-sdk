@@ -948,10 +948,13 @@ export class LobstrWalletAdapter implements WalletAdapter {
   private provider?: any;
   private networkListeners: Set<(network: Network) => void> = new Set();
   private connectionListeners: Set<(connected: boolean) => void> = new Set();
+  private walletConnectConfig?: import('./types.js').WalletConnectV2AdapterConfig;
+  private walletConnectAdapter?: WalletAdapter;
 
   constructor(config?: LobstrWalletAdapterConfig) {
     this.publicKey = config?.publicKey;
     this.provider = config?.provider;
+    this.walletConnectConfig = config?.walletConnect;
   }
 
   private getProvider(): any {
@@ -962,63 +965,90 @@ export class LobstrWalletAdapter implements WalletAdapter {
     return null;
   }
 
+  async isAvailable(): Promise<boolean> {
+    if (this.publicKey) return true;
+    const provider = this.getProvider();
+    if (provider) return true;
+    if (this.walletConnectConfig) {
+      try {
+        if (!this.walletConnectAdapter) {
+          const { createWalletConnectV2Adapter } = await import('./wallet.js');
+          this.walletConnectAdapter = await createWalletConnectV2Adapter(this.walletConnectConfig);
+        }
+        return await this.walletConnectAdapter.isConnected();
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
   async isConnected(): Promise<boolean> {
     const provider = this.getProvider();
-    if (!provider) return false;
-    if (typeof provider.isConnected === 'function') {
-      return await provider.isConnected();
+    if (provider) {
+      if (typeof provider.isConnected === 'function') {
+        return await provider.isConnected();
+      }
+      return true;
     }
-    return true;
+    if (this.walletConnectAdapter) {
+      return await this.walletConnectAdapter.isConnected();
+    }
+    return false;
   }
 
   async getPublicKey(): Promise<string> {
     if (this.publicKey) return this.publicKey;
     const provider = this.getProvider();
-    if (!provider) {
-      throw new Error('Lobstr wallet provider is not available');
-    }
-    if (typeof provider.getPublicKey === 'function') {
-      const key = await provider.getPublicKey();
-      if (typeof key === 'string' && key) {
-        this.publicKey = key;
-        return key;
+    if (provider) {
+      if (typeof provider.getPublicKey === 'function') {
+        const key = await provider.getPublicKey();
+        if (typeof key === 'string' && key) {
+          this.publicKey = key;
+          return key;
+        }
+        if (key?.publicKey) {
+          this.publicKey = key.publicKey;
+          return key.publicKey;
+        }
       }
-      if (key?.publicKey) {
-        this.publicKey = key.publicKey;
-        return key.publicKey;
+      if (typeof provider.getAccount === 'function') {
+        const acc = await provider.getAccount();
+        const key = typeof acc === 'string' ? acc : (acc?.address ?? acc?.publicKey);
+        if (key) {
+          this.publicKey = key;
+          return key;
+        }
       }
     }
-    if (typeof provider.getAccount === 'function') {
-      const acc = await provider.getAccount();
-      const key = typeof acc === 'string' ? acc : (acc?.address ?? acc?.publicKey);
-      if (key) {
-        this.publicKey = key;
-        return key;
-      }
+    if (this.walletConnectAdapter) {
+      return await this.walletConnectAdapter.getPublicKey();
     }
-    throw new Error('Lobstr wallet provider did not return a valid public key');
+    throw new Error('Lobstr wallet provider is not available');
   }
 
   async signTransaction(xdrStr: string, network: Network): Promise<string> {
     const provider = this.getProvider();
-    if (!provider) {
-      throw new Error('Lobstr wallet provider is not available');
-    }
-    const networkPassphrase = NETWORK_PASSPHRASES[network] ?? network;
+    if (provider) {
+      const networkPassphrase = NETWORK_PASSPHRASES[network] ?? network;
 
-    if (typeof provider.signTransaction === 'function') {
-      const res = await provider.signTransaction(xdrStr, {
-        networkPassphrase,
-        network,
-      });
-      if (typeof res === 'string') return res;
-      if (res?.signedTxXdr) return res.signedTxXdr;
-      if (res?.xdr) return res.xdr;
+      if (typeof provider.signTransaction === 'function') {
+        const res = await provider.signTransaction(xdrStr, {
+          networkPassphrase,
+          network,
+        });
+        if (typeof res === 'string') return res;
+        if (res?.signedTxXdr) return res.signedTxXdr;
+        if (res?.xdr) return res.xdr;
+      }
+      if (typeof provider.sign === 'function') {
+        const res = await provider.sign(xdrStr, { networkPassphrase });
+        if (typeof res === 'string') return res;
+        if (res?.signedTxXdr) return res.signedTxXdr;
+      }
     }
-    if (typeof provider.sign === 'function') {
-      const res = await provider.sign(xdrStr, { networkPassphrase });
-      if (typeof res === 'string') return res;
-      if (res?.signedTxXdr) return res.signedTxXdr;
+    if (this.walletConnectAdapter) {
+      return await this.walletConnectAdapter.signTransaction(xdrStr, network);
     }
     throw new Error('Lobstr wallet failed to sign transaction');
   }

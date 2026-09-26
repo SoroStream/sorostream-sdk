@@ -104,4 +104,36 @@ describe('Issue #434: Configurable per-method request timeout', () => {
       client.cancelStream({ streamId: '2' }, undefined, { timeout: 100 }),
     ).rejects.toThrow('Transaction confirmation timed out after 100ms');
   });
+
+  it('uses config.timeouts.write when no per-call timeout is provided (issue #565)', async () => {
+    const validXdr = makeValidTxXdr();
+    const client = new SoroStreamClient({
+      network: 'testnet',
+      contractId: VALID_CONTRACT,
+      walletAdapter: makeMockAdapter(validXdr),
+      txTimeoutMs: 60000,
+      timeouts: { write: 100 },
+    });
+
+    const mockServer = {
+      getAccount: vi.fn().mockResolvedValue(new Account(VALID_ACCOUNT, '1')),
+      prepareTransaction: vi.fn().mockImplementation((tx) => Promise.resolve(tx)),
+      sendTransaction: vi.fn().mockResolvedValue({ status: 'PENDING', hash: 'tx789' }),
+      getTransaction: vi.fn().mockResolvedValue({ status: 'NOT_FOUND' }),
+      simulateTransaction: vi.fn().mockResolvedValue({
+        result: { retval: nativeToScVal(100n) },
+      }),
+    };
+
+    (client as any).server = mockServer;
+    vi.spyOn(client, 'getClaimable').mockResolvedValue(100n);
+
+    const start = Date.now();
+    await expect(client.withdraw({ streamId: '1' })).rejects.toThrow(
+      'Transaction confirmation timed out after 100ms',
+    );
+
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(5000);
+  });
 });

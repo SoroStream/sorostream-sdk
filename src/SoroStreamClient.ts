@@ -196,10 +196,14 @@ import type {
   ObserveStreamOptions,
   StreamCostBreakdown,
   BuildUnsignedXdrParams,
+  DrainFlowParams,
+  DrainFlowResult,
+  ProjectCostResult,
+  ProjectStreamCost,
 } from './types.js';
 import { withRetry, type RetryOptions } from './retry.js';
 import type { EventPollerOptions, StreamRetryPolicy } from './events.js';
-import { calculateVestingSchedule, streamToJSON, formatUSDC } from './utils.js';
+import { calculateVestingSchedule, streamToJSON, formatUSDC, projectCost } from './utils.js';
 import { buildUnsignedXdr } from './serialization.js';
 import { checkPeerDependencies } from './peerDependencies.js';
 import { PluginRegistry } from './pluginRegistry.js';
@@ -269,6 +273,14 @@ export interface SoroStreamClientOptions {
   writeRateLimit?: WriteRateLimitOptions;
   /** Maximum time in ms to wait for a transaction to confirm (default: 120000). */
   txTimeoutMs?: number;
+  /**
+   * Per-method timeout overrides in ms (issue #565).
+   * `read` applies to getStream/getClaimable/simulate reads.
+   * `write` applies to create/withdraw/cancel/topUp/etc.
+   * `simulate` applies to simulateTransaction calls.
+   * Each method-specific value falls back to `txTimeoutMs` when omitted.
+   */
+  timeouts?: { read?: number; write?: number; simulate?: number };
   /** Retry policy for read methods (getStream, getClaimable, etc.). */
   readRetry?: RetryOptions;
   /** Retry policy for transaction submission RPC calls (getAccount, prepareTransaction, sendTransaction). */
@@ -587,6 +599,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   private network: Network;
   private walletAdapter: WalletAdapter | undefined;
   private txTimeoutMs: number;
+  private readonly timeouts: { read?: number; write?: number; simulate?: number };
   private readonly readRetry: RetryOptions;
   private readonly submitRetry: RetryOptions;
   private readonly encoder: ContractCallEncoder;
@@ -857,6 +870,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       rpcUrl: options.rpcUrl ?? RPC_URLS[this.network],
     });
     this.txTimeoutMs = options.txTimeoutMs ?? 120_000;
+    this.timeouts = options.timeouts ?? {};
     this.breaker = options.circuitBreaker ? new CircuitBreaker(options.circuitBreaker) : null;
     // Issue #464: opt-in client-side throttle on write-operation submission rate.
     this.writeRateLimiter = options.writeRateLimit
@@ -1770,6 +1784,10 @@ get isTelemetryEnabled(): boolean {
     return this.breaker ? this.breaker.call(fn) : fn();
   }
 
+  private resolveTimeout(category: 'read' | 'write' | 'simulate', override?: number): number {
+    return override ?? this.timeouts[category] ?? this.txTimeoutMs;
+  }
+
   /**
    * Ensures a wallet adapter is present for operations that require signing.
    * Throws an error if no adapter was provided during client construction.
@@ -1895,7 +1913,7 @@ get isTelemetryEnabled(): boolean {
     memo?: string | MemoHash,
     timeoutMs?: number,
   ): Promise<{ txHash: string; ledger: number }> {
-    const effectiveTimeoutMs = timeoutMs ?? this.txTimeoutMs;
+    const effectiveTimeoutMs = this.resolveTimeout('write', timeoutMs);
     const adapter = this.requireWalletAdapter();
     const publicKey = await adapter.getPublicKey();
 
@@ -2958,6 +2976,136 @@ async cancelStream(
        throw err;
      }
    }
+
+  /**
+   * Atomically cancels a stream and withdraws the claimable balance (issue #558).
+   *
+   * This is a two-step operation executed sequentially. If the cancel succeeds
+   * but the withdraw fails, the error includes both the `cancelResult` and the
+   * `withdrawError` so the caller can decide how to recover.
+   *
+   * @param params - Drain parameters.
+   * @param params.streamId - ID of the stream to drain.
+   * @param signal - Optional `AbortSignal` to cancel in-flight transaction polling.
+   * @param options - Optional write options (e.g. `feeBump`).
+   * @returns `DrainFlowSuccess` when both steps succeed, or `DrainFlowPartialFailure`
+   *   when the cancel succeeds but the withdraw fails.
+   * @throws {TransactionFailedError} If the cancel transaction itself is rejected.
+   *
+   * @example
+   * ```ts
+   * const result = await client.drainFlow({ streamId: "42" });
+   * if (result.ok) {
+   *   console.log(`Drained ${formatUSDC(BigInt(result.amount))} USDC`);
+   * } else {
+   *   console.error('Cancel ok but withdraw failed:', result.withdrawError);
+   * }
+   * ```
+   */
+  async drainFlow(
+    params: DrainFlowParams,
+    signal?: AbortSignal,
+    options?: WriteOptions,
+  ): Promise<DrainFlowResult> {
+    const sender = await this.requireWalletAdapter().getPublicKey();
+
+    const cancelOp = this.encoder.cancelStream(params.streamId, sender);
+    const feeBump = this.resolveFeeBump(options?.feeBump);
+    const { txHash: cancelTxHash } = await this.buildAndSubmit(
+      cancelOp,
+      signal,
+      feeBump,
+      'cancelStream',
+      options?.memo,
+      options?.timeoutMs ?? options?.timeout,
+    );
+
+    try {
+      const recipient = await this.requireWalletAdapter().getPublicKey();
+      const claimable = await this.getClaimable(params.streamId);
+      if (claimable === 0n) {
+        return { ok: true as const, cancelTxHash, withdrawTxHash: cancelTxHash, amount: '0' };
+      }
+
+      const withdrawOp = this.encoder.withdraw(params.streamId, recipient);
+      const { txHash: withdrawTxHash } = await this.buildAndSubmit(
+        withdrawOp,
+        signal,
+        feeBump,
+        'withdraw',
+        options?.memo,
+        options?.timeoutMs ?? options?.timeout,
+      );
+
+      this.eventBus.emit('stream.withdrawn', {
+        streamId: params.streamId,
+        amount: claimable.toString(),
+        txHash: withdrawTxHash,
+      });
+
+      return { ok: true, cancelTxHash, withdrawTxHash, amount: claimable.toString() };
+    } catch (withdrawError) {
+      return {
+        ok: false,
+        cancelResult: { txHash: cancelTxHash },
+        withdrawError: withdrawError instanceof Error ? withdrawError : new Error(String(withdrawError)),
+      };
+    }
+  }
+
+  /**
+   * Calculates the projected total cost for a list of streams (issue #556).
+   *
+   * For each stream the cost is `flowRate × duration − alreadyWithdrawn`.
+   * The result is grouped by stream and by token.
+   *
+   * @param streamIds - Stream IDs to include in the calculation.
+   * @returns `{ total, byStream, byToken }` with costs in stroops.
+   *
+   * @example
+   * ```ts
+   * const { total, byStream, byToken } = await client.getProjectCost(["1", "2", "3"]);
+   * console.log(`Total project cost: ${formatUSDC(total)}`);
+   * ```
+   */
+  async getProjectCost(streamIds: string[]): Promise<ProjectCostResult> {
+    const streams = await this.getStreams(streamIds, { strict: true });
+    const byStream: ProjectStreamCost[] = [];
+    const tokenMap = new Map<string, { deposited: bigint; claimable: bigint; claimedSoFar: bigint; streamCount: number }>();
+
+    for (const stream of streams) {
+      const duration = Math.max(0, stream.endTime - stream.startTime);
+      const projectedCost = projectCost(stream.flowRate, duration);
+      const withdrawn = stream.flowRate * BigInt(Math.max(0, stream.lastWithdrawTime - stream.startTime));
+      const netCost = projectedCost > withdrawn ? projectedCost - withdrawn : 0n;
+
+      byStream.push({
+        streamId: stream.id,
+        token: stream.token,
+        projectedCost,
+        withdrawn,
+        netCost,
+      });
+
+      const existing = tokenMap.get(stream.token) ?? { deposited: 0n, claimable: 0n, claimedSoFar: 0n, streamCount: 0 };
+      existing.deposited += stream.deposit;
+      existing.claimedSoFar += withdrawn;
+      existing.streamCount += 1;
+      tokenMap.set(stream.token, existing);
+    }
+
+    const byToken: ProjectCostResult['byToken'] = Array.from(tokenMap.entries()).map(([token, agg]) => ({
+      token,
+      streamCount: agg.streamCount,
+      deposited: agg.deposited,
+      claimable: agg.deposited - agg.claimedSoFar,
+      claimedSoFar: agg.claimedSoFar,
+    }));
+
+    const total = byStream.reduce((sum, s) => sum + s.netCost, 0n);
+
+    return { total, byStream, byToken };
+  }
 
   /**
    * Tops up an existing stream with additional tokens, extending its duration.
