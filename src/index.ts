@@ -116,6 +116,14 @@ export { ConnectionPool } from './connectionPool.js';
 export type { ConnectionPoolOptions, PoolEvent, PoolEventType } from './connectionPool.js';
 export { InMemoryEventBus } from './eventBus.js';
 export type { IEventBus, Unsubscribe } from './eventBus.js';
+export { PriorityRequestQueue, createRequestQueue } from './request-queue.js';
+export type {
+  RequestQueueConfig,
+  RequestPriority,
+  LaneStats,
+  QueueStats,
+  RateLimitDelayedPayload,
+} from './request-queue.js';
 export { RequestDeduplicator, dedupKey } from './requestDeduplicator.js';
 export type { RequestDedupStats, RequestDeduplicatorOptions } from './requestDeduplicator.js';
 export { SoroStreamObservable, shareLatest, observableSymbol } from './observable.js';
