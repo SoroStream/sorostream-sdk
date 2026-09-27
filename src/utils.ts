@@ -129,23 +129,73 @@ export function formatUSDC(
   options?: FormatUSDCOptions,
 ): string {
   const factor = 10n ** BigInt(decimals);
-  const whole = stroops / factor;
-  const remainder = stroops % factor;
 
   if (!options) {
+    const whole = stroops / factor;
+    const remainder = stroops % factor;
     return `${whole}.${remainder.toString().padStart(decimals, '0')}`;
   }
 
-  // Build a numeric value from the bigint parts to avoid precision loss.
-  // `whole` and `remainder` are each individually within Number.MAX_SAFE_INTEGER
-  // for any realistic token amount.
-  const numericValue = Number(whole) + Number(remainder) / Number(factor);
+  const negative = stroops < 0n;
+  const absolute = negative ? -stroops : stroops;
+  const whole = absolute / factor;
+  const remainder = absolute % factor;
 
-  return new Intl.NumberFormat(options.locale, {
-    minimumFractionDigits: options.minimumFractionDigits ?? 2,
-    maximumFractionDigits: options.maximumFractionDigits ?? decimals,
+  const nf = new Intl.NumberFormat(options.locale, {
     useGrouping: options.useGrouping ?? true,
-  }).format(numericValue);
+  });
+
+  // Issue #610: the previous implementation built the value with
+  // `Number(whole) + Number(remainder) / Number(factor)` and let Intl format the
+  // resulting double. That silently loses precision past
+  // Number.MAX_SAFE_INTEGER (2^53) — e.g. 9_007_199_254_740_993 stroop-wholes
+  // render as ...992 — which is exactly the range large stream amounts live in.
+  // The fraction below is therefore assembled in bigint space (half-up rounding
+  // included) and only the integer part is handed to Intl, which formats bigints
+  // exactly.
+  //
+  // `maximumFractionDigits` is clamped to the token's own precision: a 7-decimal
+  // token has no 8th digit in `stroops`, so honouring a larger request would
+  // mean inventing digits. `minimumFractionDigits` follows it down for the same
+  // reason.
+  const digits = Math.max(0, Math.min(options.maximumFractionDigits ?? decimals, decimals));
+  const minDigits = Math.max(0, Math.min(options.minimumFractionDigits ?? 2, digits));
+
+  const unit = 10n ** BigInt(decimals - digits);
+  let scaledFraction = remainder / unit;
+  if ((remainder % unit) * 2n >= unit) scaledFraction += 1n;
+
+  let wholeRounded = whole;
+  const cap = 10n ** BigInt(digits);
+  if (scaledFraction >= cap) {
+    wholeRounded += 1n;
+    scaledFraction -= cap;
+  }
+
+  const integerText = nf.format(wholeRounded);
+  if (digits === 0) {
+    return `${negative ? minusSign(nf) : ''}${integerText}`;
+  }
+
+  let fraction = scaledFraction.toString().padStart(digits, '0');
+  while (fraction.length > minDigits && fraction.endsWith('0')) {
+    fraction = fraction.slice(0, -1);
+  }
+
+  const sign = negative ? minusSign(nf) : '';
+  if (!fraction) return `${sign}${integerText}`;
+
+  return `${sign}${integerText}${decimalSeparator(nf)}${fraction}`;
+}
+
+/** Locale-correct decimal separator for a formatter (`,` in de-DE, `.` in en-US). */
+function decimalSeparator(nf: Intl.NumberFormat): string {
+  return nf.formatToParts(0.5).find((part) => part.type === 'decimal')?.value ?? '.';
+}
+
+/** Locale-correct minus sign for a formatter. */
+function minusSign(nf: Intl.NumberFormat): string {
+  return nf.formatToParts(-1).find((part) => part.type === 'minusSign')?.value ?? '-';
 }
 
 /**
