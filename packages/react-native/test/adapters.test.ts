@@ -10,8 +10,14 @@ import { describe, it, expect, vi } from 'vitest';
 // satisfy sibling packages' dependency on their own root package name.
 import { SoroStreamClient } from '../../../src/SoroStreamClient.js';
 import type { WalletAdapter } from '../../../src/types.js';
-import { createAsyncStorageAdapter, createReactNativeAdapters } from '../src/index.js';
-import type { AsyncStorageLike } from '../src/index.js';
+import {
+  createAsyncStorageAdapter,
+  createReactNativeAdapters,
+  createExpoSecureStoreAdapter,
+  createExpoAdapters,
+  setupExpoPolyfills,
+} from '../src/index.js';
+import type { AsyncStorageLike, ExpoSecureStoreLike } from '../src/index.js';
 
 const VALID_CONTRACT = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
 
@@ -31,6 +37,15 @@ function makeFakeAsyncStorage(): AsyncStorageLike {
     getItem: async (key) => store.get(key) ?? null,
     setItem: async (key, value) => void store.set(key, value),
     removeItem: async (key) => void store.delete(key),
+  };
+}
+
+function makeFakeExpoSecureStore(): ExpoSecureStoreLike {
+  const store = new Map<string, string>();
+  return {
+    getItemAsync: async (key) => store.get(key) ?? null,
+    setItemAsync: async (key, value) => void store.set(key, value),
+    deleteItemAsync: async (key) => void store.delete(key),
   };
 }
 
@@ -54,6 +69,34 @@ describe('createAsyncStorageAdapter', () => {
     // Allow the background hydration microtask to resolve.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(adapter.getItem('preexisting')).toBe('hello');
+  });
+});
+
+describe('createExpoSecureStoreAdapter (#654)', () => {
+  it('reads and writes to fake Expo SecureStore backend', async () => {
+    const secureStore = makeFakeExpoSecureStore();
+    await secureStore.setItemAsync('token', 'secret_val');
+
+    const adapter = createExpoSecureStoreAdapter(secureStore);
+    expect(adapter.getItem('token')).toBeNull(); // pending hydration
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(adapter.getItem('token')).toBe('secret_val');
+
+    adapter.setItem('newKey', 'newVal');
+    expect(adapter.getItem('newKey')).toBe('newVal');
+  });
+
+  it('createExpoAdapters correctly selects secureStore or asyncStorage', () => {
+    const secureStore = makeFakeExpoSecureStore();
+    const adapters = createExpoAdapters({ secureStore });
+    expect(adapters.storage).toBeDefined();
+  });
+
+  it('setupExpoPolyfills sets global crypto if missing', () => {
+    const fakeCrypto = { getRandomValues: vi.fn() };
+    setupExpoPolyfills({ crypto: fakeCrypto as any });
+    expect(globalThis.crypto).toBeDefined();
   });
 });
 

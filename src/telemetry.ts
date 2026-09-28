@@ -1,3 +1,5 @@
+import { VERSION } from './version.js';
+
 type Attributes = Record<string, string | number | boolean>;
 interface SpanOptions {
   attributes?: Attributes;
@@ -35,7 +37,7 @@ export class Telemetry {
     if (enabled) {
       const otel = getOtel();
       if (otel) {
-        this.tracer = otel.trace.getTracer('@sorostream/sdk', '0.1.0');
+        this.tracer = otel.trace.getTracer('@sorostream/sdk', VERSION);
       }
     }
   }

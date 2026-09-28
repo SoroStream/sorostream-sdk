@@ -282,3 +282,5 @@ export type { FeeRetryMiddlewareOptions } from './feeRetryMiddleware.js';
 export { createFederationPlugin } from './federationPlugin.js';
 export type { FederationPluginOptions } from './federationPlugin.js';
 export type { PaginatedEvents, StreamEvent as IndexerStreamEvent, StreamEventType as IndexerStreamEventType } from './indexer.js';
+export { VERSION, SDK_VERSION } from './version.js';
+

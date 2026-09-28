@@ -169,3 +169,6 @@ export type {
   RpcErrorEventPayload,
   SoroStreamEventMap,
 } from './types.js';
+
+export { VERSION, SDK_VERSION } from './version.js';
+
