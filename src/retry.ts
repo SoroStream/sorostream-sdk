@@ -20,6 +20,47 @@ export function jitterDelay(rawDelayMs: number): number {
   return Math.floor(min + Math.random() * (max - min));
 }
 
+/**
+ * Backoff strategy used to compute the delay before the next retry attempt
+ * (issue #632).
+ *
+ * - `'exponential'` (default): `baseDelayMs * 2^attempt`
+ * - `'linear'`: `baseDelayMs * (attempt + 1)`
+ * - `'constant'`: `baseDelayMs`
+ * - a function `(attempt, baseDelayMs) => delayMs`, where `attempt` is zero-based
+ *
+ * The result is always capped at `maxDelayMs`.
+ */
+export type BackoffStrategy =
+  | 'exponential'
+  | 'linear'
+  | 'constant'
+  | ((attempt: number, baseDelayMs: number) => number);
+
+/**
+ * Computes the capped (un-jittered) backoff delay for a zero-based attempt.
+ * Negative or non-finite results from a custom strategy are treated as 0.
+ */
+export function computeBackoffDelay(
+  attempt: number,
+  baseDelayMs: number,
+  maxDelayMs: number,
+  strategy: BackoffStrategy = 'exponential',
+): number {
+  let raw: number;
+  if (typeof strategy === 'function') {
+    raw = strategy(attempt, baseDelayMs);
+  } else if (strategy === 'linear') {
+    raw = baseDelayMs * (attempt + 1);
+  } else if (strategy === 'constant') {
+    raw = baseDelayMs;
+  } else {
+    raw = baseDelayMs * 2 ** attempt;
+  }
+  if (!Number.isFinite(raw) || raw < 0) raw = 0;
+  return Math.min(maxDelayMs, raw);
+}
+
 export interface RetryOptions {
   /** Maximum number of attempts (default: 3). */
   maxAttempts?: number;
@@ -34,6 +75,16 @@ export interface RetryOptions {
    * from a transient outage simultaneously.
    */
   maxDelayMs?: number;
+  /**
+   * Backoff strategy (default: `'exponential'`). Issue #632.
+   * See {@link BackoffStrategy}.
+   */
+  backoff?: BackoffStrategy;
+  /**
+   * When `false`, the ±25% jitter is not applied and the computed backoff
+   * delay is used as-is (default: `true`). Issue #632.
+   */
+  jitter?: boolean;
   /** Optional AbortSignal to cancel retries mid-flight. */
   signal?: AbortSignal;
   /**
@@ -139,12 +190,21 @@ export function isTransientRpcError(err: unknown): boolean {
 export class RetryBackoff {
   private readonly baseDelayMs: number;
   private readonly maxDelayMs: number;
+  private readonly backoff: BackoffStrategy;
+  private readonly jitter: boolean;
   /** Current backoff attempt counter, keyed by request identifier. */
   private readonly attemptCounts = new Map<string, number>();
 
-  constructor(options?: { baseDelayMs?: number; maxDelayMs?: number }) {
+  constructor(options?: {
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    backoff?: BackoffStrategy;
+    jitter?: boolean;
+  }) {
     this.baseDelayMs = options?.baseDelayMs ?? 200;
     this.maxDelayMs = options?.maxDelayMs ?? 30_000;
+    this.backoff = options?.backoff ?? 'exponential';
+    this.jitter = options?.jitter ?? true;
   }
 
   /**
@@ -153,7 +213,7 @@ export class RetryBackoff {
    * @returns The capped delay in ms: `min(maxDelayMs, baseDelayMs * 2^attempt)`.
    */
   private cappedDelay(attempt: number): number {
-    return Math.min(this.maxDelayMs, this.baseDelayMs * 2 ** attempt);
+    return computeBackoffDelay(attempt, this.baseDelayMs, this.maxDelayMs, this.backoff);
   }
 
   /**
@@ -178,7 +238,8 @@ export class RetryBackoff {
   onFailure(key: string): number {
     const attempt = this.attemptCounts.get(key) ?? 0;
     this.attemptCounts.set(key, attempt + 1);
-    return jitterDelay(this.cappedDelay(attempt));
+    const delay = this.cappedDelay(attempt);
+    return this.jitter ? jitterDelay(delay) : delay;
   }
 
   /**
@@ -234,6 +295,8 @@ export async function withRetry<T>(fn: () => Promise<T>, options?: RetryOptions)
   const baseDelayMs = options?.baseDelayMs ?? 200;
   const maxDelayMs = options?.maxDelayMs ?? 30_000;
   const signal = options?.signal;
+  const backoff = options?.backoff ?? 'exponential';
+  const useJitter = options?.jitter ?? true;
 
   // Issue #363: determine whether a given error should be retried.
   // Priority: explicit shouldRetry > transientOnly flag > retry-all (default).
@@ -282,8 +345,8 @@ export async function withRetry<T>(fn: () => Promise<T>, options?: RetryOptions)
       }
 
       if (attempt < maxAttempts - 1) {
-        const cap = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
-        const delay = jitterDelay(cap);
+        const cap = computeBackoffDelay(attempt, baseDelayMs, maxDelayMs, backoff);
+        const delay = useJitter ? jitterDelay(cap) : cap;
         await new Promise<void>((resolve) => setTimeout(resolve, delay));
       }
     }
