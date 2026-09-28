@@ -14,6 +14,7 @@
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -66,7 +67,8 @@
     "validate-exports": "node scripts/validate-exports.js",
     "test:cjs": "node scripts/cjs-smoke-test.js",
     "check:bundle-size": "node scripts/check-bundle-size.js",
-    "prepublishOnly": "npm run validate-exports"
+    "prepublishOnly": "npm run validate-exports",
+    "check:circular": "npx madge --circular --extensions ts --ts-config tsconfig.json src"
   },
   "keywords": [
     "stellar",

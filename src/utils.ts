@@ -5,6 +5,8 @@ import {
   InsecureRpcUrlError,
   InvalidStreamIdError,
 } from './errors.js';
+import { jitterDelay } from './internal.js';
+export { redactSecretKey, jitterDelay } from './internal.js';
 import { getDefaultWebSocketFactory } from './adapters.js';
 import type { FetchAdapter, WebSocketFactory } from './adapters.js';
 import { Memo, TransactionBuilder, Transaction, Networks } from '@stellar/stellar-sdk';
@@ -656,7 +658,7 @@ export function watchClaimableWs(
         if (stopped) return;
         if (shouldReconnect && reconnectAttempts < maxAttempts) {
           reconnectAttempts++;
-          const delay = backoffMs * Math.pow(1.5, reconnectAttempts - 1);
+          const delay = jitterDelay(backoffMs * 1.5 ** (reconnectAttempts - 1));
           reconnectTimer = setTimeout(connect, delay);
         }
       };
@@ -2154,22 +2156,6 @@ export interface StreamMetadataFields {
   description?: string;
   tags?: string[];
   meta?: Record<string, unknown>;
-}
-
-/**
- * Redacts Stellar secret keys (S...), mnemonics, and private keys from strings and error messages (issue #525).
- *
- * @param input - The string to redact secret materials from.
- * @returns The redacted string with placeholders.
- */
-export function redactSecretKey(input: string): string {
-  if (!input) return input;
-  let result = input.replace(/\bS[A-Z2-7]{55}\b/g, '[REDACTED_SECRET_KEY]');
-  result = result.replace(
-    /\b(secretKey|secretSeed|privateKey|mnemonic|secret|seed)\s*[:=]\s*["']?[^"'\s,]+["']?/gi,
-    '$1=[REDACTED_SECRET]',
-  );
-  return result;
 }
 
 // ── Issue #441: subscribeToActivityFeed standalone utility ───────────────────

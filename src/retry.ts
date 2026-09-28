@@ -1,24 +1,8 @@
 import { SoroStreamRetryExhaustedError } from './errors.js';
 import type { RetryAttempt } from './errors.js';
+import { jitterDelay } from './internal.js';
 
-/**
- * Applies a ±25% jitter to a raw exponential backoff delay.
- *
- * Spreads retry load across a window so that clients recovering from a
- * transient outage do not all retry simultaneously (the "thundering herd"
- * problem). The jittered value is bounded to the raw delay:
- *   jittered ∈ [rawDelay × 0.75, rawDelay × 1.25]
- *
- * @param rawDelayMs - The capped exponential delay in ms.
- * @returns The jittered delay in ms, rounded down to an integer.
- */
-export function jitterDelay(rawDelayMs: number): number {
-  if (rawDelayMs <= 0) return 0;
-  const jitter = rawDelayMs * 0.25;
-  const min = rawDelayMs - jitter;
-  const max = rawDelayMs + jitter;
-  return Math.floor(min + Math.random() * (max - min));
-}
+export { jitterDelay };
 
 export interface RetryOptions {
   /** Maximum number of attempts (default: 3). */

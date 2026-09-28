@@ -1,4 +1,4 @@
-import { redactSecretKey } from './utils.js';
+import { redactSecretKey } from './internal.js';
 
 // See ERRORS.md for cause, typical trigger, and recovery guidance for each
 // error class below, and which SoroStreamClient methods throw them.

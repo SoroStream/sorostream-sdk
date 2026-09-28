@@ -1,3 +1,4 @@
+import { jitterDelay } from './internal.js';
 import type { StreamEvent, StreamEventFilter, StreamSubscription, WebhookConfig } from './types.js';
 import type { SoroStreamClient } from './SoroStreamClient.js';
 
@@ -86,7 +87,7 @@ export class WebhookForwarder {
       }
 
       if (attempt < maxRetries) {
-        await new Promise((r) => setTimeout(r, delay * Math.pow(2, attempt)));
+        await new Promise((r) => setTimeout(r, jitterDelay(delay * 2 ** attempt)));
       }
     }
   }
@@ -262,7 +263,7 @@ export class WebhookEmitter {
         // Network error — will retry
       }
       if (attempt < this.retries) {
-        await new Promise((r) => setTimeout(r, this.retryDelayMs * Math.pow(2, attempt)));
+        await new Promise((r) => setTimeout(r, jitterDelay(this.retryDelayMs * 2 ** attempt)));
       }
     }
   }
