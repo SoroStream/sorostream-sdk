@@ -6,6 +6,20 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-28
+
+### Added
+- Add migration guide for upgrading from v0.0.x / v0.1.0 to v1.0.0 (`docs/MIGRATION_V1.md`) (#649)
+- Add CDN browser bundle (`dist/sorostream.global.js`) in IIFE format exposing the `SoroStream` global variable for script tag and unpkg / jsDelivr usage (#651)
+- Add `build:browser` npm script that produces the minified IIFE bundle via `tsup` (#651)
+
+### Changed
+- Update `build` script to include IIFE browser bundle generation alongside existing ESM and CJS outputs (#651)
+- Include `docs/MIGRATION_V1.md` and `SECURITY.md` in the published npm package `files` list (#649) (#650)
+
+### Security
+- Add `SECURITY.md` with comprehensive best practices for secret key management, wallet adapter security, TLS enforcement, rate limiting, nonce / idempotency keys, input validation, and vulnerability disclosure policy (#650)
+
 ### Added
 - Add changelog entry format guide for contributors (#153)
 - **#445** Add `getMultipleStreamBalances(streamIds)` to `SoroStreamClient` for fetching current accrued claimable balances for many streams in a single batched RPC call (one `get_claimable` operation per stream ID in one `simulateTransaction`). Results share the existing claimable TTL cache and in-flight request pool with `getClaimable`; duplicate IDs are de-duplicated and missing streams resolve to `0n`. When the RPC server rejects the batched simulation (e.g. it only accepts a single `invokeHostFunction` operation per transaction) the method gracefully falls back to per-stream `getClaimable` calls. Also implemented on `MockSoroStreamClient` and both `SoroStreamSandbox` variants, and exported as the new `StreamBalance` type.
