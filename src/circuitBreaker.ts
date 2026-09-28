@@ -14,6 +14,7 @@ export class CircuitBreaker {
   private lastFailureTime = 0;
   private readonly threshold: number;
   private readonly cooldownMs: number;
+  private manuallyPaused = false;
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.threshold = options.threshold ?? DEFAULT_THRESHOLD;
@@ -21,6 +22,9 @@ export class CircuitBreaker {
   }
 
   async call<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.manuallyPaused) {
+      throw new Error('RPC endpoint unavailable (circuit breaker manually paused)');
+    }
     if (this.state === 'OPEN') {
       if (Date.now() - this.lastFailureTime >= this.cooldownMs) {
         this.state = 'HALF_OPEN';
@@ -48,6 +52,27 @@ export class CircuitBreaker {
 
   getState(): CircuitState {
     return this.state;
+  }
+
+  /**
+   * Manually opens the circuit (e.g. for maintenance). All calls are rejected
+   * until {@link resume} is called; the cooldown does not auto-close it (issue #625).
+   */
+  pause(): void {
+    this.manuallyPaused = true;
+    this.state = 'OPEN';
+    this.lastFailureTime = Date.now();
+  }
+
+  /** Closes a manually paused circuit and resets failure counters (issue #625). */
+  resume(): void {
+    this.manuallyPaused = false;
+    this.reset();
+  }
+
+  /** Whether the circuit was opened via {@link pause}. */
+  isPaused(): boolean {
+    return this.manuallyPaused;
   }
 
   reset(): void {

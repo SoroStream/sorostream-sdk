@@ -427,11 +427,24 @@ export type XdrValidationErrorCode =
 export class XdrValidationError extends SoroStreamError {
   /** Structured machine-readable error code. */
   readonly code: XdrValidationErrorCode;
+  /** Name of the field that failed validation, when known (issue #628). */
+  readonly field?: string;
+  /** Expected value of {@link field}, when applicable. */
+  readonly expected?: unknown;
+  /** Actual value of {@link field}, when applicable. */
+  readonly actual?: unknown;
 
-  constructor(code: XdrValidationErrorCode, message: string) {
-    super(message);
+  constructor(
+    code: XdrValidationErrorCode,
+    message: string,
+    details?: { field?: string; expected?: unknown; actual?: unknown },
+  ) {
+    super(details?.field ? `[${details.field}] ${message}` : message);
     this.name = 'XdrValidationError';
     this.code = code;
+    this.field = details?.field;
+    this.expected = details?.expected;
+    this.actual = details?.actual;
   }
 }
 

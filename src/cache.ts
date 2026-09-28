@@ -70,6 +70,43 @@ export class Cache<K, V> {
     this.store.clear();
   }
 
+  /**
+   * Removes every entry whose key matches `pattern` (issue #627).
+   * String patterns support `*` wildcards (e.g. `"stream:42:*"`); keys are
+   * compared via `String(key)`. A predicate may be passed for custom matching.
+   * @returns The number of entries removed.
+   */
+  invalidatePattern(pattern: string | RegExp | ((key: K) => boolean)): number {
+    let match: (key: K) => boolean;
+    if (typeof pattern === 'function') {
+      match = pattern;
+    } else {
+      const re =
+        typeof pattern === 'string'
+          ? new RegExp(
+              '^' +
+                pattern
+                  .split('*')
+                  .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+                  .join('.*') +
+                '$',
+            )
+          : pattern;
+      match = (key) => {
+        re.lastIndex = 0;
+        return re.test(String(key));
+      };
+    }
+    let removed = 0;
+    for (const key of [...this.store.keys()]) {
+      if (match(key)) {
+        this.store.delete(key);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
   setMaxSize(size: number): void {
     this.maxSize = size;
     while (this.store.size > this.maxSize) {
