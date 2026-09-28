@@ -7,6 +7,7 @@ import type {
   BatchMetrics,
 } from './types.js';
 import type { RpcTransportAdapter } from './transport.js';
+import { safeIdString } from './utils.js';
 
 /**
  * Retry policy for automatic event poller reconnection on unexpected failures.
@@ -66,7 +67,7 @@ function parseStreamEvent(raw: rpc.Api.EventResponse): StreamEvent | null {
   if (typeof rawType !== 'string' || !isStreamEventType(rawType)) return null;
 
   const rawStreamId = raw.topic.length > 1 ? scValToNative(raw.topic[1]!) : null;
-  const streamId = rawStreamId != null ? String(rawStreamId) : '0';
+  const streamId = rawStreamId != null ? safeIdString(rawStreamId) : '0';
 
   const data = raw.value ? (scValToNative(raw.value) as Record<string, unknown>) : {};
 

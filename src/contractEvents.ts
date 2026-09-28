@@ -14,6 +14,7 @@
 
 import { scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { rpc } from '@stellar/stellar-sdk';
+import { safeBigInt, safeIdString } from './utils.js';
 
 // ── Payload interfaces ────────────────────────────────────────────────────────
 
@@ -268,7 +269,10 @@ function safeNative(val: xdr.ScVal | undefined): unknown {
 
 function toBigInt(v: unknown): bigint {
   if (typeof v === 'bigint') return v;
-  if (typeof v === 'number') return BigInt(Math.round(v));
+  if (typeof v === 'number') {
+    if (!Number.isSafeInteger(v)) return safeBigInt(v);
+    return BigInt(v);
+  }
   if (typeof v === 'string') return BigInt(v);
   return 0n;
 }
@@ -343,7 +347,7 @@ export function parseContractEvent(raw: rpc.Api.EventResponse): ContractEventPay
   let streamId = '0';
   try {
     const idVal = raw.topic[1] ? scValToNative(raw.topic[1]) : null;
-    streamId = idVal !== null && idVal !== undefined ? String(idVal) : '0';
+    streamId = idVal !== null && idVal !== undefined ? safeIdString(idVal) : '0';
   } catch {
     streamId = '0';
   }

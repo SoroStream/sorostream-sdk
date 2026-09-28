@@ -46,6 +46,9 @@ export {
   toRatePerMonth,
   timeUntilStreamEnd,
   claimableNow,
+  safeClaimable,
+  safeBigInt,
+  safeIdString,
   calculateVestingSchedule,
   watchClaimable,
   watchClaimableWs,
@@ -99,6 +102,7 @@ export type {
 export { templates } from './templates.js';
 export { serializeStream, deserializeStream, buildUnsignedXdr } from './serialization.js';
 export type { SerializedStream } from './serialization.js';
+export { ScValCache, cachedScVal, cachedBool, cachedScValBase64 } from './scValCache.js';
 export type { BuildUnsignedXdrParams } from './types.js';
 export { getTransactionHistory, getAddressActivity } from './horizon.js';
 export type {
@@ -305,7 +309,7 @@ export type {
   SoroStreamEmitter,
 } from './types.js';
 
-export { ConnectionPoolExhaustedError, RecipientValidationError } from './errors.js';
+export { ConnectionPoolExhaustedError, RecipientValidationError, InvalidTokenContractError } from './errors.js';
 export { SanitizingLogger, NoopLogger, ConsoleLogger, createLogger } from './logger.js';
 export type { Logger, LogLevel, CreateLoggerOptions } from './logger.js';
 export { StreamStateMachine, InvalidStateTransitionError } from './state-machine.js';

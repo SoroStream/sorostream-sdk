@@ -5,7 +5,6 @@ import {
   TransactionBuilder,
   BASE_FEE,
   rpc,
-  nativeToScVal,
   scValToNative,
   xdr,
   Transaction,
@@ -127,6 +126,7 @@ import {
   RecipientValidationError,
   StartTimeInPastError,
   StreamAlreadyLockedError,
+  InvalidTokenContractError,
 } from './errors.js';
 import type { BulkCreateFailedSlot } from './errors.js';
 import type {
@@ -206,8 +206,9 @@ import type {
 } from './types.js';
 import { withRetry, type RetryOptions } from './retry.js';
 import type { EventPollerOptions, StreamRetryPolicy } from './events.js';
-import { calculateVestingSchedule, streamToJSON, formatUSDC, projectCost } from './utils.js';
+import { calculateVestingSchedule, streamToJSON, formatUSDC, projectCost, safeClaimable, safeBigInt, safeIdString } from './utils.js';
 import { buildUnsignedXdr } from './serialization.js';
+import { cachedScVal } from './scValCache.js';
 import { checkPeerDependencies } from './peerDependencies.js';
 import { PluginRegistry } from './pluginRegistry.js';
 import { getPortfolioStats } from './portfolioAnalytics.js';
@@ -511,12 +512,12 @@ export interface SoroStreamClientOptions {
 
 function nativeToStream(raw: Record<string, unknown>): Stream {
   return {
-    id: String(raw['id']),
+    id: safeIdString(raw['id']),
     sender: String(raw['sender']),
     recipient: String(raw['recipient']),
     token: String(raw['token']),
-    deposit: BigInt(raw['deposit'] as number),
-    flowRate: BigInt(raw['flow_rate'] as number),
+    deposit: safeBigInt(raw['deposit']),
+    flowRate: safeBigInt(raw['flow_rate']),
     startTime: Number(raw['start_time']),
     endTime: Number(raw['end_time']),
     lastWithdrawTime: Number(raw['last_withdraw_time']),
@@ -533,12 +534,12 @@ function nativeToStream(raw: Record<string, unknown>): Stream {
 function scValToStream(val: xdr.ScVal): Stream {
   const raw = scValToNative(val) as Record<string, unknown>;
   return {
-    id: String(raw['id']),
+    id: safeIdString(raw['id']),
     sender: String(raw['sender']),
     recipient: String(raw['recipient']),
     token: String(raw['token']),
-    deposit: BigInt(raw['deposit'] as number),
-    flowRate: BigInt(raw['flow_rate'] as number),
+    deposit: safeBigInt(raw['deposit']),
+    flowRate: safeBigInt(raw['flow_rate']),
     startTime: Number(raw['start_time']),
     endTime: Number(raw['end_time']),
     lastWithdrawTime: Number(raw['last_withdraw_time']),
@@ -2554,6 +2555,8 @@ const txBuilder = new TransactionBuilder(account, {
       throw new InvalidAddressError(params.token);
     }
 
+    await this.validateTokenContract(params.token);
+
     if (params.durationSeconds < MIN_STREAM_DURATION_SECONDS) {
       throw new ZeroDurationError(
         `Stream duration must be >= ${MIN_STREAM_DURATION_SECONDS}s, got ${params.durationSeconds}s`,
@@ -2607,6 +2610,19 @@ const txBuilder = new TransactionBuilder(account, {
   }
 
   /**
+   * Validates that the given address implements the SAC token interface by
+   * simulating a `symbol()` call. Throws {@link InvalidTokenContractError}
+   * if the simulation fails (issue #611).
+   */
+  private async validateTokenContract(token: string): Promise<void> {
+    const tokenContract = new Contract(token);
+    const result = await this.simulateOp(tokenContract.call('symbol'));
+    if (rpc.Api.isSimulationError(result)) {
+      throw new InvalidTokenContractError(token);
+    }
+  }
+
+  /**
    * Checks the sender's token allowance for the contract via the SAC allowance view.
    * Throws {@link InsufficientAllowanceError} if the current allowance is less than required.
    * Silently passes when the allowance RPC call fails (non-SAC token, RPC outage, etc.).
@@ -2619,8 +2635,8 @@ const txBuilder = new TransactionBuilder(account, {
       const tokenContract = new Contract(token);
       const op = tokenContract.call(
         'allowance',
-        nativeToScVal(sender, { type: 'address' }),
-        nativeToScVal(contractAddress, { type: 'address' }),
+        cachedScVal(sender, 'address'),
+        cachedScVal(contractAddress, 'address'),
       );
 
       const result = await this.simulateOp(op);
@@ -2629,7 +2645,7 @@ const txBuilder = new TransactionBuilder(account, {
       const retval = (result as rpc.Api.SimulateTransactionSuccessResponse).result?.retval;
       if (!retval) return;
 
-      const current = BigInt(scValToNative(retval) as number);
+      const current = safeBigInt(scValToNative(retval));
       if (current < required) {
         throw new InsufficientAllowanceError(token, required, current);
       }
@@ -2914,9 +2930,15 @@ async createStream(
     // Without this, a past start_time passes client-side and is only caught
     // by the contract, which rejects it with an opaque error.
     const ledgerNow = await this.getLedgerTimestamp();
+    const validatedTokens = new Set<string>();
     for (const params of paramsArray) {
       if (params.amount <= 0n) throw new Error('Amount must be > 0');
       if (params.durationSeconds <= 0) throw new Error('Duration must be > 0');
+
+      if (!validatedTokens.has(params.token)) {
+        await this.validateTokenContract(params.token);
+        validatedTokens.add(params.token);
+      }
 
       const startTimeParam =
         params.startTime ?? (params as CreateStreamParams & { start_time?: number }).start_time;
@@ -3151,7 +3173,7 @@ async cancelStream(
          // Estimate refund as the portion of deposit not yet streamed.
          const now = Math.floor(Date.now() / 1000);
          const elapsed = stream ? Math.max(0, now - stream.startTime) : 0;
-         const streamed = stream ? stream.flowRate * BigInt(elapsed) : 0n;
+         const streamed = stream ? safeClaimable(stream.flowRate, BigInt(elapsed), stream.deposit) : 0n;
          const refund = stream ? (stream.deposit > streamed ? stream.deposit - streamed : 0n) : 0n;
          const refundUsdc = formatUSDC(refund);
          const result = this.explainOperation(
@@ -3298,7 +3320,7 @@ async cancelStream(
     for (const stream of streams) {
       const duration = Math.max(0, stream.endTime - stream.startTime);
       const projectedCost = projectCost(stream.flowRate, duration);
-      const withdrawn = stream.flowRate * BigInt(Math.max(0, stream.lastWithdrawTime - stream.startTime));
+      const withdrawn = safeClaimable(stream.flowRate, BigInt(Math.max(0, stream.lastWithdrawTime - stream.startTime)), stream.deposit);
       const netCost = projectedCost > withdrawn ? projectedCost - withdrawn : 0n;
 
       byStream.push({
@@ -4697,7 +4719,7 @@ async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
         const result = await withRetry(
           () =>
             this.simulateOp(
-              this.contract.call('get_stream', nativeToScVal(BigInt(streamId), { type: 'u64' })),
+              this.contract.call('get_stream', cachedScVal(BigInt(streamId), 'u64')),
             ),
           this.readRetry,
         );
@@ -4851,7 +4873,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
     options?: GetStreamsOptions,
   ): Promise<Stream[]> {
     const idsScVal = xdr.ScVal.scvVec(
-      chunk.map((id) => nativeToScVal(BigInt(id), { type: 'u64' })),
+      chunk.map((id) => cachedScVal(BigInt(id), 'u64')),
     );
 
     const result = await withRetry(
@@ -4953,7 +4975,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
         const result = await withRetry(
           () =>
             this.simulateOp(
-              this.contract.call('get_claimable', nativeToScVal(BigInt(streamId), { type: 'u64' })),
+              this.contract.call('get_claimable', cachedScVal(BigInt(streamId), 'u64')),
             ),
           this.readRetry,
         );
@@ -4962,7 +4984,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
         if (!rpc.Api.isSimulationError(result)) {
           const returnVal = (result as rpc.Api.SimulateTransactionSuccessResponse).result?.retval;
           if (returnVal) {
-            const raw = BigInt(scValToNative(returnVal) as number);
+            const raw = safeBigInt(scValToNative(returnVal));
             if (raw < 0n) {
               console.warn(`getClaimable returned negative value ${raw} — clamping to 0`);
             } else {
@@ -5092,7 +5114,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
    */
   private async simulateClaimableBatch(ids: string[]): Promise<Map<string, bigint> | null> {
     const operations = ids.map((id) =>
-      this.contract.call('get_claimable', nativeToScVal(BigInt(id), { type: 'u64' })),
+      this.contract.call('get_claimable', cachedScVal(BigInt(id), 'u64')),
     );
 
     const result = await withRetry(() => this.simulateOps(operations), this.readRetry);
@@ -5120,7 +5142,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
     ids.forEach((id, index) => {
       let value = 0n;
       try {
-        value = BigInt(scValToNative(retvals[index]!) as number);
+        value = safeBigInt(scValToNative(retvals[index]!));
       } catch {
         value = 0n;
       }
@@ -5167,13 +5189,13 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
     return this.requestDedup.dedupe(
       dedupKey('getStreamsBySender', networkAtCallTime, sender, pagination),
       async (): Promise<Stream[] | PaginatedStreams> => {
-        const args: xdr.ScVal[] = [nativeToScVal(sender, { type: 'address' })];
+        const args: xdr.ScVal[] = [cachedScVal(sender, 'address')];
 
         if (pagination) {
-          args.push(nativeToScVal(pagination.limit ?? 20, { type: 'u32' }));
+          args.push(cachedScVal(pagination.limit ?? 20, 'u32'));
           args.push(
             pagination.cursor != null
-              ? nativeToScVal(BigInt(pagination.cursor), { type: 'u64' })
+              ? cachedScVal(BigInt(pagination.cursor), 'u64')
               : xdr.ScVal.scvVoid(),
           );
         }
@@ -5250,13 +5272,13 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
       if (cached) return cached;
     }
 
-    const args: xdr.ScVal[] = [nativeToScVal(recipient, { type: 'address' })];
+    const args: xdr.ScVal[] = [cachedScVal(recipient, 'address')];
 
     if (pagination) {
-      args.push(nativeToScVal(pagination.limit ?? 20, { type: 'u32' }));
+      args.push(cachedScVal(pagination.limit ?? 20, 'u32'));
       args.push(
         pagination.cursor != null
-          ? nativeToScVal(BigInt(pagination.cursor), { type: 'u64' })
+          ? cachedScVal(BigInt(pagination.cursor), 'u64')
           : xdr.ScVal.scvVoid(),
       );
     }
@@ -5342,13 +5364,13 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
           throw new SoroStreamError('tag must not be empty');
         }
 
-        const args: xdr.ScVal[] = [nativeToScVal(tag, { type: 'string' })];
+        const args: xdr.ScVal[] = [cachedScVal(tag, 'string')];
 
         if (pagination) {
-          args.push(nativeToScVal(pagination.limit ?? 20, { type: 'u32' }));
+          args.push(cachedScVal(pagination.limit ?? 20, 'u32'));
           args.push(
             pagination.cursor != null
-              ? nativeToScVal(BigInt(pagination.cursor), { type: 'u64' })
+              ? cachedScVal(BigInt(pagination.cursor), 'u64')
               : xdr.ScVal.scvVoid(),
           );
         }
@@ -5851,6 +5873,16 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
       // Validate cliff for all rows before submitting anything
       for (const row of rows) {
         await this.validateCliff(row.cliffSeconds ?? 0);
+      }
+
+      // Issue #611: validate all distinct token addresses before submitting
+      const tokensToValidate = new Set<string>();
+      if (defaultToken) tokensToValidate.add(defaultToken);
+      for (const row of rows) {
+        if (row.token) tokensToValidate.add(row.token);
+      }
+      for (const token of tokensToValidate) {
+        await this.validateTokenContract(token);
       }
 
       const results: BulkCreateResult['batches'] = [];
@@ -6824,7 +6856,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
       }
       const operation = this.contract.call(
         'get_delegates',
-        nativeToScVal(target, { type: 'address' }),
+        cachedScVal(target, 'address'),
       );
       const result = await this.simulateOp(operation);
       if (rpc.Api.isSimulationSuccess(result) && result.result) {
@@ -6894,9 +6926,9 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
       const sender = await this.requireWalletAdapter().getPublicKey();
       const operation = this.contract.call(
         'grant_stream_delegate',
-        nativeToScVal(sender, { type: 'address' }),
-        nativeToScVal(streamId, { type: 'string' }),
-        nativeToScVal(delegate, { type: 'address' }),
+        cachedScVal(sender, 'address'),
+        cachedScVal(streamId, 'string'),
+        cachedScVal(delegate, 'address'),
       );
       const feeBump = this.resolveFeeBump(options?.feeBump);
       const { txHash } = await this.buildAndSubmit(
@@ -6939,9 +6971,9 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
       const sender = await this.requireWalletAdapter().getPublicKey();
       const operation = this.contract.call(
         'revoke_stream_delegate',
-        nativeToScVal(sender, { type: 'address' }),
-        nativeToScVal(streamId, { type: 'string' }),
-        nativeToScVal(delegate, { type: 'address' }),
+        cachedScVal(sender, 'address'),
+        cachedScVal(streamId, 'string'),
+        cachedScVal(delegate, 'address'),
       );
       const feeBump = this.resolveFeeBump(options?.feeBump);
       const { txHash } = await this.buildAndSubmit(
@@ -6968,7 +7000,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
       validateStringLength('streamId', streamId);
       const operation = this.contract.call(
         'get_stream_delegates',
-        nativeToScVal(streamId, { type: 'string' }),
+        cachedScVal(streamId, 'string'),
       );
       const result = await this.simulateOp(operation);
       if (rpc.Api.isSimulationSuccess(result) && result.result) {
