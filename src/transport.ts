@@ -264,7 +264,8 @@ export function createPooledRpcTransport(
       }
     },
     teardown() {
-      servers = [];
+      // Keep the pooled servers so their connections are reused on the next
+      // call instead of being re-created (issue #621).
       activeRequests = 0;
     },
     getAccount: (address) => execute((s) => s.getAccount(address)),

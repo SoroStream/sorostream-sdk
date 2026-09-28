@@ -251,20 +251,21 @@ export class ConnectionPool {
     return best;
   }
 
+  /**
+   * Keeps idle slots warm instead of re-creating their RPC connections
+   * (issue #621). Rebuilding the `rpc.Server` discarded the underlying
+   * keep-alive socket, so the next network call paid full connection setup
+   * latency again. Idle slots now reuse their existing server; only the
+   * event poller is released so it stops holding polling resources.
+   */
   private _sweepIdle(): void {
     const now = Date.now();
     for (let i = 0; i < this.slots.length; i++) {
       const slot = this.slots[i]!;
       if (slot.subscriptions === 0 && now - slot.lastActive > this.idleTimeoutMs) {
         slot.poller.destroy();
-        const server = new rpc.Server(this.rpcUrl, { allowHttp: false });
-        this.slots[i] = {
-          server,
-          poller: new EventPoller(server, this.contractId),
-          subscriptions: 0,
-          lastActive: now,
-        };
-        this._emit({ type: 'pool:reconnect' });
+        slot.poller = new EventPoller(slot.server, this.contractId);
+        slot.lastActive = now;
       }
     }
   }

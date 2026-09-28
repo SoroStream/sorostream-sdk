@@ -41,6 +41,21 @@ export interface RequestDeduplicatorOptions {
   enabled?: boolean;
   /** Invoked with the key each time a caller joins an in-flight request. */
   onDeduplicated?: (key: string) => void;
+  /**
+   * Maximum age in ms of an in-flight request that new callers may join
+   * (issue #622). Once a pending request is older than this, its result is
+   * considered stale and the next caller starts a fresh request instead.
+   * Default: `Infinity` (always join).
+   */
+  maxAgeMs?: number;
+}
+
+/** Per-call options for {@link RequestDeduplicator.dedupe}. */
+export interface DedupeCallOptions {
+  /** Overrides {@link RequestDeduplicatorOptions.maxAgeMs} for this call. */
+  maxAgeMs?: number;
+  /** When `true`, always start a fresh request and replace any in-flight one. */
+  fresh?: boolean;
 }
 
 /**
@@ -58,6 +73,8 @@ export interface RequestDeduplicatorOptions {
  */
 export class RequestDeduplicator {
   private readonly inFlight = new Map<string, Promise<unknown>>();
+  private readonly startedAt = new Map<string, number>();
+  private readonly maxAgeMs: number;
   private readonly enabled: boolean;
   private readonly onDeduplicated: ((key: string) => void) | undefined;
   private requests = 0;
@@ -68,6 +85,7 @@ export class RequestDeduplicator {
   constructor(options: RequestDeduplicatorOptions = {}) {
     this.enabled = options.enabled !== false;
     this.onDeduplicated = options.onDeduplicated;
+    this.maxAgeMs = options.maxAgeMs ?? Infinity;
   }
 
   /**
@@ -78,9 +96,10 @@ export class RequestDeduplicator {
    *   result (network, address, pagination, …) so distinct reads never share.
    * @param factory - Starts the underlying request. Called at most once per
    *   in-flight window.
+   * @param options - Staleness controls (issue #622).
    * @returns The shared promise for this key.
    */
-  dedupe<T>(key: string, factory: () => Promise<T>): Promise<T> {
+  dedupe<T>(key: string, factory: () => Promise<T>, options: DedupeCallOptions = {}): Promise<T> {
     this.requests++;
 
     if (!this.enabled) {
@@ -89,7 +108,9 @@ export class RequestDeduplicator {
     }
 
     const existing = this.inFlight.get(key) as Promise<T> | undefined;
-    if (existing) {
+    const maxAge = options.maxAgeMs ?? this.maxAgeMs;
+    const age = Date.now() - (this.startedAt.get(key) ?? Date.now());
+    if (existing && !options.fresh && age <= maxAge) {
       this.deduplicated++;
       this.onDeduplicated?.(key);
       return existing;
@@ -98,6 +119,7 @@ export class RequestDeduplicator {
     this.started++;
     const shared = this.invoke(factory);
     this.inFlight.set(key, shared);
+    this.startedAt.set(key, Date.now());
     if (this.inFlight.size > this.peakInFlight) {
       this.peakInFlight = this.inFlight.size;
     }
@@ -106,8 +128,11 @@ export class RequestDeduplicator {
     // promise fulfills or rejects, preventing leaks from timeouts or other
     // rejection scenarios.
     shared.finally(() => {
-      if (this.inFlight.get(key) === shared) this.inFlight.delete(key);
-    });
+      if (this.inFlight.get(key) === shared) {
+        this.inFlight.delete(key);
+        this.startedAt.delete(key);
+      }
+    }).catch(() => {});
 
     return shared;
   }
@@ -137,6 +162,7 @@ export class RequestDeduplicator {
    */
   clear(): void {
     this.inFlight.clear();
+    this.startedAt.clear();
   }
 
   /** Returns a snapshot of the deduplication counters. */
