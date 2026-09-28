@@ -66,6 +66,8 @@ export class TransactionFailedError extends SoroStreamError {
 }
 
 export class RateLimitExceededError extends SoroStreamError {
+  readonly queueDepth: number;
+  readonly queueLimit: number;
   constructor(queueDepth: number, queueLimit: number) {
     super(`Rate limit exceeded: ${queueDepth}/${queueLimit}`);
     this.name = 'RateLimitExceededError';

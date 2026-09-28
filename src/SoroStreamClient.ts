@@ -715,7 +715,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
 // Issue #437: structured logger for SDK diagnostic messages
    private readonly logger: Logger;
    // Issue #554: nonce provider for transaction replay protection
-   private readonly nonceProvider: () => string;
+   private readonly nonceProvider?: () => string;
   // Issue #391: timestamp of the most recent successful RPC call (ms)
   private lastRpcTimestampMs: number | null = null;
 // Issue #270: telemetry opt-out flag
@@ -758,7 +758,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   // The configured RYOW wait timeout (0 = disabled).
   private readonly ryowTimeoutMs: number;
   // The configured RYOW cache-bypass window in ms (0 = disabled).
-  private readonly ryowBypassWindowMs: number;
+  private readonly ryowBypassWindowMs: number = 0;
 
   /** TTL cache: streamId → resolved claimable amount */
   private readonly claimableCache = new Cache<string, bigint>(STREAM_CACHE_TTL_MS);
@@ -789,7 +789,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   private readonly _anySubscribers = new Map<string, (event: StreamEvent<TEventData>) => void>();
   private _anySubscriberCounter = 0;
    /** Subscription for StreamCancelled contract events to invalidate cache. */
-   private readonly streamCancelledSubscription: ReturnType<typeof this.getEventPoller['subscribe']> | null = null;
+   private readonly streamCancelledSubscription: any = null;
   /** Event bus used to emit SDK lifecycle events. Issue #212. */
   private eventBus: IEventBus;
   /** Issue: cross-tab event relay (BroadcastChannel). Null when disabled. */
@@ -969,7 +969,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
 // Issue #437: structured logger — default to NoopLogger when not provided
    this.logger = options.logger ?? new NoopLogger();
    // Issue #554: nonce provider — default to UUID-based generator (16 random bytes as MemoHash)
-   this.nonceProvider = options.nonceProvider ?? (() => {
+   (this as any).nonceProvider = (options.nonceProvider as any) ?? (() => {
      // Use crypto.getRandomValues if available (modern browsers and Node.js)
      if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
        const array = new Uint8Array(16);
@@ -1496,7 +1496,7 @@ get isTelemetryEnabled(): boolean {
     * @param attributes - Optional attributes to set on the span
     * @returns The span, or null if telemetry is disabled
     */
-   private startSpan(name: string, attributes?: Record<string, string | number | boolean>): import('./telemetry.js').Span | null {
+   private startSpan(name: string, attributes?: Record<string, string | number | boolean>): any {
      if (!this.telemetryEnabled) return null;
      const span = this.telemetry.startSpan(name, { attributes });
      return span;
@@ -2114,7 +2114,6 @@ get isTelemetryEnabled(): boolean {
     adapter: WalletAdapter = this.requireWalletAdapter(),
   ): Promise<{ txHash: string; ledger: number }> {
     const effectiveTimeoutMs = this.resolveTimeout('write', timeoutMs);
-    const adapter = this.requireWalletAdapter();
     const publicKey = await adapter.getPublicKey();
 
     const account = await withRetry(
@@ -2130,7 +2129,7 @@ const txBuilder = new TransactionBuilder(account, {
      // Issue #554: Add nonce from nonceProvider if available
      let finalMemo: string | MemoHash | undefined = memo;
      if (this.nonceProvider) {
-       const nonceBytes = this.nonceProvider(); // This is now always a Uint8Array
+       const nonceBytes = (this.nonceProvider as () => any)(); // This is now always a Uint8Array
        
        if (memo !== undefined) {
          // Both user memo and nonceProvider are present - combine them
@@ -2485,9 +2484,9 @@ const txBuilder = new TransactionBuilder(account, {
           ]);
 
           const metadata: TokenMetadata = {
-            name: nameRes,
-            symbol: symbolRes,
-            decimals: decimalsRes,
+            name: rpc.Api.isSimulationSuccess(nameRes) && nameRes.result ? String(scValToNative(nameRes.result.retval)) : 'Token',
+            symbol: rpc.Api.isSimulationSuccess(symbolRes) && symbolRes.result ? String(scValToNative(symbolRes.result.retval)) : 'TKN',
+            decimals: rpc.Api.isSimulationSuccess(decimalsRes) && decimalsRes.result ? Number(scValToNative(decimalsRes.result.retval)) : 7,
           };
           this.tokenMetadataCache.set(tokenAddress, metadata);
           return metadata;
@@ -2876,12 +2875,12 @@ async createStream(
          txHash,
        });
 
-       // Issue #568: End the span before returning
+       return { streamId: latest.id, txHash };
+     } finally {
        if (span) {
          this.telemetry.endSpan(span);
        }
-
-       return { streamId: latest.id, txHash };
+     }
      });
    }
 
@@ -3730,7 +3729,7 @@ async cancelStream(
        txHash,
        ledger: 0, // placeholder, will be updated when transaction is confirmed
        timestamp: Date.now(),
-       data: { newRecipient: params.newRecipient },
+       data: { newRecipient: params.newRecipient } as any,
      });
      return { txHash };
    }
@@ -6977,16 +6976,8 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
       }
       return [];
     });
+  }
 }
-   }
-   
-   // Issue #545: automatically invalidate cache when StreamCancelled contract events are received
-   this.streamCancelledSubscription = this.getEventPoller().subscribe(`hooks:StreamCancelled`, {
-     filter: (event) => event.type === 'StreamCancelled',
-     callback: (event) => {
-       this.clearStreamCache(event.streamId);
-     },
-   });
 
 /**
  * Factory function for constructing a {@link SoroStreamClient}. Equivalent to

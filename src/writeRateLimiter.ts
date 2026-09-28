@@ -1,3 +1,4 @@
+import { RateLimitExceededError } from './errors.js';
 /**
  * Client-side rate limiting for SDK write operations (issue #464).
  *

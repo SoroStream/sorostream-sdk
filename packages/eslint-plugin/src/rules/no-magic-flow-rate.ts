@@ -75,7 +75,7 @@ const rule: Rule.RuleModule = {
           const arg = node.arguments[0];
           if (arg.type === 'ObjectExpression') {
             // Look for flowRate property in the argument object
-            for const prop of arg.properties) {
+            for (const prop of arg.properties) {
               if (
                 prop.type === 'Property' &&
                 prop.key &&
