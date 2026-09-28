@@ -166,3 +166,72 @@ export async function createFreighterMobileAdapter(): Promise<WalletAdapter> {
     },
   };
 }
+/**
+ * Structural subset of a biometric prompt library (e.g. `expo-local-authentication`
+ * or `react-native-biometrics`). This package does not depend on either —
+ * adapt your library to this shape.
+ */
+export interface BiometricAuthenticator {
+  /** Whether biometric hardware is present and enrolled. */
+  isAvailable(): Promise<boolean>;
+  /** Shows the system biometric prompt; resolves `true` on success. */
+  authenticate(options: { promptMessage: string }): Promise<boolean>;
+}
+
+export interface BiometricWalletOptions {
+  /** Prompt shown before signing a transaction. */
+  promptMessage?: string;
+  /** Also require biometrics before `getPublicKey()` (wallet unlock). Default: `false`. */
+  requireForPublicKey?: boolean;
+  /** Keep the wallet unlocked for this many ms after a successful prompt. Default: `0` (prompt every time). */
+  unlockTtlMs?: number;
+}
+
+/**
+ * Wraps a {@link WalletAdapter} so signing requires biometric authentication.
+ * Throws if biometrics are unavailable or the user cancels the prompt.
+ *
+ * @example
+ * ```ts
+ * import * as LocalAuthentication from "expo-local-authentication";
+ *
+ * const wallet = createBiometricWalletAdapter(await createFreighterMobileAdapter(), {
+ *   isAvailable: async () =>
+ *     (await LocalAuthentication.hasHardwareAsync()) && (await LocalAuthentication.isEnrolledAsync()),
+ *   authenticate: async ({ promptMessage }) =>
+ *     (await LocalAuthentication.authenticateAsync({ promptMessage })).success,
+ * });
+ * ```
+ */
+export function createBiometricWalletAdapter(
+  wallet: WalletAdapter,
+  biometrics: BiometricAuthenticator,
+  options: BiometricWalletOptions = {},
+): WalletAdapter {
+  const promptMessage = options.promptMessage ?? 'Authenticate to unlock your wallet';
+  const ttl = options.unlockTtlMs ?? 0;
+  let unlockedUntil = 0;
+
+  async function unlock(): Promise<void> {
+    if (ttl > 0 && Date.now() < unlockedUntil) return;
+    if (!(await biometrics.isAvailable())) {
+      throw new Error('Biometric authentication is not available on this device');
+    }
+    if (!(await biometrics.authenticate({ promptMessage }))) {
+      throw new Error('Biometric authentication failed or was cancelled');
+    }
+    unlockedUntil = Date.now() + ttl;
+  }
+
+  return {
+    ...wallet,
+    async getPublicKey() {
+      if (options.requireForPublicKey) await unlock();
+      return wallet.getPublicKey();
+    },
+    async signTransaction(xdr, network) {
+      await unlock();
+      return wallet.signTransaction(xdr, network);
+    },
+  };
+}
