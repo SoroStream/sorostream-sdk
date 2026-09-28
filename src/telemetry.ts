@@ -26,12 +26,20 @@ function getOtel(): any | null {
   return _otelModule;
 }
 
+/**
+ * Restricts which event types (span names) are collected: either a list of
+ * allowed names or a predicate. Omit to collect every event.
+ */
+export type TelemetryEventFilter = readonly string[] | ((eventType: string) => boolean);
+
 export class Telemetry {
   private tracer: Tracer | null = null;
   readonly enabled: boolean;
+  private readonly eventFilter?: TelemetryEventFilter;
 
-  constructor(enabled: boolean) {
+  constructor(enabled: boolean, eventFilter?: TelemetryEventFilter) {
     this.enabled = enabled;
+    this.eventFilter = eventFilter;
     if (enabled) {
       const otel = getOtel();
       if (otel) {
@@ -40,8 +48,15 @@ export class Telemetry {
     }
   }
 
+  /** Whether events of the given type pass the configured filter. */
+  shouldCollect(eventType: string): boolean {
+    const filter = this.eventFilter;
+    if (!filter) return true;
+    return typeof filter === 'function' ? filter(eventType) : filter.includes(eventType);
+  }
+
   startSpan(name: string, options?: SpanOptions): Span | null {
-    if (!this.tracer) return null;
+    if (!this.tracer || !this.shouldCollect(name)) return null;
     return this.tracer.startSpan(name, options);
   }
 

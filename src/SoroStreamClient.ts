@@ -461,6 +461,11 @@ export interface SoroStreamClientOptions {
   /** Set to `false` to disable telemetry emission (issue #270). Default: true. */
   telemetry?: boolean;
   /**
+   * Restrict telemetry collection to specific event types (span names), either
+   * as an allow-list or a predicate. Default: all events are collected.
+   */
+  telemetryEvents?: import('./telemetry.js').TelemetryEventFilter;
+  /**
    * Set to `false` to disable in-flight request deduplication (issue #426).
    *
    * With deduplication enabled (the default), concurrent read calls that
@@ -998,7 +1003,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
        options.tokenMetadataTtlMs ?? 600_000,
      );
      // Issue #568: Initialize OpenTelemetry
-     this.telemetry = new Telemetry(this.telemetryEnabled);
+     this.telemetry = new Telemetry(this.telemetryEnabled, options.telemetryEvents);
     // Issue #149: connection pool stats tracker
     this.connectionPool = {
       maxConnections: options.maxConnections ?? 5,
@@ -1820,11 +1825,13 @@ get isTelemetryEnabled(): boolean {
   /**
    * Enqueue a failed write operation to the offline queue (Issue #260).
    * Only queues if the offline queue is enabled and the error is a network error.
+   * Higher `priority` operations are replayed first on reconnection.
    */
   private tryQueueOffline(
     operation: string,
     error: unknown,
     execute: () => Promise<unknown>,
+    priority = 0,
   ): boolean {
     if (!this.offlineQueue) return false;
     const isNetworkError =
@@ -1836,7 +1843,7 @@ get isTelemetryEnabled(): boolean {
         error.message.includes('aborted'));
     if (!isNetworkError) return false;
     this.offlineQueue.markOffline();
-    return this.offlineQueue.enqueue(operation, execute);
+    return this.offlineQueue.enqueue(operation, execute, priority);
   }
 
   /**

@@ -14,6 +14,8 @@
  * via `SoroStreamClientOptions.writeRateLimit`.
  */
 
+import { RateLimitExceededError } from './errors.js';
+
 /** Configuration for the write-operation rate limiter. */
 export interface WriteRateLimitOptions {
   /**
@@ -49,7 +51,13 @@ class TokenBucket {
 
   constructor(maxPerSecond: number, burst: number) {
     this.intervalMs = 1000 / maxPerSecond;
-    this.burstMs = this.intervalMs * Math.max(1, burst);
+    // `burst` operations may run back-to-back before throttling starts.
+    this.burstMs = this.intervalMs * (Math.max(1, burst) - 1);
+  }
+
+  /** Milliseconds the next operation would have to wait (0 = within burst allowance). */
+  delay(now = Date.now()): number {
+    return Math.max(0, Math.max(this.theoreticalArrival, now) - this.burstMs - now);
   }
 
   /**
@@ -57,9 +65,8 @@ class TokenBucket {
    */
   async acquire(): Promise<void> {
     const now = Date.now();
-    const tat = Math.max(this.theoreticalArrival, now);
-    this.theoreticalArrival = tat + this.intervalMs;
-    const waitMs = tat - this.burstMs - now;
+    const waitMs = this.delay(now);
+    this.theoreticalArrival = Math.max(this.theoreticalArrival, now) + this.intervalMs;
     if (waitMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
@@ -87,6 +94,20 @@ export class WriteRateLimiter {
 
   /** Waits until a slot is available for the given operation, then returns. */
   async acquire(operationName: string): Promise<void> {
+    // Get the appropriate bucket based on shared setting
+    const key = this.shared ? '__shared__' : operationName;
+    let bucket = this.buckets.get(key);
+    if (!bucket) {
+      bucket = new TokenBucket(this.maxPerSecond, this.burst);
+      this.buckets.set(key, bucket);
+    }
+
+    // Operations within the burst allowance run immediately and never occupy the queue
+    if (bucket.delay() === 0) {
+      await bucket.acquire();
+      return;
+    }
+
     // Check if waiting queue is full
     if (this.queueSize > 0 && this.waiting >= this.queueSize) {
       // Throw an error so the async function returns a rejecting promise
@@ -97,13 +118,6 @@ export class WriteRateLimiter {
     this.waiting++;
 
     try {
-      // Get the appropriate bucket based on shared setting
-      const key = this.shared ? '__shared__' : operationName;
-      let bucket = this.buckets.get(key);
-      if (!bucket) {
-        bucket = new TokenBucket(this.maxPerSecond, this.burst);
-        this.buckets.set(key, bucket);
-      }
       // Wait for permission from the bucket
       await bucket.acquire();
     } finally {
