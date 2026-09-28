@@ -191,16 +191,18 @@ export async function toFiatDisplay(
 /**
  * Attempts to detect the Stellar network from an RPC URL.
  *
- * URLs containing `"testnet"` resolve to `"testnet"`; URLs containing
- * `"mainnet"` or `"horizon.stellar.org"` resolve to `"mainnet"`. Returns
- * `undefined` for URLs that don't match a known pattern (e.g. futurenet or
- * a custom/self-hosted RPC), in which case the network must be set explicitly.
+ * URLs containing `"futurenet"` resolve to `"futurenet"`; URLs containing
+ * `"testnet"` resolve to `"testnet"`; URLs containing `"mainnet"` or
+ * `"horizon.stellar.org"` resolve to `"mainnet"`. Returns `undefined` for
+ * URLs that don't match a known pattern (e.g. a custom/self-hosted RPC), in
+ * which case the network must be set explicitly.
  *
  * @param rpcUrl - The RPC endpoint URL to inspect.
  * @returns The detected network, or `undefined` if it can't be determined.
  */
 export function detectNetworkFromRpcUrl(rpcUrl: string): Network | undefined {
   const lower = rpcUrl.toLowerCase();
+  if (lower.includes('futurenet')) return 'futurenet';
   if (lower.includes('testnet')) return 'testnet';
   if (lower.includes('mainnet') || lower.includes('horizon.stellar.org')) return 'mainnet';
   return undefined;

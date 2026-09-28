@@ -52,6 +52,8 @@
     "generate-integrity": "node scripts/generate-integrity-manifest.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:fuzz": "FC_SEED=588 vitest run test/contract_encoders_fuzz.test.ts",
+    "test:snapshots:update": "vitest run -u test/scval-snapshots.test.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "tsc --noEmit",
     "check:changeset": "node scripts/check-changeset.js",
