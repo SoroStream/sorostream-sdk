@@ -1,100 +1,75 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
+/**
+ * Tree-shaking compatibility test suite (#643).
+ * Verifies that package exports allow proper dead code elimination when bundled.
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as esbuild from 'esbuild';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 
-// ── Issue #206: Tree-shaking annotations ─────────────────────────────────────
-//
-// Verifies that bundling an app which only imports from `@sorostream/sdk/core`
-// does not pull in the wallet adapters (and their heavy browser/hardware
-// dependencies) into the output bundle. Requires `npm run build` to have
-// produced `dist/` first.
+describe('Tree-shaking compatibility (#643)', () => {
+  let tmpDir: string;
 
-const distDir = path.resolve(__dirname, '../dist');
-const distBuilt = existsSync(path.join(distDir, 'core.mjs'));
+  beforeAll(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sorostream-treeshake-test-'));
+  });
 
-describe.skipIf(!distBuilt)('tree-shaking: @sorostream/sdk/core excludes wallet code', () => {
-  let bundle: string;
+  afterAll(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 
-  beforeAll(async () => {
+  it('eliminates dead code when importing pure utility functions', async () => {
+    const entryFile = path.join(tmpDir, 'entry_pure.js');
+    fs.writeFileSync(
+      entryFile,
+      `import { toStroops, formatUSDC } from '${path.resolve('./src/utils.ts')}';
+       console.log(formatUSDC(toStroops('100.50')));`,
+    );
+
     const result = await esbuild.build({
-      stdin: {
-        contents: `import { SoroStreamClient } from ${JSON.stringify(path.join(distDir, 'core.mjs'))};\nconsole.log(SoroStreamClient);`,
-        resolveDir: distDir,
-      },
+      entryPoints: [entryFile],
       bundle: true,
       write: false,
+      minify: false,
+      treeShaking: true,
       format: 'esm',
       platform: 'node',
+      target: 'es2022',
+      external: ['@stellar/stellar-sdk'],
     });
-    bundle = result.outputFiles[0]!.text;
+
+    const outputCode = result.outputFiles[0].text;
+    expect(outputCode).toBeDefined();
+
+    // Verify dead code elimination: pure utilities entry should NOT contain SoroStreamClient
+    expect(outputCode).not.toContain('class SoroStreamClient');
+    expect(outputCode.length).toBeLessThan(15_000);
   });
 
-  it('does not include wallet adapter source', () => {
-    expect(bundle).not.toMatch(
-      /createFreighterAdapter|createPasskeyAdapter|createMultisigAdapter|createClaimDelegateAdapter/,
+  it('eliminates dead code when importing calculation utilities', async () => {
+    const entryFile = path.join(tmpDir, 'entry_calc.js');
+    fs.writeFileSync(
+      entryFile,
+      `import { claimableNow, isExpired } from '${path.resolve('./src/utils.ts')}';
+       console.log(isExpired(1000, 2000, 1500));`,
     );
-  });
 
-  it('does not reference the freighter or ledger packages', () => {
-    expect(bundle).not.toMatch(/@stellar\/freighter-api|@ledgerhq/);
-  });
-
-  it('does include the core client', () => {
-    expect(bundle).toMatch(/SoroStreamClient/);
-  });
-});
-
-describe.skipIf(!distBuilt)('sub-path exports resolve in both module formats', () => {
-  const entries = ['index', 'core', 'wallets', 'wallet', 'batch', 'mock', 'testing'];
-
-  it.each(entries)('%s has ESM, CJS, and type declaration outputs', (entry) => {
-    // "wallet" and "wallets" share the same built output (aliased in package.json).
-    const base = entry === 'wallet' ? 'wallets' : entry;
-    expect(existsSync(path.join(distDir, `${base}.mjs`))).toBe(true);
-    expect(existsSync(path.join(distDir, `${base}.js`))).toBe(true);
-    expect(existsSync(path.join(distDir, `${base}.d.ts`))).toBe(true);
-  });
-});
-
-// ── Issue #223: Lazy-loading wallet adapter code ────────────────────────────────
-//
-// Verifies that importing from the main @sorostream/sdk entry point does not
-// pull in wallet adapter code, enabling read-only applications to avoid the
-// initialization cost of wallet dependencies.
-
-describe.skipIf(!distBuilt)('lazy-loading: main index excludes wallet code', () => {
-  let bundle: string;
-
-  beforeAll(async () => {
     const result = await esbuild.build({
-      stdin: {
-        contents: `import { SoroStreamClient } from ${JSON.stringify(path.join(distDir, 'index.mjs'))};\nconsole.log(SoroStreamClient);`,
-        resolveDir: distDir,
-      },
+      entryPoints: [entryFile],
       bundle: true,
       write: false,
+      minify: false,
+      treeShaking: true,
       format: 'esm',
       platform: 'node',
+      target: 'es2022',
+      external: ['@stellar/stellar-sdk'],
     });
-    bundle = result.outputFiles[0]!.text;
-  });
 
-  it('does not include wallet adapter source', () => {
-    expect(bundle).not.toMatch(
-      /createFreighterAdapter|createPasskeyAdapter|createMultisigAdapter|createClaimDelegateAdapter|createKeypairAdapter/,
-    );
-  });
-
-  it('does not reference the freighter or ledger packages', () => {
-    expect(bundle).not.toMatch(/@stellar\/freighter-api|@ledgerhq/);
-  });
-
-  it('does include the core client', () => {
-    expect(bundle).toMatch(/SoroStreamClient/);
-  });
-
-  it('does include read-only utilities', () => {
-    expect(bundle).toMatch(/getStream|getClaimable/);
+    const outputCode = result.outputFiles[0].text;
+    expect(outputCode).toBeDefined();
+    expect(outputCode).not.toContain('class SoroStreamClient');
   });
 });

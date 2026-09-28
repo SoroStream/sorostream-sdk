@@ -13,6 +13,7 @@
  * Disabled by default — existing clients are unaffected until they opt in
  * via `SoroStreamClientOptions.writeRateLimit`.
  */
+import { RateLimitExceededError } from './errors.js';
 
 /** Configuration for the write-operation rate limiter. */
 export interface WriteRateLimitOptions {
