@@ -14,8 +14,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsup src/index.ts src/analyze.ts src/schemas.ts --format cjs --dts --clean",
-    "prepublishOnly": "npm run build",
+    "build": "tsup src/index.ts src/analyze.ts src/schemas.ts --format cjs --dts --sourcemap --clean",
     "lint": "tsc --noEmit"
   },
   "keywords": [

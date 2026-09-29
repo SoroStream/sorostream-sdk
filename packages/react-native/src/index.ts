@@ -11,6 +11,11 @@ const Linking = {
 };
 
 /**
+ * Current version of `@sorostream/sdk-react-native`.
+ */
+export const VERSION = '0.1.0';
+
+/**
  * Structural subset of `@react-native-async-storage/async-storage`'s default
  * export. Pass your installed instance directly — this package does not
  * depend on `@react-native-async-storage/async-storage` itself, so any
@@ -23,6 +28,17 @@ export interface AsyncStorageLike {
 }
 
 /**
+ * Structural subset of `expo-secure-store` module functions.
+ * Pass your installed `SecureStore` module directly — this package does not
+ * depend on `expo-secure-store` itself.
+ */
+export interface ExpoSecureStoreLike {
+  getItemAsync(key: string, options?: Record<string, unknown>): Promise<string | null>;
+  setItemAsync(key: string, value: string, options?: Record<string, unknown>): Promise<void>;
+  deleteItemAsync(key: string, options?: Record<string, unknown>): Promise<void>;
+}
+
+/**
  * Wraps an async storage backend (e.g. `@react-native-async-storage/async-storage`)
  * as a synchronous {@link StorageAdapter}.
  *
@@ -32,19 +48,6 @@ export interface AsyncStorageLike {
  * with an in-memory cache: reads are served from the cache and trigger a
  * background hydration from `asyncStorage` on first access; writes update
  * the cache immediately and persist to `asyncStorage` in the background.
- *
- * This makes reads/writes **eventually consistent** rather than strictly
- * synchronous — acceptable for the SDK's audit log, which is a best-effort,
- * non-critical diagnostic feature (already documented to swallow storage
- * errors rather than throw).
- *
- * @example
- * ```ts
- * import AsyncStorage from "@react-native-async-storage/async-storage";
- * import { createAsyncStorageAdapter } from "@sorostream/sdk-react-native";
- *
- * const storage = createAsyncStorageAdapter(AsyncStorage);
- * ```
  */
 export function createAsyncStorageAdapter(asyncStorage: AsyncStorageLike): StorageAdapter {
   const cache = new Map<string, string>();
@@ -81,27 +84,43 @@ export function createAsyncStorageAdapter(asyncStorage: AsyncStorageLike): Stora
 }
 
 /**
+ * Wraps Expo's `expo-secure-store` module as a synchronous {@link StorageAdapter}.
+ */
+export function createExpoSecureStoreAdapter(secureStore: ExpoSecureStoreLike): StorageAdapter {
+  const cache = new Map<string, string>();
+  const hydrating = new Set<string>();
+
+  function hydrate(key: string): void {
+    if (cache.has(key) || hydrating.has(key)) return;
+    hydrating.add(key);
+    secureStore
+      .getItemAsync(key)
+      .then((value) => {
+        if (value !== null) cache.set(key, value);
+      })
+      .catch(() => {})
+      .finally(() => hydrating.delete(key));
+  }
+
+  return {
+    getItem(key) {
+      hydrate(key);
+      return cache.get(key) ?? null;
+    },
+    setItem(key, value) {
+      cache.set(key, value);
+      void secureStore.setItemAsync(key, value).catch(() => {});
+    },
+    removeItem(key) {
+      cache.delete(key);
+      void secureStore.deleteItemAsync(key).catch(() => {});
+    },
+  };
+}
+
+/**
  * Builds the `adapters` option for `createClient`/`SoroStreamClient` in a
  * React Native app.
- *
- * React Native provides `fetch` and `WebSocket` as globals already, so only
- * `storage` needs an explicit override — pass your app's `AsyncStorage`
- * instance (or omit it to leave the audit log disabled/no-op).
- *
- * @example
- * ```ts
- * import AsyncStorage from "@react-native-async-storage/async-storage";
- * import { createClient } from "@sorostream/sdk";
- * import { createReactNativeAdapters } from "@sorostream/sdk-react-native";
- *
- * const client = createClient({
- *   network: "testnet",
- *   contractId: "...",
- *   walletAdapter,
- *   auditLog: true,
- *   adapters: createReactNativeAdapters({ asyncStorage: AsyncStorage }),
- * });
- * ```
  */
 export function createReactNativeAdapters(options?: {
   asyncStorage?: AsyncStorageLike;
@@ -109,6 +128,48 @@ export function createReactNativeAdapters(options?: {
   return {
     storage: options?.asyncStorage ? createAsyncStorageAdapter(options.asyncStorage) : undefined,
   };
+}
+
+/**
+ * Builds the `adapters` option for `createClient`/`SoroStreamClient` in an Expo app.
+ * Accepts either `secureStore` (`expo-secure-store`) or `asyncStorage` (`@react-native-async-storage/async-storage`).
+ *
+ * @example
+ * ```ts
+ * import * as SecureStore from "expo-secure-store";
+ * import { createClient } from "@sorostream/sdk";
+ * import { createExpoAdapters } from "@sorostream/sdk-react-native";
+ *
+ * const client = createClient({
+ *   network: "testnet",
+ *   contractId: "...",
+ *   walletAdapter,
+ *   adapters: createExpoAdapters({ secureStore: SecureStore }),
+ * });
+ * ```
+ */
+export function createExpoAdapters(options?: {
+  secureStore?: ExpoSecureStoreLike;
+  asyncStorage?: AsyncStorageLike;
+}): SoroStreamAdapters {
+  if (options?.secureStore) {
+    return { storage: createExpoSecureStoreAdapter(options.secureStore) };
+  }
+  if (options?.asyncStorage) {
+    return { storage: createAsyncStorageAdapter(options.asyncStorage) };
+  }
+  return {};
+}
+
+/**
+ * Utility helper to set up Expo polyfills (e.g. `globalThis.crypto.getRandomValues`).
+ */
+export function setupExpoPolyfills(options?: {
+  crypto?: { getRandomValues: <T extends ArrayBufferView | null>(array: T) => T };
+}): void {
+  if (options?.crypto && typeof globalThis.crypto === 'undefined') {
+    (globalThis as unknown as { crypto: unknown }).crypto = options.crypto;
+  }
 }
 
 // Freighter Mobile deep link constants
@@ -172,6 +233,75 @@ export async function createFreighterMobileAdapter(): Promise<WalletAdapter> {
       Linking.openURL(url);
       // Return a placeholder - in a real app, this would be the actual signed XDR returned from the app.
       return 'PLACEHOLDER_SIGNED_XDR_FROM_FREIGHTER_MOBILE';
+    },
+  };
+}
+/**
+ * Structural subset of a biometric prompt library (e.g. `expo-local-authentication`
+ * or `react-native-biometrics`). This package does not depend on either —
+ * adapt your library to this shape.
+ */
+export interface BiometricAuthenticator {
+  /** Whether biometric hardware is present and enrolled. */
+  isAvailable(): Promise<boolean>;
+  /** Shows the system biometric prompt; resolves `true` on success. */
+  authenticate(options: { promptMessage: string }): Promise<boolean>;
+}
+
+export interface BiometricWalletOptions {
+  /** Prompt shown before signing a transaction. */
+  promptMessage?: string;
+  /** Also require biometrics before `getPublicKey()` (wallet unlock). Default: `false`. */
+  requireForPublicKey?: boolean;
+  /** Keep the wallet unlocked for this many ms after a successful prompt. Default: `0` (prompt every time). */
+  unlockTtlMs?: number;
+}
+
+/**
+ * Wraps a {@link WalletAdapter} so signing requires biometric authentication.
+ * Throws if biometrics are unavailable or the user cancels the prompt.
+ *
+ * @example
+ * ```ts
+ * import * as LocalAuthentication from "expo-local-authentication";
+ *
+ * const wallet = createBiometricWalletAdapter(await createFreighterMobileAdapter(), {
+ *   isAvailable: async () =>
+ *     (await LocalAuthentication.hasHardwareAsync()) && (await LocalAuthentication.isEnrolledAsync()),
+ *   authenticate: async ({ promptMessage }) =>
+ *     (await LocalAuthentication.authenticateAsync({ promptMessage })).success,
+ * });
+ * ```
+ */
+export function createBiometricWalletAdapter(
+  wallet: WalletAdapter,
+  biometrics: BiometricAuthenticator,
+  options: BiometricWalletOptions = {},
+): WalletAdapter {
+  const promptMessage = options.promptMessage ?? 'Authenticate to unlock your wallet';
+  const ttl = options.unlockTtlMs ?? 0;
+  let unlockedUntil = 0;
+
+  async function unlock(): Promise<void> {
+    if (ttl > 0 && Date.now() < unlockedUntil) return;
+    if (!(await biometrics.isAvailable())) {
+      throw new Error('Biometric authentication is not available on this device');
+    }
+    if (!(await biometrics.authenticate({ promptMessage }))) {
+      throw new Error('Biometric authentication failed or was cancelled');
+    }
+    unlockedUntil = Date.now() + ttl;
+  }
+
+  return {
+    ...wallet,
+    async getPublicKey() {
+      if (options.requireForPublicKey) await unlock();
+      return wallet.getPublicKey();
+    },
+    async signTransaction(xdr, network) {
+      await unlock();
+      return wallet.signTransaction(xdr, network);
     },
   };
 }

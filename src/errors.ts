@@ -68,6 +68,7 @@ export class TransactionFailedError extends SoroStreamError {
 export class RateLimitExceededError extends SoroStreamError {
   readonly queueDepth: number;
   readonly queueLimit: number;
+
   constructor(queueDepth: number, queueLimit: number) {
     super(`Rate limit exceeded: ${queueDepth}/${queueLimit}`);
     this.name = 'RateLimitExceededError';
@@ -493,5 +494,25 @@ export class NetworkMismatchError extends SoroStreamError {
     this.name = 'NetworkMismatchError';
     this.expected = expected;
     this.actual = actual;
+  }
+}
+
+/**
+ * The address passed as a token does not implement the SAC token interface
+ * (issue #611). The contract at the given address failed to respond to a
+ * `symbol()` simulation, which every compliant Stellar Asset Contract must
+ * support.
+ */
+export class InvalidTokenContractError extends SoroStreamError {
+  /** The address that was tested. */
+  readonly token: string;
+
+  constructor(token: string) {
+    super(
+      `Address ${token} does not implement the SAC token interface ` +
+        `(symbol() simulation failed). Provide a valid token contract address.`,
+    );
+    this.name = 'InvalidTokenContractError';
+    this.token = token;
   }
 }

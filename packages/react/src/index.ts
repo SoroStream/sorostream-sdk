@@ -10,3 +10,5 @@ export type {
 export { useWithdraw } from './useWithdraw.js';
 export type { UseWithdrawResult } from './useWithdraw.js';
 export type { UseCreateStreamResult } from './useCreateStream.js';
+export { StreamErrorBoundary } from './StreamErrorBoundary.js';
+export type { StreamErrorBoundaryProps } from './StreamErrorBoundary.js';

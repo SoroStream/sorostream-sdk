@@ -12,3 +12,5 @@ export type {
   UseStreamListReturn,
   UseWithdrawReturn,
 } from './types.js';
+export { SoroStreamPlugin, SoroStreamClientKey, useSoroStreamClient } from './plugin.js';
+export type { SoroStreamPluginOptions } from './plugin.js';
