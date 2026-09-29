@@ -939,13 +939,19 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     this.claimableCache = new Cache<string, bigint>(cacheTtl, cacheMaxSize);
     if (options.cacheOptions) {
       if (options.cacheOptions.enabled === false) {
-        this.streamCache.setTtl(0);
-        this.streamCache.setMaxSize(0);
+        // Issue #630: disable every stream-state cache, not just streamCache.
+        for (const c of [this.streamCache, this.senderCache, this.recipientCache, this.tagCache]) {
+          c.setTtl(0);
+          c.setMaxSize(0);
+        }
         this.claimableCache.setTtl(0);
         this.claimableCache.setMaxSize(0);
       } else {
-        this.streamCache.setTtl(cacheTtl);
-        this.streamCache.setMaxSize(cacheMaxSize);
+        // Issue #630: honour the configured TTL for all stream-state caches.
+        for (const c of [this.streamCache, this.senderCache, this.recipientCache, this.tagCache]) {
+          c.setTtl(cacheTtl);
+          c.setMaxSize(cacheMaxSize);
+        }
       }
     }
     // Issue #426: one deduplication layer for every read path. Enabled by
@@ -2545,7 +2551,7 @@ const txBuilder = new TransactionBuilder(account, {
       try {
         const cached = this.federationCache.get(address);
         if (cached) return cached;
-        const resolved = await resolveFederationAddress(address);
+        const resolved = await resolveFederationAddress(address, this.fetchAdapter);
         this.federationCache.set(address, resolved);
         return resolved;
       } catch {

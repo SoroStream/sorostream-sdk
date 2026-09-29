@@ -74,13 +74,27 @@ export interface FederationPluginOptions {
    * @param fromCache - Whether the result was served from the in-memory cache.
    */
   onResolved?: (federationAddress: string, stellarAddress: string, fromCache: boolean) => void;
+
+  /**
+   * Cache store to use instead of a private per-plugin map. Pass the same
+   * `Map` to several plugin instances (or clients) so they share lookups.
+   * Issue #629.
+   */
+  cache?: Map<string, FederationCacheEntry>;
 }
 
 // ── Cache entry ────────────────────────────────────────────────────────
 
-interface CacheEntry {
+/** A cached federation lookup result (`null` = cached failure). */
+export interface FederationCacheEntry {
   stellarAddress: string | null;
   expiresAt: number;
+}
+
+/** A federation plugin with helpers to inspect and reset its cache. */
+export interface FederationPlugin extends SoroStreamPlugin {
+  /** Clears all cached lookups (positive and negative). */
+  clearCache(): void;
 }
 
 // ── Factory ────────────────────────────────────────────────────────────
@@ -114,7 +128,7 @@ interface CacheEntry {
  * });
  * ```
  */
-export function createFederationPlugin(options: FederationPluginOptions = {}): SoroStreamPlugin {
+export function createFederationPlugin(options: FederationPluginOptions = {}): FederationPlugin {
   const cacheTtlMs = options.cacheTtlMs ?? 300_000; // 5 minutes
   const negativeCacheTtlMs = options.negativeCacheTtlMs ?? 60_000; // 60 seconds
   const fetchImpl: FetchAdapter = options.fetch ?? (globalThis.fetch as FetchAdapter);
@@ -122,7 +136,13 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): S
   const onResolved = options.onResolved;
 
   /** In-memory resolution cache: federation address → CacheEntry */
-  const cache = new Map<string, CacheEntry>();
+  const cache = options.cache ?? new Map<string, FederationCacheEntry>();
+
+  /**
+   * In-flight lookups, so concurrent calls for the same address share a
+   * single network round-trip instead of each hitting the network (#629).
+   */
+  const inflight = new Map<string, Promise<string | null>>();
 
   /**
    * Returns the cached stellar address for `federationAddress` if the entry
@@ -153,7 +173,15 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): S
    * Resolves a single federation address, using the cache when available.
    * Returns `null` when resolution fails and `throwOnFailure` is `false`.
    */
-  async function resolve(federationAddress: string): Promise<string | null> {
+  function resolve(federationAddress: string): Promise<string | null> {
+    const pending = inflight.get(federationAddress);
+    if (pending) return pending;
+    const p = resolveUncached(federationAddress).finally(() => inflight.delete(federationAddress));
+    inflight.set(federationAddress, p);
+    return p;
+  }
+
+  async function resolveUncached(federationAddress: string): Promise<string | null> {
     const cached = getCached(federationAddress);
     if (cached !== undefined) {
       // cached could be null (negative) or a string (positive)
@@ -185,7 +213,11 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): S
     }
   }
 
-  const plugin: SoroStreamPlugin = {
+  const plugin: FederationPlugin = {
+    clearCache(): void {
+      cache.clear();
+    },
+
     /**
      * Before `createStream`: resolve any federation address in `params.recipient`.
      * The params object is mutated in-place so the SDK sees the resolved address.

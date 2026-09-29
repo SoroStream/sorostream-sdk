@@ -116,8 +116,8 @@ export type {
   TransactionHistoryOptions,
 } from './horizon.js';
 export { CircuitBreaker } from './circuitBreaker.js';
-export { withRetry, RetryBackoff, isTransientRpcError } from './retry.js';
-export type { RetryOptions } from './retry.js';
+export { withRetry, RetryBackoff, isTransientRpcError, computeBackoffDelay } from './retry.js';
+export type { RetryOptions, BackoffStrategy } from './retry.js';
 export type { CircuitState, CircuitBreakerOptions } from './circuitBreaker.js';
 export { WriteRateLimiter } from './writeRateLimiter.js';
 export type { WriteRateLimitOptions } from './writeRateLimiter.js';
@@ -352,7 +352,11 @@ export { scheduleFeeBumpMonitor } from './feeBump.js';
 export { createFeeRetryMiddleware, FeeRetryError } from './feeRetryMiddleware.js';
 export type { FeeRetryMiddlewareOptions } from './feeRetryMiddleware.js';
 export { createFederationPlugin } from './federationPlugin.js';
-export type { FederationPluginOptions } from './federationPlugin.js';
+export type {
+  FederationPluginOptions,
+  FederationPlugin,
+  FederationCacheEntry,
+} from './federationPlugin.js';
 export type {
   PaginatedEvents,
   StreamEvent as IndexerStreamEvent,
