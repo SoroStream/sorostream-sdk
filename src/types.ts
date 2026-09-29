@@ -1813,16 +1813,6 @@ export interface DrainFlowSuccess {
   amount: string;
 }
 
-/** Result of a partial drainFlow failure (issue #558). */
-export interface DrainFlowPartialFailure {
-  ok: false;
-  cancelResult: { txHash: string };
-  withdrawError: Error;
-}
-
-/** Result of a drainFlow operation (issue #558). */
-export type DrainFlowResult = DrainFlowSuccess | DrainFlowPartialFailure;
-
 /** Parameter options for buildUnsignedXdr helper (issue #438). */
 export interface BuildUnsignedXdrParams {
   /** The deployed contract address (required if operation is a method name string). */
@@ -1871,4 +1861,12 @@ export interface CreateStreamDryRunResult {
   minResourceFee: string;
   result: unknown;
   params: CreateStreamParams;
+}
+
+export type DrainFlowResult = DrainFlowSuccess | DrainFlowPartialFailure;
+
+export interface DrainFlowPartialFailure {
+  ok: false;
+  cancelResult: { txHash: string };
+  withdrawError: Error;
 }

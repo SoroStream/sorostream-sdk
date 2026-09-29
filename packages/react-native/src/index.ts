@@ -1,5 +1,14 @@
-import type { SoroStreamAdapters, StorageAdapter, WalletAdapter } from '@sorostream/sdk';
-import type { Linking } from 'react-native';
+import type { SoroStreamAdapters, StorageAdapter, WalletAdapter, Network } from '@sorostream/sdk';
+
+const Linking = {
+  openURL(url: string): Promise<any> {
+    const rn = (globalThis as Record<string, any>).ReactNative || globalThis;
+    if (rn && rn.Linking && typeof rn.Linking.openURL === 'function') {
+      return rn.Linking.openURL(url);
+    }
+    return Promise.resolve();
+  },
+};
 
 /**
  * Current version of `@sorostream/sdk-react-native`.

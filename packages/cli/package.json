@@ -6,8 +6,12 @@
   "types": "./dist/index.d.ts",
   "bin": {
     "sorostream": "./dist/index.js",
+    "sorostream-cli": "./dist/index.js",
     "sorostream-analyze": "./dist/analyze.js",
     "sorostream-generate-schemas": "./dist/schemas.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsup src/index.ts src/analyze.ts src/schemas.ts --format cjs --dts --sourcemap --clean",
@@ -33,7 +37,8 @@
     "typescript": "^5.0.0"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "repository": {
     "type": "git",
