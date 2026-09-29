@@ -23,6 +23,11 @@ export type {
   RpcTransportInitContext,
   RpcTransportGetEventsRequest,
 } from './transport.js';
+export { WebSocketTransportAdapter } from './wsTransport.js';
+export type {
+  WebSocketTransportOptions,
+  WebSocketTransportReconnectOptions,
+} from './wsTransport.js';
 
 export { MockSoroStreamClient, SoroStreamSandbox } from './mock.js';
 
@@ -142,7 +147,17 @@ export type {
 } from './observable.js';
 export type { StreamRetryPolicy, EventPollerOptions } from './events.js';
 export type { BatchingOptions, BatchMetrics, CompressionOptions } from './types.js';
-export { createContractEncoder } from './contractEncoders.js';
+export {
+  createContractEncoder,
+  encodeAddress,
+  encodeI128,
+  encodeBytes,
+  encodeString,
+  decodeAddress,
+  decodeI128,
+  decodeBytes,
+  decodeString,
+} from './contractEncoders.js';
 export type { ContractCallEncoder } from './contractEncoders.js';
 export { createSimplePriceFeed } from './priceFeed.js';
 export type { SimplePriceFeedOptions } from './priceFeed.js';

@@ -1,4 +1,4 @@
-import { Contract, nativeToScVal, xdr } from '@stellar/stellar-sdk';
+import { Address, Contract, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { ContractVersion, CreateStreamParams, SplitStreamParams } from './types.js';
 import { isValidStellarAddress, parseStreamId } from './utils.js';
 import { InvalidAddressError } from './errors.js';
@@ -206,4 +206,53 @@ export function createContractEncoder(
     default:
       return new V1Encoder(contract);
   }
+}
+
+// Issue #588: primitive ScVal encoders/decoders used for contract call
+// arguments, exposed so their round-trip behaviour can be property-tested.
+
+const I128_MIN = -(2n ** 127n);
+const I128_MAX = 2n ** 127n - 1n;
+
+/** Encodes a Stellar account (G…) or contract (C…) address as an `ScVal`. */
+export function encodeAddress(address: string): xdr.ScVal {
+  return nativeToScVal(requireAddress(address), { type: 'address' });
+}
+
+/** Encodes a signed 128-bit integer as an `ScVal`. Throws `RangeError` outside the i128 range. */
+export function encodeI128(value: bigint): xdr.ScVal {
+  if (value < I128_MIN || value > I128_MAX) {
+    throw new RangeError(`Value ${value} is outside the i128 range`);
+  }
+  return nativeToScVal(value, { type: 'i128' });
+}
+
+/** Encodes raw bytes as an `ScVal`. */
+export function encodeBytes(bytes: Uint8Array): xdr.ScVal {
+  return xdr.ScVal.scvBytes(Buffer.from(bytes));
+}
+
+/** Encodes a UTF-8 string as an `ScVal`. */
+export function encodeString(value: string): xdr.ScVal {
+  return nativeToScVal(value, { type: 'string' });
+}
+
+/** Decodes an address `ScVal` produced by {@link encodeAddress}. */
+export function decodeAddress(scVal: xdr.ScVal): string {
+  return Address.fromScVal(scVal).toString();
+}
+
+/** Decodes an i128 `ScVal` produced by {@link encodeI128}. */
+export function decodeI128(scVal: xdr.ScVal): bigint {
+  return BigInt(scValToNative(scVal) as bigint);
+}
+
+/** Decodes a bytes `ScVal` produced by {@link encodeBytes}. */
+export function decodeBytes(scVal: xdr.ScVal): Uint8Array {
+  return new Uint8Array(scVal.bytes());
+}
+
+/** Decodes a string `ScVal` produced by {@link encodeString}. */
+export function decodeString(scVal: xdr.ScVal): string {
+  return scVal.str().toString();
 }

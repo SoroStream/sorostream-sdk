@@ -54,6 +54,8 @@
     "test:types": "tsc --noEmit",
     "test:treeshake": "npm run build && vitest run test/tree_shaking.test.ts",
     "test:watch": "vitest",
+    "test:fuzz": "FC_SEED=588 vitest run test/contract_encoders_fuzz.test.ts",
+    "test:snapshots:update": "vitest run -u test/scval-snapshots.test.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "tsc --noEmit",
     "extract-release-notes": "node scripts/extract-release-notes.js",

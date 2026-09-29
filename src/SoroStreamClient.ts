@@ -249,10 +249,10 @@ export interface SoroStreamClientOptions {
   /**
    * The Stellar network to connect to. Optional when `rpcUrl` is provided
    * and its host can be auto-detected (issue #202): URLs containing
-   * `"testnet"` resolve to `"testnet"`; `"mainnet"` or `"horizon.stellar.org"`
-   * resolve to `"mainnet"`. When both are provided, `network` always wins —
-   * a mismatch against the auto-detected value logs a `console.warn` in
-   * non-production builds. Required (and not auto-detectable) for futurenet.
+   * `"futurenet"` resolve to `"futurenet"`; `"testnet"` resolve to `"testnet"`;
+   * `"mainnet"` or `"horizon.stellar.org"` resolve to `"mainnet"`. When both
+   * are provided, `network` always wins — a mismatch against the auto-detected
+   * value logs a `console.warn` in non-production builds.
    */
   network?: Network;
   /** The deployed StreamContract address. */
