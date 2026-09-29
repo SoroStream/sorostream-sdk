@@ -186,6 +186,9 @@ export {
   InsecureRpcUrlError,
   SdkNetworkError,
   XdrValidationError,
+  FeeTooHighError,
+  MalformedWalletResponseError,
+  MetadataTooLargeError,
 } from './errors.js';
 export type { XdrValidationErrorCode } from './errors.js';
 export { assertEnvelopeUnmutated } from './xdrValidation.js';

@@ -393,6 +393,67 @@ export class InsecureRpcUrlError extends SoroStreamError {
   }
 }
 
+/**
+ * Thrown when `FeeBumpOptions.maxFee` exceeds the contract's accepted ceiling
+ * of 10,000 stroops. Values above this limit are rejected by the contract,
+ * so the SDK rejects them client-side with a clear message instead of
+ * letting the transaction fail on-chain.
+ */
+export class FeeTooHighError extends SoroStreamError {
+  /** The fee value that was rejected (in stroops). */
+  readonly fee: number;
+  /** The maximum allowed fee in stroops. */
+  readonly maxAllowed: number;
+
+  constructor(fee: number, maxAllowed: number) {
+    super(
+      `Fee value ${fee} stroops exceeds the maximum allowed by the contract (${maxAllowed} stroops). ` +
+        `Pass a maxFee <= ${maxAllowed} or omit it to use the default.`,
+    );
+    this.name = 'FeeTooHighError';
+    this.fee = fee;
+    this.maxAllowed = maxAllowed;
+  }
+}
+
+/**
+ * Thrown when a wallet adapter's `signTransaction` returns a value that is
+ * not a valid base64-encoded XDR string. This prevents a raw parse exception
+ * from crashing the application and surfaces a clear, actionable error instead.
+ */
+export class MalformedWalletResponseError extends SoroStreamError {
+  constructor(message?: string) {
+    super(
+      message ??
+        'Wallet adapter returned a malformed or empty response from signTransaction. ' +
+          'Expected a non-empty base64-encoded XDR string.',
+    );
+    this.name = 'MalformedWalletResponseError';
+  }
+}
+
+/**
+ * Thrown when the `namespace`/metadata field exceeds 256 bytes (UTF-8 encoded).
+ * The contract silently truncates values above this limit; the SDK rejects them
+ * client-side to prevent data loss.
+ */
+export class MetadataTooLargeError extends SoroStreamError {
+  /** The actual UTF-8 byte length of the metadata string. */
+  readonly actualBytes: number;
+  /** The maximum allowed byte length. */
+  readonly maxBytes: number;
+
+  constructor(actualBytes: number, maxBytes: number) {
+    super(
+      `Stream metadata/namespace is ${actualBytes} bytes (UTF-8), which exceeds the ` +
+        `contract limit of ${maxBytes} bytes. Shorten the namespace before submitting.`,
+    );
+    this.name = 'MetadataTooLargeError';
+    this.actualBytes = actualBytes;
+    this.maxBytes = maxBytes;
+  }
+}
+
 export class InvalidStreamIdError extends SoroStreamError {
   readonly streamId: string;
   constructor(streamId: string) {

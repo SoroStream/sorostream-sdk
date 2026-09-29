@@ -2254,6 +2254,16 @@ const txBuilder = new TransactionBuilder(account, {
 
     const signedXdr = await adapter.signTransaction(preparedTx.toXDR(), this.network);
 
+    // Guard against malformed wallet responses. A null, undefined, or empty
+    // string would crash TransactionBuilder.fromXDR or assertEnvelopeUnmutated
+    // with an opaque parse error rather than a meaningful message.
+    if (typeof signedXdr !== 'string' || signedXdr.trim() === '') {
+      throw new MalformedWalletResponseError(
+        `Wallet adapter returned an invalid signTransaction response: ${JSON.stringify(signedXdr)}. ` +
+          `Expected a non-empty base64-encoded XDR string.`,
+      );
+    }
+
     // Issue #459: verify the signed envelope still describes the transaction
     // that was submitted for signing before broadcasting it.
     assertEnvelopeUnmutated(preparedTx, signedXdr, NETWORK_PASSPHRASES[this.network]);
@@ -2346,7 +2356,11 @@ const txBuilder = new TransactionBuilder(account, {
   }
 
   private resolveFeeBump(override?: FeeBumpOptions): FeeBumpOptions | undefined {
-    return override ?? this.defaultFeeBump ?? undefined;
+    const opts = override ?? this.defaultFeeBump ?? undefined;
+    if (opts?.maxFee !== undefined && opts.maxFee > 10_000) {
+      throw new FeeTooHighError(opts.maxFee, 10_000);
+    }
+    return opts;
   }
 
   private async buildAndSubmitBatch(
@@ -2385,6 +2399,14 @@ const txBuilder = new TransactionBuilder(account, {
     const preparedTx = await withRetry(() => this.server.prepareTransaction(tx), this.submitRetry);
 
     const signedXdr = await adapter.signTransaction(preparedTx.toXDR(), this.network);
+
+    // Guard against malformed wallet responses (same as buildAndSubmitInner).
+    if (typeof signedXdr !== 'string' || signedXdr.trim() === '') {
+      throw new MalformedWalletResponseError(
+        `Wallet adapter returned an invalid signTransaction response: ${JSON.stringify(signedXdr)}. ` +
+          `Expected a non-empty base64-encoded XDR string.`,
+      );
+    }
 
     // Issue #459: verify the signed envelope still describes the transaction
     // that was submitted for signing before broadcasting it.
@@ -2621,6 +2643,16 @@ const txBuilder = new TransactionBuilder(account, {
     if (params.durationSeconds < MIN_STREAM_DURATION_SECONDS) {
       throw new ZeroDurationError(
         `Stream duration must be >= ${MIN_STREAM_DURATION_SECONDS}s, got ${params.durationSeconds}s`,
+      );
+    }
+
+    // Fractional durations (e.g. 0.5s) pass the >= 1 check but truncate to 0
+    // at the contract layer (u64 cast), producing end_time == start_time which
+    // the contract rejects. Enforce integer seconds client-side.
+    if (!Number.isInteger(params.durationSeconds)) {
+      throw new ZeroDurationError(
+        `Stream duration must be a whole number of seconds, got ${params.durationSeconds}s. ` +
+          `Round up to the nearest second before submitting.`,
       );
     }
 
