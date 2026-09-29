@@ -1,4 +1,4 @@
-import { redactSecretKey } from './utils.js';
+import { redactSecretKey } from './internal.js';
 
 /**
  * Ordered log levels from most-verbose to most-silent.

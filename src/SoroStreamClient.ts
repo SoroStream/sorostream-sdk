@@ -516,6 +516,13 @@ export interface SoroStreamClientOptions {
   nonceProvider?: () => string;
 }
 
+// Shared toJSON implementation — avoids allocating a new closure per stream.
+function streamToJSONMethod(this: Stream): Record<string, unknown> {
+  return streamToJSON(this) as Record<string, unknown>;
+}
+
+// Builds the Stream directly, assigning optional fields in place instead of
+// spreading throwaway `{ pausedAt }` / `{}` objects (issue #617).
 function nativeToStream(raw: Record<string, unknown>): Stream {
   return {
     id: safeIdString(raw['id']),
@@ -529,12 +536,13 @@ function nativeToStream(raw: Record<string, unknown>): Stream {
     lastWithdrawTime: Number(raw['last_withdraw_time']),
     status: raw['status'] as Stream['status'],
     autoRenew: Boolean(raw['auto_renew']),
-    ...(raw['paused_at'] != null ? { pausedAt: Number(raw['paused_at']) } : {}),
-    ...(raw['lock_until'] != null ? { lockUntil: Number(raw['lock_until']) } : {}),
-    toJSON() {
-      return streamToJSON(this) as Record<string, unknown>;
-    },
+    toJSON: streamToJSONMethod,
   };
+  const pausedAt = raw['paused_at'];
+  if (pausedAt != null) stream.pausedAt = Number(pausedAt);
+  const lockUntil = raw['lock_until'];
+  if (lockUntil != null) stream.lockUntil = Number(lockUntil);
+  return stream;
 }
 
 function scValToStream(val: xdr.ScVal): Stream {
@@ -4907,9 +4915,11 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
       return this._fetchStreamsIndividually(chunk, options);
     }
 
-    const streams = raw
-      .filter((entry): entry is Record<string, unknown> => entry != null)
-      .map(nativeToStream);
+    // Single pass: skip nulls without allocating an intermediate filtered array.
+    const streams: Stream[] = [];
+    for (const entry of raw) {
+      if (entry != null) streams.push(nativeToStream(entry));
+    }
 
     // Warm the per-stream cache so a later getStream() for any of these IDs is
     // served locally — only when the network hasn't switched mid-flight.
