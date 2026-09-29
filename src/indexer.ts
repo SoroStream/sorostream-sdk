@@ -1,9 +1,14 @@
-import { rpc, scValToNative, nativeToScVal, xdr } from '@stellar/stellar-sdk';
+import { rpc, scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { RpcTransportAdapter } from './transport.js';
+import { cachedScValBase64 } from './scValCache.js';
+import { safeBigInt, safeIdString } from './utils.js';
 
 function toBigInt(val: unknown): bigint {
   if (typeof val === 'bigint') return val;
-  if (typeof val === 'number') return BigInt(val);
+  if (typeof val === 'number') {
+    if (!Number.isSafeInteger(val)) return safeBigInt(val);
+    return BigInt(val);
+  }
   if (typeof val === 'string') return BigInt(val);
   return 0n;
 }
@@ -131,7 +136,7 @@ export class StreamIndexer {
     const eventTypes = ['StreamCreated', 'StreamWithdrawn', 'StreamCancelled'] as const;
 
     const topics: string[][] = eventTypes.map((eventType) => {
-      return [nativeToScVal(eventType, { type: 'symbol' }).toXDR('base64')];
+      return [cachedScValBase64(eventType, 'symbol')];
     });
 
     const request: rpc.Server.GetEventsRequest = {
@@ -210,7 +215,7 @@ export class StreamIndexer {
 
     switch (eventType) {
       case 'StreamCreated': {
-        const streamId = String(rawData['id'] ?? '');
+        const streamId = rawData['id'] != null ? safeIdString(rawData['id']) : '';
         if (filter.streamId && streamId !== filter.streamId) return null;
         if (filter.sender && String(rawData['sender'] ?? '') !== filter.sender) return null;
         if (filter.recipient && String(rawData['recipient'] ?? '') !== filter.recipient)
@@ -268,7 +273,7 @@ export class StreamIndexer {
     const scVal = topic[1];
     if (!scVal) return '';
     try {
-      return String(scValToNative(scVal));
+      return safeIdString(scValToNative(scVal));
     } catch {
       return '';
     }

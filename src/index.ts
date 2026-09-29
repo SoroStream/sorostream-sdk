@@ -23,6 +23,11 @@ export type {
   RpcTransportInitContext,
   RpcTransportGetEventsRequest,
 } from './transport.js';
+export { WebSocketTransportAdapter } from './wsTransport.js';
+export type {
+  WebSocketTransportOptions,
+  WebSocketTransportReconnectOptions,
+} from './wsTransport.js';
 
 export { MockSoroStreamClient, SoroStreamSandbox } from './mock.js';
 
@@ -46,6 +51,9 @@ export {
   toRatePerMonth,
   timeUntilStreamEnd,
   claimableNow,
+  safeClaimable,
+  safeBigInt,
+  safeIdString,
   calculateVestingSchedule,
   watchClaimable,
   watchClaimableWs,
@@ -99,6 +107,7 @@ export type {
 export { templates } from './templates.js';
 export { serializeStream, deserializeStream, buildUnsignedXdr } from './serialization.js';
 export type { SerializedStream } from './serialization.js';
+export { ScValCache, cachedScVal, cachedBool, cachedScValBase64 } from './scValCache.js';
 export type { BuildUnsignedXdrParams } from './types.js';
 export { getTransactionHistory, getAddressActivity } from './horizon.js';
 export type {
@@ -113,7 +122,7 @@ export type { CircuitState, CircuitBreakerOptions } from './circuitBreaker.js';
 export { WriteRateLimiter } from './writeRateLimiter.js';
 export type { WriteRateLimitOptions } from './writeRateLimiter.js';
 export { ConnectionPool } from './connectionPool.js';
-export type { ConnectionPoolOptions, PoolEvent, PoolEventType } from './connectionPool.js';
+export type { ConnectionPoolOptions, ConnectionPriority, PoolEvent, PoolEventType } from './connectionPool.js';
 export { InMemoryEventBus } from './eventBus.js';
 export type { IEventBus, Unsubscribe } from './eventBus.js';
 export { PriorityRequestQueue, createRequestQueue } from './request-queue.js';
@@ -138,7 +147,17 @@ export type {
 } from './observable.js';
 export type { StreamRetryPolicy, EventPollerOptions } from './events.js';
 export type { BatchingOptions, BatchMetrics, CompressionOptions } from './types.js';
-export { createContractEncoder } from './contractEncoders.js';
+export {
+  createContractEncoder,
+  encodeAddress,
+  encodeI128,
+  encodeBytes,
+  encodeString,
+  decodeAddress,
+  decodeI128,
+  decodeBytes,
+  decodeString,
+} from './contractEncoders.js';
 export type { ContractCallEncoder } from './contractEncoders.js';
 export { createSimplePriceFeed } from './priceFeed.js';
 export type { SimplePriceFeedOptions } from './priceFeed.js';
@@ -305,7 +324,7 @@ export type {
   SoroStreamEmitter,
 } from './types.js';
 
-export { ConnectionPoolExhaustedError, RecipientValidationError } from './errors.js';
+export { ConnectionPoolExhaustedError, RecipientValidationError, InvalidTokenContractError } from './errors.js';
 export { SanitizingLogger, NoopLogger, ConsoleLogger, createLogger } from './logger.js';
 export type { Logger, LogLevel, CreateLoggerOptions } from './logger.js';
 export { StreamStateMachine, InvalidStateTransitionError } from './state-machine.js';

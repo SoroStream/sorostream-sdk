@@ -80,6 +80,17 @@ export interface RpcTransportAdapter {
   /** Fetch contract events matching the given filters, used by `subscribeEvents`/`watchClaimable`. */
   getEvents(request: RpcTransportGetEventsRequest): Promise<rpc.Api.GetEventsResponse>;
 
+  /**
+   * Optional push-based event subscription (issue #331). When present, the
+   * event poller uses it instead of HTTP polling and falls back to polling
+   * once `onError` is called. Returns a function that closes the subscription.
+   */
+  subscribeEvents?(
+    request: Pick<RpcTransportGetEventsRequest, 'filters'>,
+    onEvent: (event: rpc.Api.EventResponse) => void,
+    onError: (error: unknown) => void,
+  ): () => void;
+
   /** The RPC endpoint URL, mirroring `rpc.Server.serverURL`. Optional for custom transports. */
   serverURL?: URL;
 

@@ -46,7 +46,9 @@ export function assertEnvelopeUnmutated(
   } catch (err) {
     const message =
       err instanceof Error ? err.message : `failed to decode signed XDR (${String(err)})`;
-    throw new XdrValidationError('INVALID_XDR', `invalid XDR envelope: ${message}`);
+    throw new XdrValidationError('INVALID_XDR', `invalid XDR envelope: ${message}`, {
+      field: 'envelope',
+    });
   }
 
   if (!(decoded instanceof Transaction)) {
@@ -59,24 +61,32 @@ export function assertEnvelopeUnmutated(
     throw new XdrValidationError(
       'ENVELOPE_MUTATED',
       `source account changed (expected ${prepared.source}, got ${decoded.source})`,
+      { field: 'source', expected: prepared.source, actual: decoded.source },
     );
   }
   if (decoded.sequence !== prepared.sequence) {
     throw new XdrValidationError(
       'ENVELOPE_MUTATED',
       `sequence number changed (expected ${prepared.sequence}, got ${decoded.sequence})`,
+      { field: 'sequence', expected: prepared.sequence, actual: decoded.sequence },
     );
   }
   if (decoded.fee !== prepared.fee) {
     throw new XdrValidationError(
       'ENVELOPE_MUTATED',
       `fee changed (expected ${prepared.fee}, got ${decoded.fee})`,
+      { field: 'fee', expected: prepared.fee, actual: decoded.fee },
     );
   }
   if (decoded.operations.length !== prepared.operations.length) {
     throw new XdrValidationError(
       'ENVELOPE_MUTATED',
       `operation count changed (expected ${prepared.operations.length}, got ${decoded.operations.length})`,
+      {
+        field: 'operations.length',
+        expected: prepared.operations.length,
+        actual: decoded.operations.length,
+      },
     );
   }
   for (let i = 0; i < prepared.operations.length; i++) {
@@ -84,6 +94,11 @@ export function assertEnvelopeUnmutated(
       throw new XdrValidationError(
         'ENVELOPE_MUTATED',
         `operation ${i} type changed (expected ${prepared.operations[i]!.type}, got ${decoded.operations[i]!.type})`,
+        {
+          field: `operations[${i}].type`,
+          expected: prepared.operations[i]!.type,
+          actual: decoded.operations[i]!.type,
+        },
       );
     }
   }
@@ -96,6 +111,11 @@ export function assertEnvelopeUnmutated(
     throw new XdrValidationError(
       'ENVELOPE_MUTATED',
       'transaction body does not match the envelope submitted for signing (amount, address, or other operation details differ)',
+      {
+        field: 'hash',
+        expected: prepared.hash().toString('hex'),
+        actual: decoded.hash().toString('hex'),
+      },
     );
   }
 }

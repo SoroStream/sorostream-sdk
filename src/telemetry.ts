@@ -1,3 +1,5 @@
+import { VERSION } from './version.js';
+
 type Attributes = Record<string, string | number | boolean>;
 interface SpanOptions {
   attributes?: Attributes;
@@ -26,42 +28,37 @@ function getOtel(): any | null {
   return _otelModule;
 }
 
-/** Options controlling how finished spans are batched before export (issue #623). */
-export interface TelemetryBatchOptions {
-  /** Number of finished spans that triggers a flush (default: 50). */
-  maxBatchSize?: number;
-  /** Maximum time in ms a finished span waits before being flushed (default: 5000). */
-  flushIntervalMs?: number;
-}
-
-interface PendingSpan {
-  span: Span;
-  attributes?: Attributes;
-  endTime: number;
-}
+/**
+ * Restricts which event types (span names) are collected: either a list of
+ * allowed names or a predicate. Omit to collect every event.
+ */
+export type TelemetryEventFilter = readonly string[] | ((eventType: string) => boolean);
 
 export class Telemetry {
   private tracer: Tracer | null = null;
   readonly enabled: boolean;
-  private readonly maxBatchSize: number;
-  private readonly flushIntervalMs: number;
-  private pending: PendingSpan[] = [];
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly eventFilter?: TelemetryEventFilter;
 
-  constructor(enabled: boolean, batch: TelemetryBatchOptions = {}) {
+  constructor(enabled: boolean, eventFilter?: TelemetryEventFilter) {
     this.enabled = enabled;
-    this.maxBatchSize = Math.max(1, batch.maxBatchSize ?? 50);
-    this.flushIntervalMs = Math.max(0, batch.flushIntervalMs ?? 5_000);
+    this.eventFilter = eventFilter;
     if (enabled) {
       const otel = getOtel();
       if (otel) {
-        this.tracer = otel.trace.getTracer('@sorostream/sdk', '0.1.0');
+        this.tracer = otel.trace.getTracer('@sorostream/sdk', VERSION);
       }
     }
   }
 
+  /** Whether events of the given type pass the configured filter. */
+  shouldCollect(eventType: string): boolean {
+    const filter = this.eventFilter;
+    if (!filter) return true;
+    return typeof filter === 'function' ? filter(eventType) : filter.includes(eventType);
+  }
+
   startSpan(name: string, options?: SpanOptions): Span | null {
-    if (!this.tracer) return null;
+    if (!this.tracer || !this.shouldCollect(name)) return null;
     return this.tracer.startSpan(name, options);
   }
 

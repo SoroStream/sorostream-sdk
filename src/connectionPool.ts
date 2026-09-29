@@ -2,6 +2,11 @@ import { rpc } from '@stellar/stellar-sdk';
 import { EventPoller, unrefTimer } from './events.js';
 import { ConnectionPoolExhaustedError } from './errors.js';
 
+/** Priority of a pooled request; higher-priority waiters are served first (issue #626). */
+export type ConnectionPriority = 'high' | 'normal' | 'low';
+
+const PRIORITY_RANK: Record<ConnectionPriority, number> = { high: 0, normal: 1, low: 2 };
+
 export type PoolEventType = 'pool:full' | 'pool:reconnect' | 'pool:drain';
 
 export interface PoolEvent {
@@ -52,7 +57,7 @@ export class ConnectionPool {
   /** Number of connections currently held via {@link acquire}. */
   private activeConnections = 0;
   /** FIFO queue of pending {@link acquire} grants waiting for a free connection. */
-  private waiters: Array<() => void> = [];
+  private waiters: Array<{ grant: () => void; rank: number }> = [];
 
   constructor(options: ConnectionPoolOptions) {
     this.rpcUrl = options.rpcUrl;
@@ -160,6 +165,9 @@ export class ConnectionPool {
    * released. Unlike {@link acquirePoller} this never throws for a busy pool —
    * it waits instead.
    *
+   * @param options.priority - `'high' | 'normal' | 'low'` (default `'normal'`).
+   *   When queued, higher-priority callers are granted connections first
+   *   (FIFO within the same priority). Issue #626.
    * @param options.signal - Optional `AbortSignal`. If the signal fires while
    *   queued, the returned promise rejects and the queued grant is withdrawn.
    * @returns A promise resolving with a pooled RPC server and a `release`
@@ -167,8 +175,10 @@ export class ConnectionPool {
    */
   acquire(options?: {
     signal?: AbortSignal;
+    priority?: ConnectionPriority;
   }): Promise<{ server: rpc.Server; release: () => void }> {
     const signal = options?.signal;
+    const rank = PRIORITY_RANK[options?.priority ?? 'normal'];
     if (signal?.aborted) {
       return Promise.reject(
         new Error('ConnectionPool.acquire(): aborted before acquiring a connection'),
@@ -189,9 +199,9 @@ export class ConnectionPool {
           released = true;
           slot.subscriptions = Math.max(0, slot.subscriptions - 1);
           this.activeConnections = Math.max(0, this.activeConnections - 1);
-          // Hand the freed slot to the longest-waiting caller (FIFO).
+          // Hand the freed slot to the highest-priority, longest-waiting caller.
           const next = this.waiters.shift();
-          if (next) next();
+          if (next) next.grant();
           if (this.slots.every((s) => s.subscriptions === 0)) {
             this._emit({ type: 'pool:drain' });
           }
@@ -203,7 +213,7 @@ export class ConnectionPool {
       let abortHandler: (() => void) | undefined;
       if (signal && !signal.aborted) {
         abortHandler = () => {
-          const idx = this.waiters.indexOf(grant);
+          const idx = this.waiters.findIndex((w) => w.grant === grant);
           if (idx >= 0) this.waiters.splice(idx, 1);
           reject(new Error('ConnectionPool.acquire(): aborted while waiting for a connection'));
         };
@@ -213,7 +223,11 @@ export class ConnectionPool {
       if (this.activeConnections < this.maxConnections) {
         grant();
       } else {
-        this.waiters.push(grant);
+        // Insert after all waiters of equal or higher priority (FIFO within a priority).
+        const idx = this.waiters.findIndex((w) => w.rank > rank);
+        const entry = { grant, rank };
+        if (idx === -1) this.waiters.push(entry);
+        else this.waiters.splice(idx, 0, entry);
       }
     });
   }

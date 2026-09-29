@@ -18,6 +18,7 @@ export type StreamEventType =
   | 'StreamPaused'
   | 'StreamResumed'
   | 'StreamTransferred'
+  | 'StreamLocked'
   /** Alias emitted by the typed EventEmitter when a withdrawal is confirmed
    * (issue #516). Semantically equivalent to `StreamWithdrawn`. */
   | 'WithdrawalMade';
@@ -305,16 +306,6 @@ export interface DrainFlowSuccess {
   withdrawTxHash: string;
   amount: string;
 }
-
-/** Result of a partial drainFlow failure (issue #558). */
-export interface DrainFlowPartialFailure {
-  ok: false;
-  cancelResult: { txHash: string };
-  withdrawError: Error;
-}
-
-/** Result of a drainFlow operation (issue #558). */
-export type DrainFlowResult = DrainFlowSuccess | DrainFlowPartialFailure;
 
 /** Parameters for topping up a stream. */
 export interface TopUpParams {
@@ -1477,6 +1468,12 @@ export interface AlbedoWalletAdapterConfig {
   network?: Network;
 }
 
+export interface WalletConnectV2AdapterConfig {
+  projectId: string;
+  metadata?: Record<string, any>;
+  [key: string]: any;
+}
+
 /** Configuration options for LobstrWalletAdapter (issue #431). */
 export interface LobstrWalletAdapterConfig {
   /** Optional public key pre-configured for the adapter. */
@@ -1816,16 +1813,6 @@ export interface DrainFlowSuccess {
   amount: string;
 }
 
-/** Result of a partial drainFlow failure (issue #558). */
-export interface DrainFlowPartialFailure {
-  ok: false;
-  cancelResult: { txHash: string };
-  withdrawError: Error;
-}
-
-/** Result of a drainFlow operation (issue #558). */
-export type DrainFlowResult = DrainFlowSuccess | DrainFlowPartialFailure;
-
 /** Parameter options for buildUnsignedXdr helper (issue #438). */
 export interface BuildUnsignedXdrParams {
   /** The deployed contract address (required if operation is a method name string). */
@@ -1874,4 +1861,12 @@ export interface CreateStreamDryRunResult {
   minResourceFee: string;
   result: unknown;
   params: CreateStreamParams;
+}
+
+export type DrainFlowResult = DrainFlowSuccess | DrainFlowPartialFailure;
+
+export interface DrainFlowPartialFailure {
+  ok: false;
+  cancelResult: { txHash: string };
+  withdrawError: Error;
 }
