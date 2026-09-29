@@ -1,4 +1,4 @@
-import { redactSecretKey } from './utils.js';
+import { redactSecretKey } from './internal.js';
 
 // See ERRORS.md for cause, typical trigger, and recovery guidance for each
 // error class below, and which SoroStreamClient methods throw them.
@@ -66,6 +66,9 @@ export class TransactionFailedError extends SoroStreamError {
 }
 
 export class RateLimitExceededError extends SoroStreamError {
+  readonly queueDepth: number;
+  readonly queueLimit: number;
+
   constructor(queueDepth: number, queueLimit: number) {
     super(`Rate limit exceeded: ${queueDepth}/${queueLimit}`);
     this.name = 'RateLimitExceededError';
@@ -488,11 +491,24 @@ export type XdrValidationErrorCode =
 export class XdrValidationError extends SoroStreamError {
   /** Structured machine-readable error code. */
   readonly code: XdrValidationErrorCode;
+  /** Name of the field that failed validation, when known (issue #628). */
+  readonly field?: string;
+  /** Expected value of {@link field}, when applicable. */
+  readonly expected?: unknown;
+  /** Actual value of {@link field}, when applicable. */
+  readonly actual?: unknown;
 
-  constructor(code: XdrValidationErrorCode, message: string) {
-    super(message);
+  constructor(
+    code: XdrValidationErrorCode,
+    message: string,
+    details?: { field?: string; expected?: unknown; actual?: unknown },
+  ) {
+    super(details?.field ? `[${details.field}] ${message}` : message);
     this.name = 'XdrValidationError';
     this.code = code;
+    this.field = details?.field;
+    this.expected = details?.expected;
+    this.actual = details?.actual;
   }
 }
 
@@ -552,5 +568,25 @@ export class NetworkMismatchError extends SoroStreamError {
     this.name = 'NetworkMismatchError';
     this.expected = expected;
     this.actual = actual;
+  }
+}
+
+/**
+ * The address passed as a token does not implement the SAC token interface
+ * (issue #611). The contract at the given address failed to respond to a
+ * `symbol()` simulation, which every compliant Stellar Asset Contract must
+ * support.
+ */
+export class InvalidTokenContractError extends SoroStreamError {
+  /** The address that was tested. */
+  readonly token: string;
+
+  constructor(token: string) {
+    super(
+      `Address ${token} does not implement the SAC token interface ` +
+        `(symbol() simulation failed). Provide a valid token contract address.`,
+    );
+    this.name = 'InvalidTokenContractError';
+    this.token = token;
   }
 }

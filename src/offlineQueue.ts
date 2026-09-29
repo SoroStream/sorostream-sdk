@@ -3,7 +3,7 @@
 // When enabled via `offlineQueue: true` in the client config, failed write
 // operations due to network errors are stored in an in-memory queue.
 // On reconnection (detected via RPC health check polling), the queue drains
-// in FIFO order and emits a `queueDrained` event with per-operation results.
+// in priority order (higher first, FIFO within a priority) and emits a `queueDrained` event with per-operation results.
 
 import type { IEventBus } from './eventBus.js';
 
@@ -16,6 +16,8 @@ export interface QueuedOperation {
   execute: () => Promise<unknown>;
   /** Timestamp when the operation was queued. */
   queuedAt: number;
+  /** Replay priority; higher values drain first. Default: 0. */
+  priority: number;
 }
 
 /** Result of replaying a queued operation. */
@@ -125,9 +127,10 @@ export class OfflineWriteQueue {
 
   /**
    * Enqueue a failed write operation.
+   * Higher `priority` operations are replayed first; equal priorities keep FIFO order.
    * Returns true if the operation was queued, false if the queue is full.
    */
-  enqueue(operation: string, execute: () => Promise<unknown>): boolean {
+  enqueue(operation: string, execute: () => Promise<unknown>, priority = 0): boolean {
     if (!this.options.enabled) return false;
     if (this.queue.length >= this.options.maxQueueSize) {
       console.warn(
@@ -142,14 +145,17 @@ export class OfflineWriteQueue {
       operation,
       execute,
       queuedAt: Date.now(),
+      priority,
     };
 
-    this.queue.push(queuedOp);
+    const index = this.queue.findIndex((op) => op.priority < priority);
+    if (index === -1) this.queue.push(queuedOp);
+    else this.queue.splice(index, 0, queuedOp);
     return true;
   }
 
   /**
-   * Drain the queue in FIFO order, replaying each operation.
+   * Drain the queue in priority order, replaying each operation.
    * Emits a `queueDrained` event with the results.
    */
   async drain(): Promise<QueueDrainedEvent> {

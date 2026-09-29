@@ -1,6 +1,7 @@
 import { SoroStreamClient, toStroops, formatUSDC } from '@sorostream/sdk';
 import { createKeypairAdapter } from './wallet.js';
 import * as readline from 'node:readline';
+import { printOutput, type OutputFormat } from './output.js';
 
 export interface GlobalOptions {
   network: 'mainnet' | 'testnet' | 'futurenet';
@@ -8,6 +9,8 @@ export interface GlobalOptions {
   rpc: string[];
   secret: string;
   transport?: any;
+  /** Output format for command results (default: json). */
+  output?: OutputFormat;
 }
 
 function createClient(options: GlobalOptions): SoroStreamClient {
@@ -112,7 +115,7 @@ export async function cmdStreamCreate(opts: StreamCreateOptions): Promise<void> 
   }
 
   // Surface the new stream ID and transaction hash prominently.
-  console.log(JSON.stringify({ streamId: result.streamId, txHash: result.txHash }, null, 2));
+  printOutput({ streamId: result.streamId, txHash: result.txHash }, opts.output);
 }
 
 export async function cmdCreate(
@@ -134,25 +137,25 @@ export async function cmdCreate(
     autoRenew: opts.autoRenew,
   });
 
-  console.log(JSON.stringify(result, null, 2));
+  printOutput(result, opts.output);
 }
 
 export async function cmdGet(opts: GlobalOptions, streamId: string): Promise<void> {
   const client = createClient(opts);
   const stream = await client.getStream(streamId);
-  console.log(JSON.stringify(stream, (_, v) => (typeof v === 'bigint' ? v.toString() : v), 2));
+  printOutput(stream, opts.output);
 }
 
 export async function cmdWithdraw(opts: GlobalOptions, streamId: string): Promise<void> {
   const client = createClient(opts);
   const result = await client.withdraw({ streamId });
-  console.log(JSON.stringify(result, null, 2));
+  printOutput(result, opts.output);
 }
 
 export async function cmdCancel(opts: GlobalOptions, streamId: string): Promise<void> {
   const client = createClient(opts);
   const result = await client.cancelStream({ streamId });
-  console.log(JSON.stringify(result, null, 2));
+  printOutput(result, opts.output);
 }
 
 export async function cmdTopUp(
@@ -164,41 +167,33 @@ export async function cmdTopUp(
     streamId,
     amount: toStroops(opts.amount),
   });
-  console.log(JSON.stringify({ ...result, newEndTime: result.newEndTime.toISOString() }, null, 2));
+  printOutput({ ...result, newEndTime: result.newEndTime.toISOString() }, opts.output);
 }
 
 export async function cmdClaimable(opts: GlobalOptions, streamId: string): Promise<void> {
   const client = createClient(opts);
   const claimable = await client.getClaimable(streamId);
-  console.log(
-    JSON.stringify({ claimable: claimable.toString(), usdc: formatUSDC(claimable) }, null, 2),
-  );
+  printOutput({ claimable: claimable.toString(), usdc: formatUSDC(claimable) }, opts.output);
 }
 
 export async function cmdForecast(opts: GlobalOptions, streamId: string): Promise<void> {
   const client = createClient(opts);
   const forecast = await client.getRenewalForecast(streamId);
   if (!forecast) {
-    console.log(
-      JSON.stringify(
-        { forecast: null, message: 'Stream does not auto-renew or is cancelled' },
-        null,
-        2,
-      ),
+    printOutput(
+      { forecast: null, message: 'Stream does not auto-renew or is cancelled' },
+      opts.output,
     );
     return;
   }
-  console.log(
-    JSON.stringify(
-      {
-        nextRenewalDate: forecast.nextRenewalDate.toISOString(),
-        amount: forecast.amount.toString(),
-        usdc: formatUSDC(forecast.amount),
-        nextEndTime: forecast.nextEndTime.toISOString(),
-      },
-      null,
-      2,
-    ),
+  printOutput(
+    {
+      nextRenewalDate: forecast.nextRenewalDate.toISOString(),
+      amount: forecast.amount.toString(),
+      usdc: formatUSDC(forecast.amount),
+      nextEndTime: forecast.nextEndTime.toISOString(),
+    },
+    opts.output,
   );
 }
 
@@ -236,5 +231,5 @@ export async function cmdList(
     });
   }
 
-  console.log(JSON.stringify(result, (_, v) => (typeof v === 'bigint' ? v.toString() : v), 2));
+  printOutput(result, opts.output);
 }

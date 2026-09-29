@@ -7,6 +7,7 @@ import type {
   BatchMetrics,
 } from './types.js';
 import type { RpcTransportAdapter } from './transport.js';
+import { safeIdString } from './utils.js';
 
 /**
  * Retry policy for automatic event poller reconnection on unexpected failures.
@@ -66,7 +67,7 @@ function parseStreamEvent(raw: rpc.Api.EventResponse): StreamEvent | null {
   if (typeof rawType !== 'string' || !isStreamEventType(rawType)) return null;
 
   const rawStreamId = raw.topic.length > 1 ? scValToNative(raw.topic[1]!) : null;
-  const streamId = rawStreamId != null ? String(rawStreamId) : '0';
+  const streamId = rawStreamId != null ? safeIdString(rawStreamId) : '0';
 
   const data = raw.value ? (scValToNative(raw.value) as Record<string, unknown>) : {};
 
@@ -105,6 +106,9 @@ export class EventPoller {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private entries: Map<string, PollerEntry> = new Map();
   private startLedger: number | null = null;
+  // Issue #331: push subscription state
+  private closePush: (() => void) | null = null;
+  private pushFailed = false;
 
   // Issue #186: retry / reconnect support
   private readonly retryMaxAttempts: number;
@@ -162,7 +166,7 @@ export class EventPoller {
 
   subscribe(key: string, entry: PollerEntry): StreamSubscription {
     this.entries.set(key, entry);
-    if (!this.intervalId) {
+    if (!this.intervalId && !this.closePush) {
       this.startPolling();
     }
     return {
@@ -204,25 +208,7 @@ export class EventPoller {
         }
         this.cursor = response.cursor;
 
-        for (const raw of response.events) {
-          const event = parseStreamEvent(raw);
-          if (!event) continue;
-          // Dispatch to immediate subscribers
-          for (const [, entry] of this.entries) {
-            if (entry.filter(event)) {
-              entry.callback(event);
-            }
-          }
-          // Buffer for batch subscribers
-          if (this.batchEntries.size > 0) {
-            this.batchBuffer.push(event);
-            if (this.batchBuffer.length >= this.maxBatchSize) {
-              this._flushBatch();
-            } else if (this.batchFlushTimer === null) {
-              this.batchFlushTimer = setTimeout(() => this._flushBatch(), this.maxBatchDelayMs);
-            }
-          }
-        }
+        for (const raw of response.events) this.dispatch(raw);
       } else if (this.startLedger === null) {
         this.startLedger = response.latestLedger;
       }
@@ -253,13 +239,54 @@ export class EventPoller {
     }
   }
 
+  private dispatch(raw: rpc.Api.EventResponse): void {
+    const event = parseStreamEvent(raw);
+    if (!event) return;
+    // Dispatch to immediate subscribers
+    for (const [, entry] of this.entries) {
+      if (entry.filter(event)) {
+        entry.callback(event);
+      }
+    }
+    // Buffer for batch subscribers
+    if (this.batchEntries.size > 0) {
+      this.batchBuffer.push(event);
+      if (this.batchBuffer.length >= this.maxBatchSize) {
+        this._flushBatch();
+      } else if (this.batchFlushTimer === null) {
+        this.batchFlushTimer = setTimeout(() => this._flushBatch(), this.maxBatchDelayMs);
+      }
+    }
+  }
+
   private startPolling(): void {
+    // Issue #331: prefer a push-based transport subscription; fall back to
+    // HTTP polling if it fails.
+    if (this.server.subscribeEvents && !this.pushFailed) {
+      const close = this.server.subscribeEvents(
+        { filters: [{ type: 'contract', contractIds: [this.contractId] }] },
+        (raw) => this.dispatch(raw),
+        () => {
+          this.pushFailed = true;
+          if (this.closePush !== null) {
+            this.closePush = null;
+            this.startPolling();
+          }
+        },
+      );
+      if (!this.pushFailed) {
+        this.closePush = close;
+        return;
+      }
+    }
     void this.poll();
     this.intervalId = setInterval(() => void this.poll(), 5000);
     unrefTimer(this.intervalId);
   }
 
   private stopPolling(): void {
+    this.closePush?.();
+    this.closePush = null;
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
@@ -273,7 +300,7 @@ export class EventPoller {
    */
   subscribeBatch(key: string, entry: BatchEntry): StreamSubscription {
     this.batchEntries.set(key, entry);
-    if (!this.intervalId) {
+    if (!this.intervalId && !this.closePush) {
       this.startPolling();
     }
     return {

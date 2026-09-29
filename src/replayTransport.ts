@@ -178,6 +178,18 @@ export interface ReplayOptions {
    * Issue #544.
    */
   sequential?: boolean;
+  /**
+   * Only replay entries whose `method` is in this list (e.g.
+   * `['getEvents', 'getTransaction']`). Calls to other methods throw
+   * {@link ReplayFixtureError}. Issue #631.
+   */
+  methods?: string[];
+  /**
+   * Custom predicate applied to each fixture entry before loading. Entries
+   * for which it returns `false` are skipped. Combined with `methods` when
+   * both are given. Issue #631.
+   */
+  filter?: (entry: FixtureEntry, index: number) => boolean;
 }
 
 export const ReplayTransport = {
@@ -286,8 +298,14 @@ export const ReplayTransport = {
       throw new ReplayFixtureParseError('missing or invalid "entries" array');
     }
 
+    const methods = options.methods ? new Set(options.methods) : null;
+    const filter = options.filter;
+    const entries = parsed.entries.filter(
+      (entry, i) => (!methods || methods.has(entry.method)) && (!filter || filter(entry, i)),
+    );
+
     const queue = new ReplayQueue();
-    queue.load(parsed.entries);
+    queue.load(entries);
 
     const sequential = options.sequential !== false;
 

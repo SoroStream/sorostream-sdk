@@ -1,10 +1,12 @@
+import { VERSION } from './version.js';
+
 type Attributes = Record<string, string | number | boolean>;
 interface SpanOptions {
   attributes?: Attributes;
 }
-interface Span {
+export interface Span {
   setAttributes(attrs: Attributes): void;
-  end(): void;
+  end(endTime?: number): void;
   recordException(e: Error): void;
   setAttribute(k: string, v: unknown): void;
 }
@@ -26,29 +28,73 @@ function getOtel(): any | null {
   return _otelModule;
 }
 
+/**
+ * Restricts which event types (span names) are collected: either a list of
+ * allowed names or a predicate. Omit to collect every event.
+ */
+export type TelemetryEventFilter = readonly string[] | ((eventType: string) => boolean);
+
 export class Telemetry {
   private tracer: Tracer | null = null;
   readonly enabled: boolean;
+  private readonly eventFilter?: TelemetryEventFilter;
 
-  constructor(enabled: boolean) {
+  constructor(enabled: boolean, eventFilter?: TelemetryEventFilter) {
     this.enabled = enabled;
+    this.eventFilter = eventFilter;
     if (enabled) {
       const otel = getOtel();
       if (otel) {
-        this.tracer = otel.trace.getTracer('@sorostream/sdk', '0.1.0');
+        this.tracer = otel.trace.getTracer('@sorostream/sdk', VERSION);
       }
     }
   }
 
+  /** Whether events of the given type pass the configured filter. */
+  shouldCollect(eventType: string): boolean {
+    const filter = this.eventFilter;
+    if (!filter) return true;
+    return typeof filter === 'function' ? filter(eventType) : filter.includes(eventType);
+  }
+
   startSpan(name: string, options?: SpanOptions): Span | null {
-    if (!this.tracer) return null;
+    if (!this.tracer || !this.shouldCollect(name)) return null;
     return this.tracer.startSpan(name, options);
   }
 
+  /**
+   * Queues a span to be ended as part of the next batch instead of emitting
+   * it immediately (issue #623). The original end time is preserved.
+   */
   endSpan(span: Span | null, attributes?: Attributes): void {
     if (!span) return;
-    if (attributes) span.setAttributes(attributes);
-    span.end();
+    this.pending.push({ span, attributes, endTime: Date.now() });
+    if (this.pending.length >= this.maxBatchSize) {
+      this.flush();
+    } else if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => this.flush(), this.flushIntervalMs);
+      const t = this.flushTimer as { unref?: () => void };
+      if (typeof t.unref === 'function') t.unref();
+    }
+  }
+
+  /** Number of finished spans waiting to be flushed. */
+  get pendingCount(): number {
+    return this.pending.length;
+  }
+
+  /** Ends all queued spans in a single batch. */
+  flush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    const batch = this.pending;
+    this.pending = [];
+    for (const { span, attributes, endTime } of batch) {
+      if (attributes) span.setAttributes(attributes);
+      span.end(endTime);
+    }
   }
 
   setAttributes(span: Span | null, attributes: Attributes): void {
