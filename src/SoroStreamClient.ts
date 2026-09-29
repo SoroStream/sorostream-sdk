@@ -13,6 +13,7 @@ import {
   Memo,
 } from '@stellar/stellar-sdk';
 import { BatchBuilder } from './batchBuilder.js';
+import { VERSION } from './version.js';
 import { EventPoller, unrefTimer } from './events.js';
 import { InMemoryEventBus, type IEventBus } from './eventBus.js';
 import { CrossTabSync, CrossTabEventBus } from './crossTabSync.js';
@@ -1299,7 +1300,7 @@ destroy(): void {
    * ```
    */
   async checkContractCompatibility(): Promise<import('./types.js').CompatibilityResult> {
-    const sdkVersion = '0.1.0'; // From package.json
+    const sdkVersion = VERSION; // From package.json / version.ts
     const minCompatibleVersion = MIN_COMPATIBLE_CONTRACT_VERSION;
     const maxCompatibleVersion = MAX_COMPATIBLE_CONTRACT_VERSION;
 
@@ -1549,7 +1550,7 @@ get isTelemetryEnabled(): boolean {
    * ```
    */
   diagnostics(): import('./types.js').DiagnosticsResult {
-    const sdkVersion = '0.1.0'; // From package.json
+    const sdkVersion = VERSION; // From package.json / version.ts
 
     // Determine wallet adapter display name.
     let walletAdapter: string | null = null;
