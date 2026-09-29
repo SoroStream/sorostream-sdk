@@ -17,6 +17,10 @@
           "type": "string",
           "description": "Optional custom RPC URL (overrides the default for `network`)."
         },
+        "cacheOptions": {
+          "$ref": "#/definitions/CacheConfigOptions",
+          "description": "Optional response caching configuration for read-only RPC calls (issue #528)."
+        },
         "circuitBreaker": {
           "$ref": "#/definitions/CircuitBreakerOptions",
           "description": "Optional circuit-breaker configuration for RPC calls."
@@ -39,6 +43,10 @@
             "maxDelayMs": {
               "type": "number",
               "description": "Maximum delay cap in ms (default: 5000)."
+            },
+            "transientOnly": {
+              "type": "boolean",
+              "description": "When true, only retry errors classified as transient (network errors, rate limits, 5xx server errors). Non-transient errors (contract errors, validation failures) are rethrown immediately without consuming retry budget. Defaults to false for backwards compatibility. Issue #363."
             }
           },
           "additionalProperties": false,
@@ -58,10 +66,37 @@
             "maxDelayMs": {
               "type": "number",
               "description": "Maximum delay cap in ms (default: 5000)."
+            },
+            "transientOnly": {
+              "type": "boolean",
+              "description": "When true, only retry errors classified as transient (network errors, rate limits, 5xx server errors). Non-transient errors (contract errors, validation failures) are rethrown immediately without consuming retry budget. Defaults to false for backwards compatibility. Issue #363."
             }
           },
           "additionalProperties": false,
           "description": "Retry policy for transaction submission RPC calls."
+        },
+        "rpcRetry": {
+          "type": "object",
+          "properties": {
+            "maxAttempts": {
+              "type": "number",
+              "description": "Maximum number of attempts (default: 3)."
+            },
+            "baseDelayMs": {
+              "type": "number",
+              "description": "Base delay in ms for exponential backoff (default: 200)."
+            },
+            "maxDelayMs": {
+              "type": "number",
+              "description": "Maximum delay cap in ms (default: 5000)."
+            },
+            "transientOnly": {
+              "type": "boolean",
+              "description": "When true, only retry errors classified as transient (network errors, rate limits, 5xx server errors). Non-transient errors (contract errors, validation failures) are rethrown immediately without consuming retry budget. Defaults to false for backwards compatibility. Issue #363."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Automatic retry policy with exponential backoff and jitter for transient RPC calls (issue #425)."
         },
         "contractVersion": {
           "$ref": "#/definitions/ContractVersion",
@@ -98,11 +133,51 @@
         "auditLog": {
           "type": "boolean",
           "description": "When true, write an audit log entry for each SDK write operation."
+        },
+        "auditLogger": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ],
+          "description": "Custom AuditLogger instance to receive audit log entries."
+        },
+        "cacheStreamState": {
+          "type": "boolean",
+          "description": "Whether to enable opt-in localStorage cache for last-known stream state."
+        },
+        "crossTabSync": {
+          "type": "boolean",
+          "description": "Whether to enable cross-tab event synchronization."
+        },
+        "skipPeerCheck": {
+          "type": "boolean",
+          "description": "Skip peer dependency version compatibility check."
+        },
+        "dedupeRequests": {
+          "type": "boolean",
+          "description": "Whether to deduplicate concurrent read requests (default: true)."
+        },
+        "batchReadSize": {
+          "type": "number",
+          "description": "Default batch read size for getStreams (default: 50)."
+        },
+        "telemetry": {
+          "type": "boolean",
+          "description": "Whether telemetry is enabled (default: true)."
+        },
+        "rpcVersion": {
+          "type": "string",
+          "enum": ["v1", "v2", "auto"],
+          "description": "RPC version setting ('v1' | 'v2' | 'auto')."
         }
       },
       "required": ["contractId"],
       "additionalProperties": false,
-      "description": "The JSON-serializable subset of `SoroStreamClientOptions` — the parts of a client config a non-TypeScript caller (a Python or Go script assembling a config payload) can meaningfully specify and validate.\n\nDeliberately excludes fields that bind to a runtime object with no JSON representation: `walletAdapter`, `transport`, `priceFeed`, `validateCliff`, `plugins`, `adapters`, and `feeBump` (its `sponsorAdapter` is a signer). This is the type `generateSchemas()` reflects to produce the `SoroStreamClientConfig` JSON Schema exported at `@sorostream/sdk/schemas`."
+      "description": "The JSON-serializable subset of `SoroStreamClientOptions` — the parts of a client config a non-TypeScript caller (a Python or Go script assembling a config payload) can meaningfully specify and validate.\n\nDeliberately excludes fields that bind to a runtime object with no JSON representation: `walletAdapter`, `transport`, `validateCliff`, `plugins`, `adapters`, `feeBump` (its `sponsorAdapter` is a signer), `eventBus`, `offlineQueue`, `onRecipientTrustScore`, `feeBumpMonitoring`, `logger`, and `auditLogger` (though we accept a string or object for a simple logger name or basic object). This is the type `generateSchemas()` reflects to produce the `SoroStreamClientConfig` JSON Schema exported at `@sorostream/sdk/schemas`."
     },
     "Network": {
       "type": "string",
@@ -159,6 +234,24 @@
       },
       "additionalProperties": false,
       "description": "Configuration for event batching on high-frequency streams."
+    },
+    "CacheConfigOptions": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether to enable in-memory response caching (default: true)."
+        },
+        "ttlMs": {
+          "type": "number",
+          "description": "Configurable TTL in milliseconds for cached read-only responses (default: 60000)."
+        },
+        "maxSize": {
+          "type": "number",
+          "description": "Maximum number of entries stored before LRU eviction occurs (default: 1000)."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "$id": "https://github.com/SoroStream/sorostream-sdk/blob/main/schemas/sorostream-client-config.schema.json"

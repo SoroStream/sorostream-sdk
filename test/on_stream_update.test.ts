@@ -68,7 +68,8 @@ describe('onStreamUpdate (#364)', () => {
     const stream1 = makeStream({ status: 'Active' });
     const stream2 = makeStream({ status: 'Cancelled' });
 
-    const getStream = vi.spyOn(client, 'getStream')
+    const getStream = vi
+      .spyOn(client, 'getStream')
       .mockResolvedValueOnce(stream1)
       .mockResolvedValueOnce(stream2);
 
@@ -81,12 +82,20 @@ describe('onStreamUpdate (#364)', () => {
     // First poll (immediate)
     await vi.advanceTimersByTimeAsync(0);
     expect(callback).toHaveBeenCalledTimes(1);
-    expect(callback).toHaveBeenNthCalledWith(1, { stream: stream1, previous: undefined, streamId: '42' });
+    expect(callback).toHaveBeenNthCalledWith(1, {
+      stream: stream1,
+      previous: undefined,
+      streamId: '42',
+    });
 
     // Second poll (after 100ms interval)
     await vi.advanceTimersByTimeAsync(100);
     expect(callback).toHaveBeenCalledTimes(2);
-    expect(callback).toHaveBeenNthCalledWith(2, { stream: stream2, previous: stream1, streamId: '42' });
+    expect(callback).toHaveBeenNthCalledWith(2, {
+      stream: stream2,
+      previous: stream1,
+      streamId: '42',
+    });
 
     sub.unsubscribe();
     getStream.mockRestore();

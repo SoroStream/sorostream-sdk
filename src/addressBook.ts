@@ -133,9 +133,7 @@ export class AddressBookValidationError extends Error {
 /** Thrown when `resolve` cannot find the alias and the value is not a raw address. */
 export class AddressBookNotFoundError extends Error {
   constructor(aliasOrAddress: string) {
-    super(
-      `AddressBook: "${aliasOrAddress}" is not a registered alias or a valid Stellar address.`,
-    );
+    super(`AddressBook: "${aliasOrAddress}" is not a registered alias or a valid Stellar address.`);
     this.name = 'AddressBookNotFoundError';
   }
 }
@@ -150,9 +148,7 @@ function validateAddress(alias: string, address: string): void {
   }
 }
 
-function normaliseImport(
-  data: AddressBookEntry[] | Record<string, string>,
-): AddressBookEntry[] {
+function normaliseImport(data: AddressBookEntry[] | Record<string, string>): AddressBookEntry[] {
   if (Array.isArray(data)) return data;
   return Object.entries(data).map(([alias, address]) => ({ alias, address }));
 }

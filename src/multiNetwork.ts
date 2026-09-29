@@ -179,9 +179,7 @@ export class MultiNetworkClient {
    * field of their result entry rather than rejecting the whole call.
    */
   async getStreamsByRecipientAllNetworks(recipient: string): Promise<MultiNetworkStreams> {
-    return this._fanOut((client) =>
-      client.getStreamsByRecipient(recipient).then(toStreamArray),
-    );
+    return this._fanOut((client) => client.getStreamsByRecipient(recipient).then(toStreamArray));
   }
 
   /**

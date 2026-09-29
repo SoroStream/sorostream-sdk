@@ -101,6 +101,7 @@ export type {
   StreamBalance,
   StreamStatus,
   CreateStreamParams,
+  CreateStreamDryRunResult,
   CloneStreamOverrides,
   EventHandler,
   WithdrawParams,

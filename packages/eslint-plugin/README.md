@@ -30,7 +30,7 @@ export default [
 }
 ```
 
-Both forms enable all three rules below as warnings. To configure rules individually:
+Both forms enable all four rules below as warnings. To configure rules individually:
 
 ```js
 // eslint.config.js
@@ -103,4 +103,33 @@ const client = new SoroStreamClient({
 const client = new SoroStreamClient({
   contractId: process.env.SOROSTREAM_CONTRACT_ID,
 });
+```
+
+### `no-magic-flow-rate`
+
+Warns when numeric literals are used for flowRate values instead of using the SDK's `toStroops()` or `ratePerSecond()` utilities. Hardcoded numeric flow rates are unreadable and error-prone.
+
+```js
+// ❌ Incorrect
+await client.updateFlowRate({ streamId: "123", newFlowRate: 1000000 });
+
+// ❌ Incorrect
+const params = { streamId: "123", flowRate: 1000000 };
+await client.updateFlowRate(params);
+
+// ✅ Correct
+await client.updateFlowRate({ 
+  streamId: "123", 
+  newFlowRate: toStroops("100") 
+});
+
+// ✅ Correct
+await client.updateFlowRate({ 
+  streamId: "123", 
+  newFlowRate: ratePerSecond(toStroops("10"), "day") 
+});
+
+// ✅ Correct (using a variable)
+const rate = calculateFlowRate(toStroops("100"), 3600);
+await client.updateFlowRate({ streamId: "123", newFlowRate: rate });
 ```

@@ -15,10 +15,10 @@ function makeStream(overrides: Partial<Stream> = {}): Stream {
     sender: 'GSENDER',
     recipient: 'GRECIPIENT',
     token: 'GTOKEN',
-    deposit: 10_000_000n,       // 1 USDC at 7 decimals
-    flowRate: 100n,              // 100 stroops/s
+    deposit: 10_000_000n, // 1 USDC at 7 decimals
+    flowRate: 100n, // 100 stroops/s
     startTime: BASE_TIME - 3600, // started 1 hour ago
-    endTime: BASE_TIME + 3600,   // ends in 1 hour (2-hour total)
+    endTime: BASE_TIME + 3600, // ends in 1 hour (2-hour total)
     lastWithdrawTime: BASE_TIME - 60, // withdrew 60 seconds ago
     status: 'Active',
     autoRenew: false,

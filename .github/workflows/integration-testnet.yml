@@ -1,32 +1,28 @@
-name: Integration
+name: integration-testnet
 
 on:
-  pull_request:
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/**'
 
 jobs:
-  integration:
+  integration-testnet:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Start local Soroban testnet
-        run: docker compose -f docker-compose.integration.yml up -d --wait
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Run integration suite
+      - name: Run integration suite against Soroban Testnet
         env:
           SOROSTREAM_INTEGRATION_CONTRACT_ID: ${{ vars.SOROSTREAM_INTEGRATION_CONTRACT_ID }}
           SOROSTREAM_INTEGRATION_TOKEN_ID: ${{ vars.SOROSTREAM_INTEGRATION_TOKEN_ID }}
+          TESTNET_SECRET_KEY: ${{ secrets.TESTNET_SECRET_KEY }}
         run: |
           bun install
           bun run test:integration
-
-      - name: Stop local Soroban testnet
-        if: always()
-        run: docker compose -f docker-compose.integration.yml down -v

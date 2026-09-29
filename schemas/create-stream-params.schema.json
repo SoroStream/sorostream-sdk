@@ -5,6 +5,10 @@
     "CreateStreamParams": {
       "type": "object",
       "properties": {
+        "dryRun": {
+          "type": "boolean",
+          "description": "If true, validate parameters and simulate via RPC without submitting (issue #439)."
+        },
         "recipient": {
           "type": "string",
           "description": "Beneficiary address."
@@ -46,9 +50,17 @@
           "type": "number",
           "description": "Unix timestamp (seconds) before which no withdrawals are allowed. Must be between startTime and endTime when provided. Enforced at contract level; the SDK validates this before submission."
         },
+        "startTime": {
+          "type": "number",
+          "description": "Optional Unix timestamp (seconds) for when the stream should start. Must not be earlier than the current ledger close time; the contract rejects past start times. The SDK warns and throws before submission when a past `startTime` is provided (issue #411)."
+        },
         "namespace": {
           "type": "string",
           "description": "Optional namespace for multi-tenant scoping (issue #274). Stored in the stream's metadata field. Filtering by namespace is off-chain only — the contract does not enforce isolation."
+        },
+        "tag": {
+          "type": "string",
+          "description": "Optional on-chain tag/label for project grouping (issue #433)."
         }
       },
       "required": ["recipient", "token", "amount", "durationSeconds", "autoRenew"],

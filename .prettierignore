@@ -6,3 +6,4 @@ docs/
 bench/
 examples/
 coverage/
+test/type-shapes/

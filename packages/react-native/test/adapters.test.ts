@@ -4,20 +4,14 @@
  * matching RN's actual JS runtime) to confirm the SDK does not crash and the
  * audit log round-trips through the AsyncStorage-backed adapter.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Imported from the SDK's source (rather than the `@sorostream/sdk` package
 // name) because npm workspaces does not self-link the monorepo root to
 // satisfy sibling packages' dependency on their own root package name.
 import { SoroStreamClient } from '../../../src/SoroStreamClient.js';
 import type { WalletAdapter } from '../../../src/types.js';
-import {
-  createAsyncStorageAdapter,
-  createReactNativeAdapters,
-  createExpoSecureStoreAdapter,
-  createExpoAdapters,
-  setupExpoPolyfills,
-} from '../src/index.js';
-import type { AsyncStorageLike, ExpoSecureStoreLike } from '../src/index.js';
+import { createAsyncStorageAdapter, createReactNativeAdapters, createFreighterMobileAdapter } from '../src/index.js';
+import type { AsyncStorageLike } = from '../src/index.js';
 
 const VALID_CONTRACT = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
 
@@ -40,14 +34,10 @@ function makeFakeAsyncStorage(): AsyncStorageLike {
   };
 }
 
-function makeFakeExpoSecureStore(): ExpoSecureStoreLike {
-  const store = new Map<string, string>();
-  return {
-    getItemAsync: async (key) => store.get(key) ?? null,
-    setItemAsync: async (key, value) => void store.set(key, value),
-    deleteItemAsync: async (key) => void store.delete(key),
-  };
-}
+// Mock Linking
+const mockLinking = {
+  openURL: vi.fn(),
+};
 
 describe('createAsyncStorageAdapter', () => {
   it('writes are readable immediately (in-memory cache)', () => {
@@ -72,31 +62,58 @@ describe('createAsyncStorageAdapter', () => {
   });
 });
 
-describe('createExpoSecureStoreAdapter (#654)', () => {
-  it('reads and writes to fake Expo SecureStore backend', async () => {
-    const secureStore = makeFakeExpoSecureStore();
-    await secureStore.setItemAsync('token', 'secret_val');
-
-    const adapter = createExpoSecureStoreAdapter(secureStore);
-    expect(adapter.getItem('token')).toBeNull(); // pending hydration
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(adapter.getItem('token')).toBe('secret_val');
-
-    adapter.setItem('newKey', 'newVal');
-    expect(adapter.getItem('newKey')).toBe('newVal');
+describe('createFreighterMobileAdapter', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('createExpoAdapters correctly selects secureStore or asyncStorage', () => {
-    const secureStore = makeFakeExpoSecureStore();
-    const adapters = createExpoAdapters({ secureStore });
-    expect(adapters.storage).toBeDefined();
+  it('should return a valid WalletAdapter', async () => {
+    const adapter = await createFreighterMobileAdapter();
+    expect(typeof adapter.isConnected).toBe('function');
+    expect(typeof adapter.getPublicKey).toBe('function');
+    expect(typeof adapter.signTransaction).toBe('function');
   });
 
-  it('setupExpoPolyfills sets global crypto if missing', () => {
-    const fakeCrypto = { getRandomValues: vi.fn() };
-    setupExpoPolyfills({ crypto: fakeCrypto as any });
-    expect(globalThis.crypto).toBeDefined();
+  describe('getPublicKey', () => {
+    it('should open the correct deep link URL for testnet', async () => {
+      // Mock Linking.openURL
+      vi.stubGlobal('Linking', mockLinking);
+
+      const adapter = await createFreighterMobileAdapter();
+      await adapter.getPublicKey();
+
+      expect(mockLinking.openURL).toHaveBeenCalledWith(
+        'freighter://sign/public-key?network=testnet'
+      );
+    });
+  });
+
+  describe('signTransaction', () => {
+    it('should open the correct deep link URL for testnet', async () => {
+      // Mock Linking.openURL
+      vi.stubGlobal('Linking', mockLinking);
+
+      const adapter = await createFreighterMobileAdapter();
+      const testXDR = 'test_xdr_string';
+      await adapter.signTransaction(testXDR, 'testnet');
+
+      expect(mockLinking.openURL).toHaveBeenCalledWith(
+        'freighter://sign/sign-tx?network=testnet&xdr=test_xdr_string'
+      );
+    });
+
+    it('should encode the XDR in the URL', async () => {
+      // Mock Linking.openURL
+      vi.stubGlobal('Linking', mockLinking);
+
+      const adapter = await createFreighterMobileAdapter();
+      const testXDR = 'special chars ?&=';
+      await adapter.signTransaction(testXDR, 'testnet');
+
+      expect(mockLinking.openURL).toHaveBeenCalledWith(
+        'freighter://sign/sign-tx?network=testnet&xdr=special%20chars%20%3F%26%3D'
+      );
+    });
   });
 });
 

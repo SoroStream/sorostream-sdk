@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { LobstrWalletAdapter, createLobstrWalletAdapter, createLobstrAdapter } from '../src/wallet.js';
+import {
+  LobstrWalletAdapter,
+  createLobstrWalletAdapter,
+  createLobstrAdapter,
+} from '../src/wallet.js';
 
 describe('Issue #431: Lobstr wallet adapter', () => {
   const originalWindow = (globalThis as any).window;
@@ -53,7 +57,9 @@ describe('Issue #431: Lobstr wallet adapter', () => {
     const adapter = createLobstrWalletAdapter({});
     expect(await adapter.isConnected()).toBe(false);
     await expect(adapter.getPublicKey()).rejects.toThrow('Lobstr wallet provider is not available');
-    await expect(adapter.signTransaction('xdr', 'testnet')).rejects.toThrow('Lobstr wallet provider is not available');
+    await expect(adapter.signTransaction('xdr', 'testnet')).rejects.toThrow(
+      'Lobstr wallet provider is not available',
+    );
   });
 
   it('supports event listener registration methods', () => {
@@ -68,5 +74,34 @@ describe('Issue #431: Lobstr wallet adapter', () => {
 
     unsubConnection();
     unsubNetwork();
+  });
+
+  it('isAvailable returns true when provider or publicKey is present', async () => {
+    const adapter = createLobstrWalletAdapter({ publicKey: 'GKEY' });
+    expect(await adapter.isAvailable()).toBe(true);
+  });
+
+  it('isAvailable returns true when window.lobstr exists', async () => {
+    (globalThis as any).window = { lobstr: { getPublicKey: async () => 'GLOBSTR' } };
+    const adapter = createLobstrWalletAdapter();
+    expect(await adapter.isAvailable()).toBe(true);
+  });
+
+  it('signTransaction routes via WalletConnect when extension is absent', async () => {
+    const wcAdapter = {
+      isConnected: vi.fn().mockResolvedValue(true),
+      getPublicKey: vi.fn().mockResolvedValue('GWALLETCONNECT'),
+      signTransaction: vi.fn().mockResolvedValue('wc_signed'),
+    };
+
+    const adapter = createLobstrWalletAdapter({
+      walletConnect: { projectId: 'test-project' } as any,
+    });
+
+    (adapter as any).walletConnectAdapter = wcAdapter;
+
+    const signed = await adapter.signTransaction('unsigned_xdr', 'testnet');
+    expect(signed).toBe('wc_signed');
+    expect(wcAdapter.signTransaction).toHaveBeenCalledWith('unsigned_xdr', 'testnet');
   });
 });

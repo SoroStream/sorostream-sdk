@@ -47,7 +47,9 @@
     "maxCompatibleVersion": "1.99.99"
   },
   "scripts": {
-    "build": "tsup src/index.ts src/core.ts src/wallets.ts src/batch.ts src/mock.ts src/testing.ts src/simulator.ts --format cjs,esm --dts --sourcemap --clean && npm run validate-exports",
+    "build": "tsup src/index.ts src/wallets.ts src/mock.ts src/testing.ts src/simulator.ts --format cjs,esm --dts --clean && npm run validate-exports",
+    "postbuild": "npm run generate-integrity",
+    "generate-integrity": "node scripts/generate-integrity-manifest.js",
     "test": "vitest run",
     "test:types": "tsc --noEmit",
     "test:treeshake": "npm run build && vitest run test/tree_shaking.test.ts",
@@ -66,6 +68,7 @@
     "docs": "typedoc",
     "validate-exports": "node scripts/validate-exports.js",
     "test:cjs": "node scripts/cjs-smoke-test.js",
+    "check:bundle-size": "node scripts/check-bundle-size.js",
     "prepublishOnly": "npm run validate-exports"
   },
   "keywords": [

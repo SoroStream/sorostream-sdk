@@ -222,8 +222,6 @@ describe('Issue #389 — auditLogger (caller-supplied logger)', () => {
       durationMs: 3,
     });
 
-    expect(loggedEntries[0]!.timestamp).toMatch(
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
-    );
+    expect(loggedEntries[0]!.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
 });

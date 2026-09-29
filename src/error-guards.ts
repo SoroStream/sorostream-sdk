@@ -138,7 +138,8 @@ export type ValidationError =
  * }
  * ```
  */
-export type AuthError = NonceNotSupportedError | SoroStreamDependencyError | TransactionMutatedError;
+export type AuthError =
+  NonceNotSupportedError | SoroStreamDependencyError | TransactionMutatedError;
 
 // ── Type guard functions ──────────────────────────────────────────────────────
 

@@ -270,7 +270,9 @@ export class StreamMonitor {
     this.abortController = ac;
 
     // Poll all streams concurrently — failure of one must not cancel others.
-    await Promise.allSettled(this.streamIds.map((streamId) => this.pollStream(streamId, ac.signal)));
+    await Promise.allSettled(
+      this.streamIds.map((streamId) => this.pollStream(streamId, ac.signal)),
+    );
   }
 
   private async pollStream(streamId: string, signal?: AbortSignal): Promise<void> {

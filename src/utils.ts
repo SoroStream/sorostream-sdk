@@ -371,6 +371,66 @@ export function fromRatePerSecond(stroopsPerSecond: bigint, unit: RateUnit = 'se
   return stroopsPerSecond * unitSeconds;
 }
 
+/** Seconds in one calendar month (30-day approximation). */
+const SECONDS_PER_MONTH = 2_592_000n; // 30n * 24n * 3600n
+
+/**
+ * Converts a stroop-per-second on-chain flow rate into a monthly amount
+ * using a 30-day month approximation.
+ *
+ * @param stroopsPerSecond - The raw on-chain flow rate in stroops/second.
+ * @returns Stroops that would flow in one 30-day month. Returns `0n` if the
+ *          rate is zero; never throws.
+ *
+ * @example
+ * ```ts
+ * const monthly = toRatePerMonth(stream.flowRate);
+ * console.log(formatUSDC(monthly)); // e.g. "300.0000000"
+ * ```
+ */
+export function toRatePerMonth(stroopsPerSecond: bigint): bigint {
+  if (stroopsPerSecond <= 0n) return 0n;
+  return stroopsPerSecond * SECONDS_PER_MONTH;
+}
+
+/**
+ * Converts an amount expressed per `fromUnit` into an equivalent amount per
+ * `toUnit` using integer arithmetic.
+ *
+ * Useful for displaying a per-day rate as a per-second on-chain value, or
+ * vice-versa. When the conversion involves a division that rounds to zero,
+ * `0n` is returned rather than throwing.
+ *
+ * @param amount   - Amount in `fromUnit` (e.g. stroops per day).
+ * @param fromUnit - The time unit `amount` is expressed in.
+ * @param toUnit   - The target time unit.
+ * @returns The converted amount in `toUnit`. Returns `0n` if the integer
+ *          result rounds to zero.
+ *
+ * @example
+ * ```ts
+ * // Convert 86 400 stroops/day → stroops/second
+ * const perSec = rateCalculator(86_400n, "day", "second"); // 1n
+ *
+ * // Convert 1 stroops/second → stroops/hour
+ * const perHour = rateCalculator(1n, "second", "hour"); // 3600n
+ * ```
+ */
+export function rateCalculator(amount: bigint, fromUnit: RateUnit, toUnit: RateUnit): bigint {
+  if (amount <= 0n) return 0n;
+  const fromSeconds = RATE_UNIT_SECONDS[fromUnit];
+  const toSeconds = RATE_UNIT_SECONDS[toUnit];
+  // amount / fromSeconds gives stroops-per-second; × toSeconds gives per-toUnit
+  const perSecond = amount / fromSeconds;
+  if (perSecond === 0n) {
+    // amount is smaller than one fromUnit-second-equivalent; scale differently
+    // to avoid losing everything: compute (amount * toSeconds) / fromSeconds
+    const result = (amount * toSeconds) / fromSeconds;
+    return result < 0n ? 0n : result;
+  }
+  return perSecond * toSeconds;
+}
+
 /**
  * Returns true when the stream's end time has passed.
  *
@@ -1893,8 +1953,7 @@ export function getStreamHealth(stream: Stream, now?: number): StreamHealthResul
 
   // Remaining balance = deposit − (flowRate × elapsed since start, capped at deposit)
   const streamedSoFar = stream.flowRate * BigInt(elapsedSeconds);
-  const remainingBalance =
-    stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
+  const remainingBalance = stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
 
   const secondsSinceLastWithdrawal =
     stream.lastWithdrawTime > 0 ? Math.max(0, nowSecs - stream.lastWithdrawTime) : 0;
@@ -1904,8 +1963,7 @@ export function getStreamHealth(stream: Stream, now?: number): StreamHealthResul
 
   // Check for stall: recipient hasn't withdrawn in > 10 % of stream duration
   const stallThreshold = Math.max(60, Math.floor(duration * 0.1));
-  const isStalled =
-    stream.lastWithdrawTime > 0 && secondsSinceLastWithdrawal > stallThreshold;
+  const isStalled = stream.lastWithdrawTime > 0 && secondsSinceLastWithdrawal > stallThreshold;
   if (isStalled) {
     const penalty = Math.min(40, Math.floor((secondsSinceLastWithdrawal / stallThreshold) * 20));
     score -= penalty;
@@ -1954,9 +2012,344 @@ export function getStreamHealth(stream: Stream, now?: number): StreamHealthResul
   };
 }
 
+// ── Issue #519: simulateStream ───────────────────────────────────────────────
+
+/**
+ * A single point-in-time snapshot in a simulated stream timeline.
+ */
+export interface StreamSimulationSnapshot {
+  /** Unix timestamp (seconds) for this snapshot. */
+  timestamp: number;
+  /** Tokens streamed from startTime to this point (in stroops). */
+  streamed: bigint;
+  /** Tokens remaining (deposit − streamed) at this point (in stroops). */
+  remaining: bigint;
+  /** Percentage of the total amount that has been streamed (0–100). */
+  percentComplete: number;
+}
+
+/**
+ * The result of {@link simulateStream}: a full offline simulation of a
+ * stream's token-flow timeline without any network calls.
+ */
+export interface StreamSimulationResult {
+  /** Unix timestamp (seconds) when the stream starts. */
+  startTime: number;
+  /** Unix timestamp (seconds) when the stream ends. */
+  endTime: number;
+  /** Duration of the stream in seconds. */
+  durationSeconds: number;
+  /** Tokens released per second (stroops). */
+  flowRate: bigint;
+  /** Total amount that will be streamed (stroops). May be slightly less than
+   * `amount` due to integer-division rounding of the flow rate. */
+  totalAmount: bigint;
+  /** Ordered timeline snapshots from 0 % to 100 %. */
+  snapshots: StreamSimulationSnapshot[];
+}
+
+/**
+ * Parameters for {@link simulateStream}.
+ */
+export interface SimulateStreamParams {
+  /** Total amount to stream in stroops. */
+  amount: bigint;
+  /** Stream duration in seconds. */
+  durationSeconds: number;
+  /**
+   * Optional Unix timestamp (seconds) for the stream start.
+   * Defaults to `Math.floor(Date.now() / 1000)`.
+   */
+  startTime?: number;
+}
+
+/**
+ * Simulates a stream's token-flow timeline entirely offline (no RPC calls).
+ *
+ * Returns the flow rate, start/end times, total streamable amount, and an
+ * ordered array of {@link StreamSimulationSnapshot} objects covering the full
+ * stream lifetime at regular intervals plus a guaranteed start and end point.
+ *
+ * Use this for integration tests and UI previews when testnet access is
+ * unavailable.
+ *
+ * Issue #519.
+ *
+ * @param params - Stream parameters: amount, durationSeconds, optional startTime.
+ * @param snapshotCount - Number of intermediate snapshots (default: 10).
+ * @returns A {@link StreamSimulationResult} with the full timeline.
+ *
+ * @throws {Error} When `amount` is 0 or negative.
+ * @throws {Error} When `durationSeconds` is 0 or negative.
+ *
+ * @example
+ * ```ts
+ * import { simulateStream, toStroops } from "@sorostream/sdk";
+ *
+ * const result = simulateStream({
+ *   amount: toStroops("100"),
+ *   durationSeconds: 3600,
+ * });
+ * console.log("flow rate:", result.flowRate, "stroops/s");
+ * console.log("snapshots:", result.snapshots.length);
+ * ```
+ */
+export function simulateStream(
+  params: SimulateStreamParams,
+  snapshotCount = 10,
+): StreamSimulationResult {
+  const { amount, durationSeconds, startTime: startTimeParam } = params;
+
+  if (amount <= 0n) {
+    throw new Error('simulateStream: amount must be > 0');
+  }
+  if (durationSeconds <= 0) {
+    throw new Error('simulateStream: durationSeconds must be > 0');
+  }
+
+  const startTime = startTimeParam ?? Math.floor(Date.now() / 1000);
+  const endTime = startTime + durationSeconds;
+
+  // Integer division: flowRate stroops/second
+  const flowRate = amount / BigInt(durationSeconds);
+  // Total amount actually streamable given integer arithmetic
+  const totalAmount = flowRate * BigInt(durationSeconds);
+
+  // Build intermediate timestamps at regular intervals
+  const count = Math.max(1, snapshotCount);
+  const step = durationSeconds / (count + 1);
+
+  const timestamps = new Set<number>();
+  timestamps.add(startTime);
+  for (let i = 1; i <= count; i++) {
+    const t = startTime + Math.round(step * i);
+    if (t < endTime) {
+      timestamps.add(t);
+    }
+  }
+  timestamps.add(endTime);
+
+  const sortedTimestamps = Array.from(timestamps).sort((a, b) => a - b);
+
+  const snapshots: StreamSimulationSnapshot[] = sortedTimestamps.map((ts) => {
+    const elapsedSec = Math.max(0, Math.min(ts - startTime, durationSeconds));
+    const streamed = flowRate * BigInt(elapsedSec);
+    const remaining = totalAmount - streamed;
+    const percentComplete = totalAmount > 0n ? Number((streamed * 100n) / totalAmount) : 0;
+    return { timestamp: ts, streamed, remaining, percentComplete };
+  });
+
+  return {
+    startTime,
+    endTime,
+    durationSeconds,
+    flowRate,
+    totalAmount,
+    snapshots,
+  };
+}
+
 export interface StreamMetadataFields {
   name?: string;
   description?: string;
   tags?: string[];
   meta?: Record<string, unknown>;
+}
+
+/**
+ * Redacts Stellar secret keys (S...), mnemonics, and private keys from strings and error messages (issue #525).
+ *
+ * @param input - The string to redact secret materials from.
+ * @returns The redacted string with placeholders.
+ */
+export function redactSecretKey(input: string): string {
+  if (!input) return input;
+  let result = input.replace(/\bS[A-Z2-7]{55}\b/g, '[REDACTED_SECRET_KEY]');
+  result = result.replace(
+    /\b(secretKey|secretSeed|privateKey|mnemonic|secret|seed)\s*[:=]\s*["']?[^"'\s,]+["']?/gi,
+    '$1=[REDACTED_SECRET]',
+  );
+  return result;
+}
+
+// ── Issue #441: subscribeToActivityFeed standalone utility ───────────────────
+
+/**
+ * Standalone utility that merges events from multiple streams into a single
+ * activity feed — useful for non-OOP usage patterns.
+ *
+ * Internally delegates to `client.subscribeToActivityFeed`, making this a
+ * thin convenience wrapper.
+ *
+ * @param client    - A connected `SoroStreamClient` instance.
+ * @param streamIds - Stream IDs to watch.
+ * @param callback  - Invoked with each activity feed entry as events arrive.
+ * @returns A `StreamSubscription` — call `.unsubscribe()` to stop watching.
+ *
+ * @example
+ * ```ts
+ * import { subscribeToActivityFeed } from '@sorostream/sdk';
+ *
+ * const feed = subscribeToActivityFeed(client, ['42', '43'], (entry) => {
+ *   console.log(`[${entry.type}] stream ${entry.streamId}`);
+ * });
+ * // later:
+ * feed.unsubscribe();
+ * ```
+ */
+export function subscribeToActivityFeed(
+  client: {
+    subscribeToActivityFeed(
+      streamIds: string[],
+      callback: (entry: import('./types.js').StreamActivityFeedEntry) => void,
+    ): import('./types.js').StreamSubscription;
+  },
+  streamIds: string[],
+  callback: (entry: import('./types.js').StreamActivityFeedEntry) => void,
+): import('./types.js').StreamSubscription {
+  return client.subscribeToActivityFeed(streamIds, callback);
+}
+
+// ── Issue #382: projectCost ───────────────────────────────────────────────────
+/**
+ * Returns the total cost in stroops for a stream running at `ratePerSecond`
+ * for `durationSeconds` seconds.
+ */
+export function projectCost(ratePerSecond: bigint, durationSeconds: number): bigint {
+  if (ratePerSecond <= 0n) throw new Error('ratePerSecond must be > 0');
+  if (durationSeconds <= 0) throw new Error('durationSeconds must be > 0');
+  return ratePerSecond * BigInt(Math.floor(durationSeconds));
+}
+
+// ── Issue #436: calculateStreamDelta ─────────────────────────────────────────
+/**
+ * Returns the increase in claimable amount since `previousClaimable` was
+ * recorded. Returns 0 when the stream is Paused, Cancelled, or Completed,
+ * and when the current claimable is not greater than the previous value.
+ */
+export function calculateStreamDelta(
+  stream: Stream,
+  previousClaimable: bigint,
+  now?: number,
+): bigint {
+  if (stream.status !== 'Active') return 0n;
+  let current: bigint;
+  if (now === undefined) {
+    current = claimableNow(stream);
+  } else {
+    const effectiveNow = Math.min(now, stream.endTime);
+    const elapsed = Math.max(0, effectiveNow - stream.lastWithdrawTime);
+    current = stream.flowRate * BigInt(elapsed);
+  }
+  const delta = current - previousClaimable;
+  return delta > 0n ? delta : 0n;
+}
+
+// ── Issue #397: batchGetStreamHealth ─────────────────────────────────────────
+/**
+ * Runs {@link getStreamHealth} on each stream and returns a combined result
+ * with per-stream entries and an aggregate summary.
+ */
+export function batchGetStreamHealth(
+  streams: Stream[],
+  now?: number,
+): {
+  entries: Array<{ streamId: string; health: StreamHealthResult }>;
+  summary: {
+    total: number;
+    healthy: number;
+    warning: number;
+    critical: number;
+    completed: number;
+    cancelled: number;
+  };
+} {
+  const entries = streams.map((s) => ({ streamId: s.id, health: getStreamHealth(s, now) }));
+  const summary = {
+    total: entries.length,
+    healthy: entries.filter((e) => e.health.status === 'healthy').length,
+    warning: entries.filter((e) => e.health.status === 'warning').length,
+    critical: entries.filter((e) => e.health.status === 'critical').length,
+    completed: entries.filter((e) => e.health.status === 'completed').length,
+    cancelled: entries.filter((e) => e.health.status === 'cancelled').length,
+  };
+  return { entries, summary };
+}
+
+// ── Issue #388: buildMetadataUri / parseMetadataUri ──────────────────────────
+const METADATA_URI_PREFIX = 'sorostream:v1?';
+const METADATA_URI_MAX_BYTES = 128;
+
+/**
+ * Serialises a flat key→value map into a `sorostream:v1?` URI.
+ * Keys are sorted alphabetically; undefined and empty-string values are omitted.
+ * Returns an empty string when no fields survive the filter.
+ * Throws when the resulting URI body exceeds {@link METADATA_URI_MAX_BYTES} bytes.
+ */
+export function buildMetadataUri(fields: Record<string, string | undefined>): string {
+  const pairs = Object.keys(fields)
+    .sort()
+    .filter((k) => fields[k] !== undefined && fields[k] !== '')
+    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(fields[k]!)}`);
+  if (pairs.length === 0) return '';
+  const body = pairs.join('&');
+  if (new TextEncoder().encode(body).length > METADATA_URI_MAX_BYTES) {
+    throw new Error(`Metadata URI body exceeds ${METADATA_URI_MAX_BYTES} bytes`);
+  }
+  return `${METADATA_URI_PREFIX}${body}`;
+}
+
+/**
+ * Parses a `sorostream:v1?` URI (or a plain query string for backward
+ * compatibility) back into a key→value map. Returns an empty object for
+ * unrecognised or malformed input.
+ */
+export function parseMetadataUri(uri: string): Record<string, string> {
+  if (!uri) return {};
+  let qs: string;
+  if (uri.startsWith(METADATA_URI_PREFIX)) {
+    qs = uri.slice(METADATA_URI_PREFIX.length);
+  } else if (uri.startsWith('sorostream:')) {
+    // sorostream:v1 without query string
+    return {};
+  } else if (uri.includes('://') || uri.startsWith('http')) {
+    // Non-sorostream URI
+    return {};
+  } else {
+    // Plain query string (backward-compat)
+    qs = uri;
+  }
+  if (!qs) return {};
+  const result: Record<string, string> = {};
+  for (const pair of qs.split('&')) {
+    const eqIdx = pair.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = decodeURIComponent(pair.slice(0, eqIdx));
+    const value = decodeURIComponent(pair.slice(eqIdx + 1));
+    result[key] = value;
+  }
+  return result;
+}
+
+// ── Issue #387: withFeeBump ───────────────────────────────────────────────────
+/**
+ * Wraps an inner transaction (or its base64 XDR) in a Stellar fee-bump
+ * envelope signed by `feeSource`.
+ */
+export function withFeeBump(
+  inner: Transaction | string,
+  feeSource: string,
+  opts?: { networkPassphrase?: string; baseFee?: number },
+): FeeBumpTransaction {
+  const passphrase = opts?.networkPassphrase ?? Networks.TESTNET;
+  const tx =
+    typeof inner === 'string'
+      ? (TransactionBuilder.fromXDR(inner, passphrase) as Transaction)
+      : inner;
+  return TransactionBuilder.buildFeeBumpTransaction(
+    feeSource,
+    String(opts?.baseFee ?? 100),
+    tx,
+    passphrase,
+  ) as FeeBumpTransaction;
 }

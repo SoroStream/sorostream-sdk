@@ -13,7 +13,11 @@ export type {
   SoroStreamAdapters,
 } from './adapters.js';
 
-export { createDefaultRpcTransport, createRetryingRpcTransport } from './transport.js';
+export {
+  createDefaultRpcTransport,
+  createRetryingRpcTransport,
+  createPooledRpcTransport,
+} from './transport.js';
 export type {
   RpcTransportAdapter,
   RpcTransportInitContext,
@@ -25,7 +29,8 @@ export { MockSoroStreamClient, SoroStreamSandbox } from './mock.js';
 export { StreamSimulator } from './simulator.js';
 export type { StreamExpiryCallback } from './simulator.js';
 
-export { WebhookForwarder } from './webhook.js';
+export { WebhookForwarder, WebhookEmitter } from './webhook.js';
+export type { WebhookEmitterConfig, WebhookEmitterPayload } from './webhook.js';
 export {
   toStroops,
   formatUSDC,
@@ -35,6 +40,10 @@ export {
   isFederationAddress,
   resolveFederationAddress,
   calculateFlowRate,
+  toRatePerSecond,
+  fromRatePerSecond,
+  rateCalculator,
+  toRatePerMonth,
   timeUntilStreamEnd,
   claimableNow,
   calculateVestingSchedule,
@@ -71,11 +80,26 @@ export {
   encodeStreamId,
   decodeStreamId,
   getStreamHealth,
+  simulateStream,
+  subscribeToActivityFeed,
+  projectCost,
+  calculateStreamDelta,
+  batchGetStreamHealth,
+  buildMetadataUri,
+  parseMetadataUri,
+  withFeeBump,
 } from './utils.js';
-export type { StreamMetadataFields } from './utils.js';
+export type {
+  StreamMetadataFields,
+  SimulateStreamParams,
+  StreamSimulationResult,
+  StreamSimulationSnapshot,
+  RateUnit,
+} from './utils.js';
 export { templates } from './templates.js';
-export { serializeStream, deserializeStream } from './serialization.js';
+export { serializeStream, deserializeStream, buildUnsignedXdr } from './serialization.js';
 export type { SerializedStream } from './serialization.js';
+export type { BuildUnsignedXdrParams } from './types.js';
 export { getTransactionHistory, getAddressActivity } from './horizon.js';
 export type {
   StreamTransaction,
@@ -92,6 +116,14 @@ export { ConnectionPool } from './connectionPool.js';
 export type { ConnectionPoolOptions, PoolEvent, PoolEventType } from './connectionPool.js';
 export { InMemoryEventBus } from './eventBus.js';
 export type { IEventBus, Unsubscribe } from './eventBus.js';
+export { PriorityRequestQueue, createRequestQueue } from './request-queue.js';
+export type {
+  RequestQueueConfig,
+  RequestPriority,
+  LaneStats,
+  QueueStats,
+  RateLimitDelayedPayload,
+} from './request-queue.js';
 export { RequestDeduplicator, dedupKey } from './requestDeduplicator.js';
 export type { RequestDedupStats, RequestDeduplicatorOptions } from './requestDeduplicator.js';
 export { SoroStreamObservable, shareLatest, observableSymbol } from './observable.js';
@@ -116,6 +148,7 @@ export {
   InsufficientAmountError,
   StreamNotFoundError,
   StreamNotActiveError,
+  StreamAlreadyLockedError,
   TransactionFailedError,
   InvalidAddressError,
   AccountNotFoundError,
@@ -132,7 +165,10 @@ export {
   SelfStreamError,
   SoroStreamTransportError,
   InsecureRpcUrlError,
+  SdkNetworkError,
+  XdrValidationError,
 } from './errors.js';
+export type { XdrValidationErrorCode } from './errors.js';
 export { assertEnvelopeUnmutated } from './xdrValidation.js';
 export { checkPeerDependencies } from './peerDependencies.js';
 export {
@@ -169,10 +205,15 @@ export type {
   StreamBalance,
   StreamStatus,
   CreateStreamParams,
+  CreateStreamDryRunResult,
   CloneStreamOverrides,
   EventHandler,
   WithdrawParams,
   CancelStreamParams,
+  DrainFlowParams,
+  DrainFlowResult,
+  ProjectCostResult,
+  ProjectStreamCost,
   TopUpParams,
   TransferStreamParams,
   PauseStreamParams,
@@ -186,6 +227,8 @@ export type {
   WalletAdapter,
   WalletAdapterSignResult,
   FeeEstimate,
+  StreamCostBreakdown,
+  SimulateStreamResult,
   VestingSchedulePoint,
   VestingScheduleResult,
   WatchClaimableOptions,
@@ -233,6 +276,7 @@ export type {
   StreamActivityEntry,
   StreamActivityType,
   GetActivityLogOptions,
+  StreamActivityFeedEntry,
   StreamFilterCriteria,
   StreamFilter,
   StreamSortField,
@@ -253,19 +297,23 @@ export type {
   OperationExplanation,
   BalanceDelta,
   SoroStreamClientConfig,
+  CacheConfigOptions,
   RecipientTrustScore,
   RecipientTrustScoreProvider,
   StreamHealthStatus,
   StreamHealthResult,
+  SoroStreamEmitter,
 } from './types.js';
 
-export { RecipientValidationError } from './errors.js';
-export {
-  StreamStateMachine,
-  InvalidStateTransitionError,
-} from './state-machine.js';
+export { ConnectionPoolExhaustedError, RecipientValidationError } from './errors.js';
+export { SanitizingLogger, NoopLogger, ConsoleLogger, createLogger } from './logger.js';
+export type { Logger, LogLevel, CreateLoggerOptions } from './logger.js';
+export { StreamStateMachine, InvalidStateTransitionError } from './state-machine.js';
 export type { StreamState, StreamAction } from './state-machine.js';
 export {
+  AlbedoWalletAdapter,
+  createAlbedoWalletAdapter,
+  createAlbedoAdapter,
   LobstrWalletAdapter,
   createLobstrWalletAdapter,
   createLobstrAdapter,
@@ -273,7 +321,12 @@ export {
   createLedgerWalletAdapter,
   createLedgerAdapter,
 } from './wallet.js';
-export type { LobstrWalletAdapterConfig, LedgerWalletAdapterConfig, RequestOptions } from './types.js';
+export type {
+  AlbedoWalletAdapterConfig,
+  LobstrWalletAdapterConfig,
+  LedgerWalletAdapterConfig,
+  RequestOptions,
+} from './types.js';
 export { PluginRegistry } from './pluginRegistry.js';
 export { getPortfolioStats } from './portfolioAnalytics.js';
 export { scheduleFeeBumpMonitor } from './feeBump.js';
@@ -281,6 +334,25 @@ export { createFeeRetryMiddleware, FeeRetryError } from './feeRetryMiddleware.js
 export type { FeeRetryMiddlewareOptions } from './feeRetryMiddleware.js';
 export { createFederationPlugin } from './federationPlugin.js';
 export type { FederationPluginOptions } from './federationPlugin.js';
-export type { PaginatedEvents, StreamEvent as IndexerStreamEvent, StreamEventType as IndexerStreamEventType } from './indexer.js';
-export { VERSION, SDK_VERSION } from './version.js';
+export type {
+  PaginatedEvents,
+  StreamEvent as IndexerStreamEvent,
+  StreamEventType as IndexerStreamEventType,
+} from './indexer.js';
 
+// ── Issue #515: Multi-network client ────────────────────────────────────────
+export {
+  MultiNetworkClient,
+  MultiNetworkConfigError,
+  MultiNetworkNotFoundError,
+} from './multiNetwork.js';
+export type { NetworkConfig, NetworkedStream, MultiNetworkStreams } from './multiNetwork.js';
+
+// ── Issue #526: Bundle integrity manifest ───────────────────────────────────
+export {
+  computeSha256,
+  generateIntegrityManifest,
+  verifyFileIntegrity,
+  verifyManifest,
+} from './bundleIntegrity.js';
+export type { IntegrityEntry, IntegrityManifest } from './bundleIntegrity.js';

@@ -44,6 +44,8 @@ const STREAM_EVENT_NAMES = new Set([
   'StreamPaused',
   'StreamResumed',
   'StreamTransferred',
+  // Issue #516: WithdrawalMade is an alias for StreamWithdrawn in the typed emitter
+  'WithdrawalMade',
 ]);
 
 export function unrefTimer(

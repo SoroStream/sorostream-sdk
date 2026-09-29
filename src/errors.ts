@@ -1,10 +1,22 @@
+import { redactSecretKey } from './utils.js';
+
 // See ERRORS.md for cause, typical trigger, and recovery guidance for each
 // error class below, and which SoroStreamClient methods throw them.
 
 export class SoroStreamError extends Error {
   constructor(message: string) {
-    super(message);
+    super(redactSecretKey(message));
     this.name = 'SoroStreamError';
+  }
+}
+
+export class ConnectionPoolExhaustedError extends SoroStreamError {
+  constructor(message?: string) {
+    super(
+      message ??
+        'Connection pool exhausted: maximum subscription limit reached across all connections',
+    );
+    this.name = 'ConnectionPoolExhaustedError';
   }
 }
 
@@ -29,10 +41,36 @@ export class StreamNotActiveError extends SoroStreamError {
   }
 }
 
+export class StreamAlreadyLockedError extends SoroStreamError {
+  readonly streamId: string;
+  readonly currentLockUntil: number;
+  readonly requestedLockUntil: number;
+
+  constructor(streamId: string, currentLockUntil: number, requestedLockUntil: number) {
+    super(
+      `Stream ${streamId} is already locked until ${currentLockUntil}. ` +
+        `Cannot set lock to ${requestedLockUntil}.`,
+    );
+    this.name = 'StreamAlreadyLockedError';
+    this.streamId = streamId;
+    this.currentLockUntil = currentLockUntil;
+    this.requestedLockUntil = requestedLockUntil;
+  }
+}
+
 export class TransactionFailedError extends SoroStreamError {
   constructor(details: string) {
     super(`Transaction failed: ${details}`);
     this.name = 'TransactionFailedError';
+  }
+}
+
+export class RateLimitExceededError extends SoroStreamError {
+  constructor(queueDepth: number, queueLimit: number) {
+    super(`Rate limit exceeded: ${queueDepth}/${queueLimit}`);
+    this.name = 'RateLimitExceededError';
+    this.queueDepth = queueDepth;
+    this.queueLimit = queueLimit;
   }
 }
 
@@ -368,9 +406,90 @@ export class TransactionMutatedError extends SoroStreamError {
   }
 }
 
+/** Structured machine-readable codes for {@link XdrValidationError}. */
+export type XdrValidationErrorCode =
+  /** Malformed / undecodable XDR string. */
+  | 'INVALID_XDR'
+  /** The decoded envelope decodes but does not match the submitted transaction. */
+  | 'ENVELOPE_MUTATED'
+  /** The submitted transaction was an unexpected type (e.g. fee-bump). */
+  | 'UNEXPECTED_TRANSACTION_TYPE';
+
+/**
+ * Thrown by XDR envelope validation (`assertEnvelopeUnmutated`, issue #546)
+ * when the signed XDR returned by a wallet adapter cannot be decoded or no
+ * longer describes the transaction that was submitted for signing.
+ *
+ * Extends the SDK's error hierarchy so callers can `instanceof`-check, and
+ * carries a structured {@link XdrValidationErrorCode} field for machine-driven
+ * error handling.
+ */
+export class XdrValidationError extends SoroStreamError {
+  /** Structured machine-readable error code. */
+  readonly code: XdrValidationErrorCode;
+
+  constructor(code: XdrValidationErrorCode, message: string) {
+    super(message);
+    this.name = 'XdrValidationError';
+    this.code = code;
+  }
+}
+
 export class WalletConnectSessionExpiredError extends SoroStreamError {
   constructor(message?: string) {
     super(message || 'WalletConnect session expired');
     this.name = 'WalletConnectSessionExpiredError';
+  }
+}
+
+/**
+ * Thrown when the Soroban RPC endpoint returns a non-JSON response body
+ * (e.g. an HTML error page, a plain-text gateway message, or a 502 from a
+ * proxy). The raw response body and HTTP status code are attached so callers
+ * can log or display a meaningful message instead of a bare `SyntaxError`.
+ *
+ * Issue #521.
+ */
+export class SdkNetworkError extends SoroStreamError {
+  /** Raw response body text returned by the server. */
+  readonly rawBody: string;
+  /** HTTP status code, if available. */
+  readonly statusCode: number | undefined;
+
+  constructor(message: string, rawBody: string, statusCode?: number) {
+    super(message);
+    this.name = 'SdkNetworkError';
+    this.rawBody = rawBody;
+    this.statusCode = statusCode;
+  }
+}
+
+/**
+ * Thrown when a connected wallet reports a network that does not match the
+ * client's configured network (issue #559).
+ *
+ * For example, the client is configured for `mainnet` but the connected
+ * wallet (e.g. Freighter) is set to `testnet`. The error message names both
+ * networks so callers can surface a clear mismatch to the user.
+ *
+ * Handlers that prefer to react instead of throw can subscribe to the
+ * `wallet:network-mismatch` event bus event via
+ * `client.on('wallet:network-mismatch', handler)`.
+ */
+export class NetworkMismatchError extends SoroStreamError {
+  /** The network the client is configured to use. */
+  readonly expected: string;
+  /** The network the connected wallet is actually on. */
+  readonly actual: string;
+
+  constructor(expected: string, actual: string) {
+    super(
+      `Wallet network mismatch: client is configured for "${expected}" but the ` +
+        `connected wallet reports "${actual}". Pass the matching network to the ` +
+        `client constructor, or switch the wallet's network.`,
+    );
+    this.name = 'NetworkMismatchError';
+    this.expected = expected;
+    this.actual = actual;
   }
 }

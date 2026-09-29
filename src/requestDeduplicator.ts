@@ -102,13 +102,12 @@ export class RequestDeduplicator {
       this.peakInFlight = this.inFlight.size;
     }
 
-    // Release the slot on settle. `then` with both handlers never rejects,
-    // so this bookkeeping chain can't surface an unhandled rejection — the
-    // rejection is still delivered to every caller through `shared` itself.
-    const release = (): void => {
+    // Release the slot on settle. `finally` ensures cleanup runs whether the
+    // promise fulfills or rejects, preventing leaks from timeouts or other
+    // rejection scenarios.
+    shared.finally(() => {
       if (this.inFlight.get(key) === shared) this.inFlight.delete(key);
-    };
-    shared.then(release, release);
+    });
 
     return shared;
   }

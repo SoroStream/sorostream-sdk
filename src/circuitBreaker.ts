@@ -31,7 +31,8 @@ export class CircuitBreaker {
 
     try {
       const result = await fn();
-      if (this.state === 'HALF_OPEN') {
+      // Reset failure count on success in any state
+      if (this.state === 'HALF_OPEN' || this.state === 'CLOSED') {
         this.reset();
       }
       return result;

@@ -48,6 +48,16 @@ export interface RequestQueueConfig {
   priorityLanes?: string[];
 }
 
+/**
+ * Per-request priority level (issue #566).
+ *
+ * - `"high"` — user-initiated, latency-sensitive actions (health checks,
+ *   user-initiated withdrawals). Jumps ahead of `"normal"` and `"low"`.
+ * - `"normal"` — the default for ordinary SDK operations.
+ * - `"low"` — background polling and best-effort work that can wait.
+ */
+export type RequestPriority = 'high' | 'normal' | 'low';
+
 /** Per-lane queue depth reported by {@link PriorityRequestQueue.getStats}. */
 export interface LaneStats {
   /** Number of requests waiting in queue for this lane. */
@@ -84,7 +94,19 @@ interface QueuedItem {
   reject: (reason: unknown) => void;
   /** Monotonic timestamp when this item was enqueued, for wait estimation. */
   enqueuedAt: number;
+  /**
+   * Per-request priority (issue #566). Higher-priority items are drained
+   * before lower-priority ones regardless of the lane they were enqueued to.
+   */
+  priority: RequestPriority;
 }
+
+/** Numeric rank used to compare {@link RequestPriority} values. */
+const PRIORITY_RANK: Record<RequestPriority, number> = {
+  high: 0,
+  normal: 1,
+  low: 2,
+};
 
 // ── PriorityRequestQueue ───────────────────────────────────────────────────────
 
@@ -136,8 +158,13 @@ export class PriorityRequestQueue {
    * @param lane - A lane name from `priorityLanes` (e.g. `"write"` or `"read"`).
    *               If the lane is not registered, it is added as the lowest priority.
    * @param task - An async function to execute once a slot is free.
+   * @param options - Optional settings. `priority` selects the per-request
+   *   priority level (issue #566): `"high"` items are drained before
+   *   `"normal"` and `"low"` items even when they were enqueued later.
    */
-  enqueue<T>(lane: string, task: Task<T>): Promise<T> {
+  enqueue<T>(lane: string, task: Task<T>, options?: { priority?: RequestPriority }): Promise<T> {
+    const priority = options?.priority ?? 'normal';
+
     // Lazily register unknown lanes at lowest priority.
     if (!this.queues.has(lane)) {
       this.queues.set(lane, []);
@@ -160,6 +187,7 @@ export class PriorityRequestQueue {
         resolve: resolve as (v: unknown) => void,
         reject,
         enqueuedAt: Date.now(),
+        priority,
       };
       laneQueue.push(item);
 
@@ -189,6 +217,24 @@ export class PriorityRequestQueue {
     let n = 0;
     for (const q of this.queues.values()) n += q.length;
     return n;
+  }
+
+  /**
+   * Returns a promise that resolves once every enqueued task has completed
+   * (queue empty and no in-flight work remaining). Useful in tests and
+   * shutdown paths to wait for the queue to fully drain.
+   */
+  waitForDrain(): Promise<void> {
+    if (this.totalQueued === 0 && this.totalInFlight === 0) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      const tick = () => {
+        if (this.totalQueued === 0 && this.totalInFlight === 0) resolve();
+        else setTimeout(tick, 5);
+      };
+      setTimeout(tick, 5);
+    });
   }
 
   // ── Internal ────────────────────────────────────────────────────────────────
@@ -230,16 +276,52 @@ export class PriorityRequestQueue {
   }
 
   /**
-   * Picks the next item from the highest-priority non-empty queue.
+   * Picks the next item to run when a concurrency slot opens up.
+   *
+   * Items are selected by per-request priority first (high before normal
+   * before low, issue #566), then by enqueue order (FIFO), then by lane
+   * order. This lets a `"high"`-priority health check jump ahead of a
+   * `"low"`-priority background poll even when they were enqueued into the
+   * same lane — the queue is not lane-strict FIFO, it is priority-ordered.
    */
   private dequeueNext(): QueuedItem | null {
-    for (const lane of this.priorityLanes) {
+    let best: QueuedItem | null = null;
+    let bestRank = Infinity;
+    let bestEnqueuedAt = Infinity;
+    let bestLaneIndex = Infinity;
+
+    for (let li = 0; li < this.priorityLanes.length; li++) {
+      const lane = this.priorityLanes[li]!;
       const queue = this.queues.get(lane);
-      if (queue && queue.length > 0) {
-        return queue.shift()!;
+      if (!queue || queue.length === 0) continue;
+
+      // Scan every item in the lane — a later-enqueued high-priority item
+      // must be able to jump ahead of an earlier low-priority one.
+      for (let qi = 0; qi < queue.length; qi++) {
+        const item = queue[qi]!;
+        const rank = PRIORITY_RANK[item.priority];
+        if (
+          rank < bestRank ||
+          (rank === bestRank &&
+            (item.enqueuedAt < bestEnqueuedAt ||
+              (item.enqueuedAt === bestEnqueuedAt && li < bestLaneIndex)))
+        ) {
+          best = item;
+          bestRank = rank;
+          bestEnqueuedAt = item.enqueuedAt;
+          bestLaneIndex = li;
+        }
       }
     }
-    return null;
+
+    if (!best) return null;
+
+    // Remove the chosen item from its lane's queue.
+    const lane = best.lane;
+    const queue = this.queues.get(lane)!;
+    const idx = queue.indexOf(best);
+    if (idx >= 0) queue.splice(idx, 1);
+    return best;
   }
 
   private recordDuration(ms: number): void {

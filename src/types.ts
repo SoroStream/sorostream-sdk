@@ -1,3 +1,4 @@
+import type { rpc } from '@stellar/stellar-sdk';
 import type { FetchAdapter, WebSocketFactory } from './adapters.js';
 import type { CircuitBreakerOptions } from './circuitBreaker.js';
 import type { RetryOptions } from './retry.js';
@@ -16,7 +17,10 @@ export type StreamEventType =
   | 'StreamToppedUp'
   | 'StreamPaused'
   | 'StreamResumed'
-  | 'StreamTransferred';
+  | 'StreamTransferred'
+  /** Alias emitted by the typed EventEmitter when a withdrawal is confirmed
+   * (issue #516). Semantically equivalent to `StreamWithdrawn`. */
+  | 'WithdrawalMade';
 
 export interface StreamEvent<TData = Record<string, unknown>> {
   type: StreamEventType;
@@ -29,6 +33,36 @@ export interface StreamEvent<TData = Record<string, unknown>> {
 
 /** Typed event handler utility type. */
 export type EventHandler<TData = Record<string, unknown>> = (event: StreamEvent<TData>) => void;
+
+/**
+ * Typed event emitter interface for SDK stream lifecycle events (issue #516).
+ *
+ * Consumers can subscribe to individual events or all events. The emitter
+ * deduplicates repeated events from Horizon poll results so each unique
+ * `txHash` fires each handler exactly once.
+ *
+ * Implemented by {@link SoroStreamClient}.
+ */
+export interface SoroStreamEmitter<TData = Record<string, unknown>> {
+  /**
+   * Subscribe to a specific stream lifecycle event by type.
+   * Returns a {@link StreamSubscription} — call `.unsubscribe()` to stop.
+   */
+  on(eventType: StreamEventType, callback: (event: StreamEvent<TData>) => void): StreamSubscription;
+
+  /**
+   * Subscribe to all stream lifecycle events regardless of type.
+   * Returns a {@link StreamSubscription} — call `.unsubscribe()` to stop.
+   */
+  onAny(callback: (event: StreamEvent<TData>) => void): StreamSubscription;
+
+  /**
+   * Programmatically emit a stream event to all matching subscribers.
+   * Deduplication is applied: a given `txHash` is only dispatched once
+   * per subscription.
+   */
+  emit(event: StreamEvent<TData>): void;
+}
 
 export interface StreamSubscription {
   unsubscribe(): void;
@@ -182,6 +216,8 @@ export interface Stream {
 
 /** Parameters for creating a new stream. */
 export interface CreateStreamParams {
+  /** If true, validate parameters and simulate via RPC without submitting (issue #439). */
+  dryRun?: boolean;
   /** Beneficiary address. */
   recipient: string;
   /** SAC token contract address. */
@@ -256,6 +292,30 @@ export interface CancelStreamParams {
   streamId: string;
 }
 
+/** Parameters for draining a stream (issue #558). */
+export interface DrainFlowParams {
+  /** Stream ID to drain. */
+  streamId: string;
+}
+
+/** Result of a successful drainFlow operation (issue #558). */
+export interface DrainFlowSuccess {
+  ok: true;
+  cancelTxHash: string;
+  withdrawTxHash: string;
+  amount: string;
+}
+
+/** Result of a partial drainFlow failure (issue #558). */
+export interface DrainFlowPartialFailure {
+  ok: false;
+  cancelResult: { txHash: string };
+  withdrawError: Error;
+}
+
+/** Result of a drainFlow operation (issue #558). */
+export type DrainFlowResult = DrainFlowSuccess | DrainFlowPartialFailure;
+
 /** Parameters for topping up a stream. */
 export interface TopUpParams {
   /** Stream ID to top up. */
@@ -273,6 +333,41 @@ export interface FeeEstimate {
   totalFee: number;
   /** Soroban resource fee in stroops. */
   minResourceFee: number;
+}
+
+/**
+ * Structured cost breakdown returned by {@link SoroStreamClient.getStreamCost}.
+ *
+ * All fee values are in stroops. `totalInAsset` expresses the same total
+ * converted to the stream's token denomination using the standard
+ * 10^7 stroops-per-unit ratio. Issue #520.
+ */
+export interface StreamCostBreakdown {
+  /** Soroban resource fee component in stroops. */
+  resourceFee: number;
+  /** Base transaction fee component in stroops. */
+  baseFee: number;
+  /** Total fee (resourceFee + baseFee) in stroops. */
+  totalFee: number;
+  /**
+   * Total fee expressed in the stream asset's denomination
+   * (stroops / 10_000_000).
+   */
+  totalInAsset: string;
+}
+
+export interface SimulateStreamResult {
+  /** Estimated fee in stroops from the simulation response. */
+  fee: number;
+  /** Transaction footprint returned by the Soroban RPC simulation. */
+  footprint: {
+    readOnly: unknown[];
+    readWrite: unknown[];
+  };
+  /** Whether the simulation succeeded. */
+  isValid: boolean;
+  /** Error details when `isValid` is `false`. */
+  error?: string;
 }
 
 /** Result of batch cancellation. */
@@ -496,6 +591,16 @@ export interface WalletAdapter {
   getPublicKey(): Promise<string>;
   signTransaction(xdr: string, network: Network): Promise<string>;
   isConnected(): Promise<boolean>;
+  /**
+   * Optional: report the network the wallet itself is currently pointed at
+   * (issue #559). Used by the client during `connect()` to detect a mismatch
+   * between the configured network and the wallet's actual network.
+   *
+   * Adapters that cannot determine the wallet's network (server-side keypair
+   * adapters, etc.) simply omit this method — the client then cannot perform
+   * network-mismatch detection and proceeds without it.
+   */
+  getNetwork?(): Promise<Network>;
   /**
    * Optional: subscribe to wallet-initiated network changes (issue #215).
    * Called with the new network whenever the connected wallet switches
@@ -759,6 +864,8 @@ export type MemoHash = Uint8Array;
 export interface WriteOptions {
   /** If true, simulate only without submitting. */
   simulateOnly?: boolean;
+  /** If true, validate parameters and simulate via RPC without submitting (issue #439). */
+  dryRun?: boolean;
   /** Optional AbortSignal to cancel in-flight transaction polling. */
   signal?: AbortSignal;
   /** Override fee-bump for this specific transaction. */
@@ -1099,6 +1206,26 @@ export interface GetActivityLogOptions {
   cursor?: string;
 }
 
+/**
+ * A single entry in a merged multi-stream activity feed (issue #441).
+ * Produced by `subscribeToActivityFeed` when an event arrives for any of the
+ * watched streams.
+ */
+export interface StreamActivityFeedEntry {
+  /** ID of the stream that emitted this event. */
+  streamId: string;
+  /** Type of on-chain event. */
+  type: StreamEventType;
+  /** Transaction hash. */
+  txHash: string;
+  /** Raw ledger number. */
+  ledger: number;
+  /** Unix timestamp (ms) of the ledger close. */
+  timestamp: number;
+  /** Event-specific data payload. */
+  data: Record<string, unknown>;
+}
+
 // ── Issue #73: Stream snapshot export/import ─────────────────────────────────
 
 /** A history entry recording a past event on a stream. */
@@ -1263,6 +1390,8 @@ export interface SoroStreamEventMap {
   'stream.cancelled': StreamCancelledEventPayload;
   'rpc.error': RpcErrorEventPayload;
   walletAdapterChanged: WalletAdapterChangedEventPayload;
+  'wallet:switched': WalletSwitchedEventPayload;
+  'wallet:network-mismatch': WalletNetworkMismatchEventPayload;
   cacheInvalidated: CacheInvalidatedEventPayload;
   requestDeduplicated: RequestDeduplicatedEventPayload;
 }
@@ -1296,6 +1425,40 @@ export interface WalletAdapterChangedEventPayload {
   previousAdapter: WalletAdapter;
 }
 
+/**
+ * Payload emitted on the `"wallet:switched"` event bus event when
+ * {@link SoroStreamClient.setWalletAdapter} replaces the active signing
+ * provider (issue #562).
+ *
+ * In-flight write operations that were initiated under the previous wallet
+ * still complete with that wallet; only new operations use the new one.
+ */
+export interface WalletSwitchedEventPayload {
+  /** Stellar address of the wallet that was replaced. */
+  previous: string | null;
+  /** Stellar address of the newly active wallet. */
+  next: string | null;
+  /** Identifier for the new adapter, if provided. */
+  identifier?: string;
+}
+
+/**
+ * Payload emitted on the `"wallet:network-mismatch"` event bus event when a
+ * connected wallet reports a network that differs from the client's
+ * configured network (issue #559).
+ *
+ * Subscribing to this event lets callers handle the mismatch gracefully
+ * instead of having the SDK throw a {@link NetworkMismatchError}.
+ */
+export interface WalletNetworkMismatchEventPayload {
+  /** The network the client is configured to use. */
+  expected: Network;
+  /** The network the connected wallet is actually on. */
+  actual: Network;
+  /** The adapter whose network was checked. */
+  adapter: WalletAdapter;
+}
+
 /** Configuration options for KmsWalletAdapter (issue #306). */
 export interface KmsWalletAdapterConfig {
   /** The public key (Stellar address) corresponding to the KMS key. */
@@ -1304,12 +1467,24 @@ export interface KmsWalletAdapterConfig {
   sign: (payload: Uint8Array) => Promise<Uint8Array>;
 }
 
+/** Configuration options for AlbedoWalletAdapter (issue #430). */
+export interface AlbedoWalletAdapterConfig {
+  /** Optional public key pre-configured for the adapter. */
+  publicKey?: string;
+  /** Optional custom Albedo provider object or window.albedo reference. */
+  provider?: any;
+  /** Optional network override (e.g. "testnet" | "mainnet"). */
+  network?: Network;
+}
+
 /** Configuration options for LobstrWalletAdapter (issue #431). */
 export interface LobstrWalletAdapterConfig {
   /** Optional public key pre-configured for the adapter. */
   publicKey?: string;
   /** Optional custom Lobstr provider object or window.lobstr reference. */
   provider?: any;
+  /** Optional WalletConnect v2 config used when the browser extension is absent (issue #561). */
+  walletConnect?: WalletConnectV2AdapterConfig;
 }
 
 /** Configuration options for LedgerWalletAdapter (issue #432). */
@@ -1324,12 +1499,18 @@ export interface LedgerWalletAdapterConfig {
   transportType?: 'webusb' | 'webhid' | 'custom';
 }
 
-/** Result shape returned by SoroStreamClient.healthCheck (issue #308). */
+/** Result shape returned by SoroStreamClient.healthCheck (issue #308, #518). */
 export interface HealthCheckResult {
   /** True if RPC endpoint responded successfully within timeout. */
   rpcReachable: boolean;
   /** Round-trip latency in milliseconds, or null on failure. */
   latencyMs: number | null;
+  /**
+   * True when the configured contract address is deployed and reachable on
+   * the network, false when the contract could not be verified or the RPC
+   * was unreachable (issue #518).
+   */
+  contractReachable: boolean;
   /** Optional error message when rpcReachable is false. */
   error?: string;
 }
@@ -1399,6 +1580,15 @@ export interface ObserveStreamOptions {
 
 // ── Issue #267: JSON Schema generation ───────────────────────────────────────
 
+export interface CacheConfigOptions {
+  /** Whether to enable in-memory response caching (default: true). */
+  enabled?: boolean;
+  /** Configurable TTL in milliseconds for cached read-only responses (default: 60000). */
+  ttlMs?: number;
+  /** Maximum number of entries stored before LRU eviction occurs (default: 1000). */
+  maxSize?: number;
+}
+
 /**
  * The JSON-serializable subset of `SoroStreamClientOptions` — the parts of a
  * client config a non-TypeScript caller (a Python or Go script assembling a
@@ -1417,10 +1607,20 @@ export interface SoroStreamClientConfig {
   contractId: string;
   /** Optional custom RPC URL (overrides the default for `network`). */
   rpcUrl?: string;
+  /** Optional response caching configuration for read-only RPC calls (issue #528). */
+  cacheOptions?: CacheConfigOptions;
   /** Optional circuit-breaker configuration for RPC calls. */
   circuitBreaker?: CircuitBreakerOptions;
   /** Maximum time in ms to wait for a transaction to confirm (default: 120000). */
   txTimeoutMs?: number;
+  /**
+   * Per-method timeout overrides in ms (issue #565).
+   * `read` applies to getStream/getClaimable/simulate reads.
+   * `write` applies to create/withdraw/cancel/topUp/etc.
+   * `simulate` applies to simulateTransaction calls.
+   * Each method-specific value falls back to `txTimeoutMs` when omitted.
+   */
+  timeouts?: { read?: number; write?: number; simulate?: number };
   /** Retry policy for read methods (getStream, getClaimable, etc.). */
   readRetry?: Omit<RetryOptions, 'signal'>;
   /** Retry policy for transaction submission RPC calls. */
@@ -1479,6 +1679,24 @@ export interface SoroStreamClientConfig {
   transport?: any;
   /** RPC version setting ('v1' | 'v2' | 'auto'). */
   rpcVersion?: 'v1' | 'v2' | 'auto';
+  /**
+   * Optional structured logger for SDK diagnostic messages (issue #437).
+   *
+   * When provided, the SDK emits `debug` / `info` messages for RPC calls,
+   * retries, and state transitions through this logger. Use `createLogger()`
+   * from `@sorostream/sdk` to construct a ready-to-use logger, or pass any
+   * object that satisfies the `Logger` interface (pino, winston, console, …).
+   *
+   * @example
+   * ```ts
+   * import { SoroStreamClient, createLogger } from '@sorostream/sdk';
+   * const client = new SoroStreamClient({
+   *   contractId: '...',
+   *   logger: createLogger({ minLevel: 'debug' }),
+   * });
+   * ```
+   */
+  logger?: import('./logger.js').Logger;
 }
 
 /** Portfolio statistics aggregated across all of an address's streams. Issue #336. */
@@ -1505,6 +1723,19 @@ export interface IPluginRegistry {
   ): void;
   list(): SoroStreamPlugin[];
   unregister(plugin: SoroStreamPlugin): boolean;
+  /**
+   * Runs the `before` hook of all registered plugins in topological order.
+   * @param operation - Name of the operation being invoked.
+   * @param context   - Arguments / context for the operation.
+   */
+  runBefore(operation: string, context: MiddlewareContext): Promise<void>;
+  /**
+   * Runs the `after` hook of all registered plugins in topological order.
+   * @param operation - Name of the operation that just completed.
+   * @param context   - Arguments / context for the operation.
+   * @param result    - Return value produced by the operation.
+   */
+  runAfter(operation: string, context: MiddlewareContext, result: unknown): Promise<void>;
 }
 
 /** Partial configuration update accepted by `updateConfig`. */
@@ -1545,4 +1776,102 @@ export interface StreamHealthResult {
   secondsSinceLastWithdrawal: number;
   /** Human-readable diagnostics messages (empty when status is healthy). */
   diagnostics: string[];
+}
+
+/** Cost breakdown for a single stream (issue #556). */
+export interface ProjectStreamCost {
+  /** Stream ID. */
+  streamId: string;
+  /** Token contract address. */
+  token: string;
+  /** Projected total cost in stroops (flowRate × duration). */
+  projectedCost: bigint;
+  /** Already withdrawn amount in stroops. */
+  withdrawn: bigint;
+  /** Net remaining cost = projectedCost - withdrawn. */
+  netCost: bigint;
+}
+
+/** Aggregate project cost result (issue #556). */
+export interface ProjectCostResult {
+  /** Total net cost across all streams in stroops. */
+  total: bigint;
+  /** Per-stream cost breakdown. */
+  byStream: ProjectStreamCost[];
+  /** Per-token aggregate. */
+  byToken: TokenAggregate[];
+}
+
+/** Parameters for draining a stream (issue #558). */
+export interface DrainFlowParams {
+  /** Stream ID to drain. */
+  streamId: string;
+}
+
+/** Result of a successful drainFlow operation (issue #558). */
+export interface DrainFlowSuccess {
+  ok: true;
+  cancelTxHash: string;
+  withdrawTxHash: string;
+  amount: string;
+}
+
+/** Result of a partial drainFlow failure (issue #558). */
+export interface DrainFlowPartialFailure {
+  ok: false;
+  cancelResult: { txHash: string };
+  withdrawError: Error;
+}
+
+/** Result of a drainFlow operation (issue #558). */
+export type DrainFlowResult = DrainFlowSuccess | DrainFlowPartialFailure;
+
+/** Parameter options for buildUnsignedXdr helper (issue #438). */
+export interface BuildUnsignedXdrParams {
+  /** The deployed contract address (required if operation is a method name string). */
+  contractId?: string;
+  /** Source account public key (Stellar address) or Account instance. */
+  sourceAccount: string | any;
+  /** Sequence number for the transaction (default: "0"). */
+  sequenceNumber?: string | number | bigint;
+  /** Target network ("testnet" | "mainnet" | "futurenet"). */
+  network?: Network;
+  /** Network passphrase override. */
+  networkPassphrase?: string;
+  /** Base fee in stroops (default: "100"). */
+  fee?: string | number;
+  /** Transaction timeout in seconds (default: 30). */
+  timeout?: number;
+  /** Optional transaction memo string. */
+  memo?: string;
+  /** Contract version ("v1" | "v2"). */
+  contractVersion?: ContractVersion;
+
+  // Operation arguments
+  recipient?: string;
+  token?: string;
+  amount?: bigint | string | number;
+  durationSeconds?: number;
+  startTime?: number;
+  cliffSeconds?: number;
+  autoRenew?: boolean;
+  namespace?: string;
+  streamId?: string;
+  sender?: string;
+  newFlowRate?: bigint | string | number;
+  newRecipient?: string;
+  operator?: string;
+  approved?: boolean;
+  delegate?: string;
+  delegator?: string;
+  [key: string]: any;
+}
+
+export interface CreateStreamDryRunResult {
+  dryRun: true;
+  simulated: boolean;
+  expectedFee: string;
+  minResourceFee: string;
+  result: unknown;
+  params: CreateStreamParams;
 }

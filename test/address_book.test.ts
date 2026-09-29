@@ -12,7 +12,7 @@ import type { StorageAdapter } from '../src/adapters.js';
 
 // Valid Stellar G-addresses used in tests
 const ALICE = 'GAXXZ5XSL2VTQPGWB3LPU5273HSJXMK7VHLZTF2XKW65QFZVA3XKULQZ';
-const BOB   = 'GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF';
+const BOB = 'GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF';
 const CAROL = 'GAZ6TMAM2LER4Z6BVPB3VK6GFRAALRLL543HMZLMXZVRLM24MK6CDEAQ';
 
 afterEach(() => vi.restoreAllMocks());
@@ -164,8 +164,12 @@ describe('PersistedAddressBook', () => {
     return {
       store,
       getItem: (k) => store[k] ?? null,
-      setItem: (k, v) => { store[k] = v; },
-      removeItem: (k) => { delete store[k]; },
+      setItem: (k, v) => {
+        store[k] = v;
+      },
+      removeItem: (k) => {
+        delete store[k];
+      },
     };
   }
 

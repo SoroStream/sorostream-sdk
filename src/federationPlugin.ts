@@ -32,7 +32,7 @@ import { isFederationAddress, resolveFederationAddress } from './utils.js';
 import { FederationResolutionError } from './errors.js';
 import type { FetchAdapter } from './adapters.js';
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────
 
 /** Options for {@link createFederationPlugin}. */
 export interface FederationPluginOptions {
@@ -44,6 +44,13 @@ export interface FederationPluginOptions {
    * Default: 300 000 ms (5 minutes).
    */
   cacheTtlMs?: number;
+
+  /**
+   * TTL in milliseconds for caching failed (negative) federation lookups.
+   * After this duration, a failed lookup will be retried.
+   * Default: 60 000 ms (60 seconds).
+   */
+  negativeCacheTtlMs?: number;
 
   /**
    * Custom `fetch` implementation. Useful for server-side environments or
@@ -69,14 +76,14 @@ export interface FederationPluginOptions {
   onResolved?: (federationAddress: string, stellarAddress: string, fromCache: boolean) => void;
 }
 
-// ── Cache entry ───────────────────────────────────────────────────────────────
+// ── Cache entry ────────────────────────────────────────────────────────
 
 interface CacheEntry {
-  stellarAddress: string;
+  stellarAddress: string | null;
   expiresAt: number;
 }
 
-// ── Factory ──────────────────────────────────────────────────────────────────
+// ── Factory ────────────────────────────────────────────────────────────
 
 /**
  * Creates a {@link SoroStreamPlugin} that intercepts `createStream` calls and
@@ -109,6 +116,7 @@ interface CacheEntry {
  */
 export function createFederationPlugin(options: FederationPluginOptions = {}): SoroStreamPlugin {
   const cacheTtlMs = options.cacheTtlMs ?? 300_000; // 5 minutes
+  const negativeCacheTtlMs = options.negativeCacheTtlMs ?? 60_000; // 60 seconds
   const fetchImpl: FetchAdapter = options.fetch ?? (globalThis.fetch as FetchAdapter);
   const throwOnFailure = options.throwOnResolutionFailure ?? false;
   const onResolved = options.onResolved;
@@ -120,7 +128,7 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): S
    * Returns the cached stellar address for `federationAddress` if the entry
    * is still within TTL, otherwise `undefined`.
    */
-  function getCached(federationAddress: string): string | undefined {
+  function getCached(federationAddress: string): string | null | undefined {
     const entry = cache.get(federationAddress);
     if (!entry) return undefined;
     if (Date.now() > entry.expiresAt) {
@@ -131,12 +139,13 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): S
   }
 
   /**
-   * Stores a resolved stellar address in the cache.
+   * Stores a resolved stellar address (or null for negative) in the cache.
    */
-  function setCached(federationAddress: string, stellarAddress: string): void {
+  function setCached(federationAddress: string, stellarAddress: string | null): void {
+    const ttlMs = stellarAddress === null ? negativeCacheTtlMs : cacheTtlMs;
     cache.set(federationAddress, {
       stellarAddress,
-      expiresAt: Date.now() + cacheTtlMs,
+      expiresAt: Date.now() + ttlMs,
     });
   }
 
@@ -147,7 +156,10 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): S
   async function resolve(federationAddress: string): Promise<string | null> {
     const cached = getCached(federationAddress);
     if (cached !== undefined) {
-      onResolved?.(federationAddress, cached, true);
+      // cached could be null (negative) or a string (positive)
+      if (cached !== null) {
+        onResolved?.(federationAddress, cached, true);
+      }
       return cached;
     }
 
@@ -165,6 +177,8 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): S
               err instanceof Error ? err.message : String(err),
             );
       }
+      // Cache the negative result
+      setCached(federationAddress, null);
       // Silent failure — let the address through unchanged; downstream
       // validation (InvalidAddressError) will catch the bad format.
       return null;

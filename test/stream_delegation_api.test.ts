@@ -94,9 +94,9 @@ describe('Issue #329 — grantDelegate/revokeDelegateFromStream (Mock)', () => {
   });
 
   it('revokeDelegateFromStream throws for a non-existent stream', async () => {
-    await expect(
-      mock.revokeDelegateFromStream('nonexistent-stream', DELEGATE_A),
-    ).rejects.toThrow(/Stream not found/);
+    await expect(mock.revokeDelegateFromStream('nonexistent-stream', DELEGATE_A)).rejects.toThrow(
+      /Stream not found/,
+    );
   });
 
   it('delegates are scoped to their stream — different streams have independent delegate lists', async () => {
@@ -167,8 +167,8 @@ describe('Issue #329 — grantDelegate/revokeDelegateFromStream (SoroStreamClien
   });
 
   it('revokeDelegateFromStream throws InvalidAddressError for a bad delegate address', async () => {
-    await expect(
-      client.revokeDelegateFromStream('stream-1', 'not-an-address'),
-    ).rejects.toThrow(/invalid.*address/i);
+    await expect(client.revokeDelegateFromStream('stream-1', 'not-an-address')).rejects.toThrow(
+      /invalid.*address/i,
+    );
   });
 });

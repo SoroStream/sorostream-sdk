@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import type { GlobalOptions } from './commands.js';
 import {
-  cmdCreate,
   cmdGet,
   cmdList,
   cmdWithdraw,
@@ -10,8 +9,10 @@ import {
   cmdTopUp,
   cmdClaimable,
   cmdForecast,
+  cmdStreamCreate,
 } from './commands.js';
 import { cmdAnalyze } from './analyze.js';
+import { OUTPUT_FORMATS } from './output.js';
 
 const program = new Command();
 
@@ -22,24 +23,30 @@ program
   .requiredOption('-c, --contract-id <address>', 'StreamContract address')
   .option('-n, --network <network>', 'Stellar network (mainnet/testnet/futurenet)', 'testnet')
   .option('-r, --rpc <urls...>', 'RPC URL(s) — specify multiple for failover')
+  .addOption(
+    new Option('-o, --output <format>', 'Output format for results')
+      .choices([...OUTPUT_FORMATS])
+      .default('json'),
+  )
   .requiredOption(
     '-s, --secret <key>',
     'Stellar secret key (or set SOROSTREAM_SECRET env var)',
     process.env.SOROSTREAM_SECRET,
   );
 
-// --- create ----------------------------------------------------------------
+// --- stream create ---------------------------------------------------------
 program
-  .command('create')
+  .command('stream create')
   .description('Create a new payment stream')
-  .requiredOption('--recipient <address>', 'Recipient Stellar address')
-  .requiredOption('--token <address>', 'Token contract address (e.g. USDC)')
-  .requiredOption('--amount <usdc>', 'Amount in USDC (e.g. 100.50)')
-  .requiredOption('--duration <seconds>', 'Duration in seconds', parseInt)
+  .option('--recipient <address>', 'Recipient Stellar address')
+  .option('--token <address>', 'Token contract address (e.g. USDC)')
+  .option('--amount <usdc>', 'Amount in USDC (e.g. 100.50)')
+  .option('--duration <seconds>', 'Duration in seconds', parseInt)
   .option('--auto-renew', 'Enable auto-renewal', false)
+  .option('--json', 'Read all params from flags non-interactively (for CI use)', false)
   .action(async (opts) => {
     const global = program.opts<GlobalOptions>();
-    await cmdCreate({ ...global, ...opts });
+    await cmdStreamCreate({ ...global, ...opts });
   });
 
 // --- list ------------------------------------------------------------------

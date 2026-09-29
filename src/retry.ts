@@ -1,12 +1,38 @@
 import { SoroStreamRetryExhaustedError } from './errors.js';
 import type { RetryAttempt } from './errors.js';
 
+/**
+ * Applies a ±25% jitter to a raw exponential backoff delay.
+ *
+ * Spreads retry load across a window so that clients recovering from a
+ * transient outage do not all retry simultaneously (the "thundering herd"
+ * problem). The jittered value is bounded to the raw delay:
+ *   jittered ∈ [rawDelay × 0.75, rawDelay × 1.25]
+ *
+ * @param rawDelayMs - The capped exponential delay in ms.
+ * @returns The jittered delay in ms, rounded down to an integer.
+ */
+export function jitterDelay(rawDelayMs: number): number {
+  if (rawDelayMs <= 0) return 0;
+  const jitter = rawDelayMs * 0.25;
+  const min = rawDelayMs - jitter;
+  const max = rawDelayMs + jitter;
+  return Math.floor(min + Math.random() * (max - min));
+}
+
 export interface RetryOptions {
   /** Maximum number of attempts (default: 3). */
   maxAttempts?: number;
   /** Base delay in ms for exponential backoff (default: 200). */
   baseDelayMs?: number;
-  /** Maximum delay cap in ms (default: 5000). */
+  /**
+   * Maximum delay cap in ms (default: 30_000).
+   *
+   * The computed backoff for attempt N is `min(maxDelayMs, baseDelayMs * 2^N)`.
+   * A jitter of ±25% is applied on top of the capped value to spread retry
+   * load and avoid thundering-herd resynchronization when many clients recover
+   * from a transient outage simultaneously.
+   */
   maxDelayMs?: number;
   /** Optional AbortSignal to cancel retries mid-flight. */
   signal?: AbortSignal;
@@ -76,7 +102,8 @@ export function isTransientRpcError(err: unknown): boolean {
     const obj = err as Record<string, unknown>;
 
     // HTTP status code checks
-    const status = obj['status'] ?? (obj['response'] as Record<string, unknown> | undefined)?.['status'];
+    const status =
+      obj['status'] ?? (obj['response'] as Record<string, unknown> | undefined)?.['status'];
     if (typeof status === 'number') {
       if (status === 429 || status === 502 || status === 503 || status === 504) {
         return true;
@@ -117,7 +144,16 @@ export class RetryBackoff {
 
   constructor(options?: { baseDelayMs?: number; maxDelayMs?: number }) {
     this.baseDelayMs = options?.baseDelayMs ?? 200;
-    this.maxDelayMs = options?.maxDelayMs ?? 5_000;
+    this.maxDelayMs = options?.maxDelayMs ?? 30_000;
+  }
+
+  /**
+   * Computes the capped exponential backoff for an attempt index.
+   * @param attempt - Zero-based attempt index.
+   * @returns The capped delay in ms: `min(maxDelayMs, baseDelayMs * 2^attempt)`.
+   */
+  private cappedDelay(attempt: number): number {
+    return Math.min(this.maxDelayMs, this.baseDelayMs * 2 ** attempt);
   }
 
   /**
@@ -130,14 +166,19 @@ export class RetryBackoff {
 
   /**
    * Records a failed request and returns the next backoff delay.
+   *
+   * The raw exponential delay (`min(maxDelayMs, baseDelayMs * 2^attempt)`) is
+   * first computed, then a jitter of ±25% is applied to spread retry load
+   * across a window and avoid thundering-herd resynchronization when many
+   * clients recover from a transient outage simultaneously.
+   *
    * @param key - The request identifier.
    * @returns The delay in ms before the next retry attempt.
    */
   onFailure(key: string): number {
     const attempt = this.attemptCounts.get(key) ?? 0;
     this.attemptCounts.set(key, attempt + 1);
-    const cap = Math.min(this.maxDelayMs, this.baseDelayMs * 2 ** attempt);
-    return Math.floor(Math.random() * cap);
+    return jitterDelay(this.cappedDelay(attempt));
   }
 
   /**
@@ -166,10 +207,16 @@ export class RetryBackoff {
 }
 
 /**
- * Wraps an async function with configurable exponential-backoff retry and full jitter.
+ * Wraps an async function with configurable exponential-backoff retry and
+ * ±25% jitter.
  *
- * Uses the AWS "full jitter" formula to spread retry load:
- *   delay = random(0, min(maxDelayMs, baseDelayMs * 2^attempt))
+ * Each retry delay is computed as:
+ *   rawDelay = min(maxDelayMs, baseDelayMs * 2^attempt)
+ *   delay    = jitter(rawDelay)  // ±25% spread
+ *
+ * The jitter spreads retry load across a window so that clients recovering
+ * from a transient outage do not all retry simultaneously (the "thundering
+ * herd" problem). The `maxDelayMs` cap is respected (default 30 s).
  *
  * When `transientOnly: true` is set, only errors matching {@link isTransientRpcError}
  * are retried. Non-transient errors (contract errors, validation failures, etc.) are
@@ -185,7 +232,7 @@ export class RetryBackoff {
 export async function withRetry<T>(fn: () => Promise<T>, options?: RetryOptions): Promise<T> {
   const maxAttempts = options?.maxAttempts ?? 3;
   const baseDelayMs = options?.baseDelayMs ?? 200;
-  const maxDelayMs = options?.maxDelayMs ?? 5_000;
+  const maxDelayMs = options?.maxDelayMs ?? 30_000;
   const signal = options?.signal;
 
   // Issue #363: determine whether a given error should be retried.
@@ -236,7 +283,7 @@ export async function withRetry<T>(fn: () => Promise<T>, options?: RetryOptions)
 
       if (attempt < maxAttempts - 1) {
         const cap = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
-        const delay = Math.floor(Math.random() * cap);
+        const delay = jitterDelay(cap);
         await new Promise<void>((resolve) => setTimeout(resolve, delay));
       }
     }

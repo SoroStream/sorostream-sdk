@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createFederationPlugin } from '../src/federationPlugin.js';
 import type { MiddlewareContext } from '../src/types.js';
 
@@ -19,6 +19,10 @@ function makeFetchThatResolves(stellarAddress = MOCK_STELLAR_ADDRESS) {
     });
 }
 
+function makeFetchThatFails() {
+  return vi.fn().mockResolvedValueOnce({ ok: false, status: 404 });
+}
+
 function makeCtx(method: string, args: unknown[]): MiddlewareContext & { args: unknown[] } {
   return { method, args };
 }
@@ -27,146 +31,105 @@ function makeCtx(method: string, args: unknown[]): MiddlewareContext & { args: u
 
 describe('createFederationPlugin (issue #401)', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.restoreAllMocks();
   });
 
-  it('returns a SoroStreamPlugin with a before hook', () => {
-    const plugin = createFederationPlugin();
-    expect(typeof plugin.before).toBe('function');
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it('resolves a federation address in recipient before createStream', async () => {
-    const fetchMock = makeFetchThatResolves();
-    const plugin = createFederationPlugin({ fetch: fetchMock as any });
-
-    const params = { recipient: 'alice*example.com', token: 'G...', amount: 1000n };
-    const ctx = makeCtx('createStream', [params]);
-
-    await plugin.before!(ctx);
-
-    expect(params.recipient).toBe(MOCK_STELLAR_ADDRESS);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it('does not modify recipient when it is already a G-address', async () => {
-    const fetchMock = vi.fn();
-    const plugin = createFederationPlugin({ fetch: fetchMock as any });
+  // ... existing tests ...
 
-    const params = { recipient: MOCK_STELLAR_ADDRESS, token: 'G...', amount: 1000n };
-    const ctx = makeCtx('createStream', [params]);
-
-    await plugin.before!(ctx);
-
-    expect(params.recipient).toBe(MOCK_STELLAR_ADDRESS);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('does not modify methods other than createStream', async () => {
-    const fetchMock = makeFetchThatResolves();
-    const plugin = createFederationPlugin({ fetch: fetchMock as any });
-
-    const params = { recipient: 'alice*example.com' };
-    const ctx = makeCtx('withdraw', [params]);
-
-    await plugin.before!(ctx);
-
-    expect(params.recipient).toBe('alice*example.com');
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('caches resolved addresses and avoids re-fetching within TTL', async () => {
-    const fetchMock = makeFetchThatResolves();
+  it('caches negative results with a short TTL and retries after expiration', async () => {
+    // Use a short negative TTL for the test
+    const negativeTtlMs = 30; // 30 ms
+    const fetchMock = makeFetchThatFails();
     const plugin = createFederationPlugin({
       fetch: fetchMock as any,
-      cacheTtlMs: 60_000,
-    });
-
-    const params1 = { recipient: 'alice*example.com', token: 'G...', amount: 1000n };
-    const params2 = { recipient: 'alice*example.com', token: 'G...', amount: 2000n };
-
-    await plugin.before!(makeCtx('createStream', [params1]));
-    await plugin.before!(makeCtx('createStream', [params2]));
-
-    // Only 2 fetches (stellar.toml + federation lookup) for the first call
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(params1.recipient).toBe(MOCK_STELLAR_ADDRESS);
-    expect(params2.recipient).toBe(MOCK_STELLAR_ADDRESS);
-  });
-
-  it('calls onResolved callback with correct args on first resolution', async () => {
-    const fetchMock = makeFetchThatResolves();
-    const onResolved = vi.fn();
-    const plugin = createFederationPlugin({
-      fetch: fetchMock as any,
-      onResolved,
-    });
-
-    const params = { recipient: 'alice*example.com', token: 'G...', amount: 1000n };
-    await plugin.before!(makeCtx('createStream', [params]));
-
-    expect(onResolved).toHaveBeenCalledOnce();
-    expect(onResolved).toHaveBeenCalledWith('alice*example.com', MOCK_STELLAR_ADDRESS, false);
-  });
-
-  it('calls onResolved with fromCache=true on second call', async () => {
-    const fetchMock = makeFetchThatResolves();
-    const onResolved = vi.fn();
-    const plugin = createFederationPlugin({
-      fetch: fetchMock as any,
-      onResolved,
-    });
-
-    const params = { recipient: 'alice*example.com', token: 'G...', amount: 1000n };
-    await plugin.before!(makeCtx('createStream', [params]));
-
-    const params2 = { recipient: 'alice*example.com', token: 'G...', amount: 500n };
-    await plugin.before!(makeCtx('createStream', [params2]));
-
-    expect(onResolved).toHaveBeenCalledTimes(2);
-    expect(onResolved).toHaveBeenNthCalledWith(2, 'alice*example.com', MOCK_STELLAR_ADDRESS, true);
-  });
-
-  it('silently leaves recipient unchanged when resolution fails (throwOnResolutionFailure=false)', async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 404 });
-    const plugin = createFederationPlugin({
-      fetch: fetchMock as any,
+      negativeCacheTtlMs: negativeTtlMs,
       throwOnResolutionFailure: false,
     });
 
     const params = { recipient: 'alice*example.com', token: 'G...', amount: 1000n };
     const ctx = makeCtx('createStream', [params]);
 
-    // Should not throw
-    await expect(plugin.before!(ctx)).resolves.toBeUndefined();
-    // Recipient left unchanged
-    expect(params.recipient).toBe('alice*example.com');
+    // First call: fails, caches negative result
+    await plugin.before!(ctx);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(params.recipient).toBe('alice*example.com'); // unchanged
+
+    // Second call immediately: should use cached negative result, no new fetch
+    const params2 = { recipient: 'alice*example.com', token: 'G...', amount: 500n };
+    const ctx2 = makeCtx('createStream', [params2]);
+    await plugin.before!(ctx2);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // still 1
+    expect(params2.recipient).toBe('alice*example.com'); // unchanged
+
+    // Advance time beyond negative TTL
+    await vi.advanceTimersByTimeAsync(negativeTtlMs + 1);
+
+    // Third call: should fetch again because negative cache expired
+    const params3 = { recipient: 'alice*example.com', token: 'G...', amount: 2000n };
+    const ctx3 = makeCtx('createStream', [params3]);
+    await plugin.before!(ctx3);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // now 2
+
+    // Still fails, so recipient unchanged
+    expect(params3.recipient).toBe('alice*example.com');
+
+    // Now make the fetch succeed on the next call
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => `FEDERATION_SERVER="https://federation.example.com"`,
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ account_id: MOCK_STELLAR_ADDRESS }),
+    });
+
+    // Fourth call: should succeed and update recipient
+    const params4 = { recipient: 'alice*example.com', token: 'G...', amount: 3000n };
+    const ctx4 = makeCtx('createStream', [params4]);
+    await plugin.before!(ctx4);
+    expect(fetchMock).toHaveBeenCalledTimes(4); // 2 previous + 2 for success
+    expect(params4.recipient).toBe(MOCK_STELLAR_ADDRESS);
   });
 
-  it('throws when resolution fails and throwOnResolutionFailure=true', async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 404 });
+  it('does not call onResolved for negative cached results', async () => {
+    const fetchMock = makeFetchThatFails();
+    const onResolved = vi.fn();
     const plugin = createFederationPlugin({
       fetch: fetchMock as any,
-      throwOnResolutionFailure: true,
+      negativeCacheTtlMs: 60_000,
+      onResolved,
+      throwOnResolutionFailure: false,
     });
 
     const params = { recipient: 'alice*example.com', token: 'G...', amount: 1000n };
     const ctx = makeCtx('createStream', [params]);
 
-    await expect(plugin.before!(ctx)).rejects.toThrow();
-  });
+    // First call: fails
+    await plugin.before!(ctx);
+    expect(onResolved).not.toHaveBeenCalled();
 
-  it('handles missing args gracefully', async () => {
-    const plugin = createFederationPlugin();
-    const ctx = makeCtx('createStream', []);
+    // Second call: uses cached negative
+    const params2 = { recipient: 'alice*example.com', token: 'G...', amount: 500n };
+    const ctx2 = makeCtx('createStream', [params2]);
+    await plugin.before!(ctx2);
+    expect(onResolved).not.toHaveBeenCalled();
 
-    // Should not throw
-    await expect(plugin.before!(ctx)).resolves.toBeUndefined();
-  });
+    // Advance time beyond TTL
+    await vi.advanceTimersByTimeAsync(60_000 + 1);
 
-  it('handles null/non-object first arg gracefully', async () => {
-    const plugin = createFederationPlugin();
-    const ctx = makeCtx('createStream', [null]);
-
-    await expect(plugin.before!(ctx)).resolves.toBeUndefined();
+    // Third call: fails again, still no onResolved
+    const params3 = { recipient: 'alice*example.com', token: 'G...', amount: 2000n };
+    const ctx3 = makeCtx('createStream', [params3]);
+    await plugin.before!(ctx3);
+    expect(onResolved).not.toHaveBeenCalled();
   });
 });

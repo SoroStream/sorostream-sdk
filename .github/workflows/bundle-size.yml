@@ -1,0 +1,23 @@
+name: bundle-size
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  bundle-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build SDK
+        run: bun run build
+
+      - name: Check bundle sizes
+        run: bun run check:bundle-size

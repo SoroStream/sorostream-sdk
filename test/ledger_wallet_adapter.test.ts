@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { LedgerWalletAdapter, createLedgerWalletAdapter, createLedgerAdapter } from '../src/wallet.js';
+import {
+  LedgerWalletAdapter,
+  createLedgerWalletAdapter,
+  createLedgerAdapter,
+} from '../src/wallet.js';
 import { Keypair, TransactionBuilder, Networks, Operation } from '@stellar/stellar-sdk';
 
 describe('Issue #432: Ledger hardware wallet adapter', () => {
@@ -69,11 +73,13 @@ describe('Issue #432: Ledger hardware wallet adapter', () => {
       new (await import('@stellar/stellar-sdk')).Account(sourceKp.publicKey(), '100'),
       { fee: '100', networkPassphrase: Networks.TESTNET },
     )
-      .addOperation(Operation.payment({
-        destination: kp.publicKey(),
-        asset: (await import('@stellar/stellar-sdk')).Asset.native(),
-        amount: '10',
-      }))
+      .addOperation(
+        Operation.payment({
+          destination: kp.publicKey(),
+          asset: (await import('@stellar/stellar-sdk')).Asset.native(),
+          amount: '10',
+        }),
+      )
       .setTimeout(30)
       .build();
 

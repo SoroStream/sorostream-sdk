@@ -25,6 +25,7 @@ import type {
   CancelStreamParams,
   CloneStreamOverrides,
   CreateStreamParams,
+  CreateStreamDryRunResult,
   PaginatedStreams,
   PaginationParams,
   SetOperatorParams,
@@ -51,8 +52,10 @@ import type {
   OperationExplanation,
   GetStreamsOptions,
   BatchStreamsResult,
+  SimulateStreamResult,
 } from './types.js';
 import { streamToJSON, filterStreams } from './utils.js';
+import { InsufficientAmountError, SelfStreamError } from './errors.js';
 import { SoroStreamObservable, shareLatest } from './observable.js';
 
 let nextId = 1;
@@ -122,6 +125,27 @@ export class MockSoroStreamClient {
     _signal?: AbortSignal,
     options?: WriteOptions,
   ): Promise<{ streamId: string; txHash: string }> {
+    if (params.amount <= 0n) {
+      throw new InsufficientAmountError();
+    }
+    if (this.senderKey && params.recipient === this.senderKey) {
+      throw new SelfStreamError();
+    }
+    if (options?.dryRun || (params as any)?.dryRun) {
+      return {
+        dryRun: true,
+        simulated: true,
+        expectedFee: '100',
+        minResourceFee: '100',
+        result: {
+          id: 'mock-sim-id',
+          events: [],
+          minResourceFee: '100',
+        } as any,
+        params,
+      } as any;
+    }
+
     if (options?.explain || (params as any)?.explain) {
       return {
         operation: 'createStream',
@@ -177,6 +201,44 @@ export class MockSoroStreamClient {
       data: { sender: stream.sender, recipient: stream.recipient },
     });
     return { streamId: id, txHash: `mock-tx-create-${id}` };
+  }
+
+  async simulateStream(params: CreateStreamParams): Promise<SimulateStreamResult> {
+    if (params.amount <= 0n || params.durationSeconds <= 0) {
+      return {
+        fee: 0,
+        footprint: { readOnly: [], readWrite: [] },
+        isValid: false,
+        error: 'Invalid stream parameters',
+      };
+    }
+    return {
+      fee: 100,
+      footprint: { readOnly: [], readWrite: [] },
+      isValid: true,
+    };
+  }
+
+  async lockUntil(streamId: string, timestamp: Date): Promise<{ txHash: string }> {
+    const stream = this.streams.get(streamId);
+    if (!stream) throw new Error(`Stream not found: ${streamId}`);
+    const lockUntilSec = Math.floor(timestamp.getTime() / 1000);
+    if (stream.lockUntil !== undefined && stream.lockUntil >= lockUntilSec) {
+      throw new Error(
+        `Stream ${streamId} is already locked until ${stream.lockUntil} (requested: ${lockUntilSec})`,
+      );
+    }
+    const now = nowSec();
+    this.streams.set(streamId, { ...stream, lockUntil: lockUntilSec });
+    this.emit({
+      type: 'StreamLocked',
+      streamId,
+      txHash: `mock-tx-lock-${streamId}-${now}`,
+      ledger: 0,
+      timestamp: now,
+      data: { lockUntil: lockUntilSec },
+    });
+    return { txHash: `mock-tx-lock-${streamId}-${now}` };
   }
 
   async withdraw(
@@ -253,9 +315,14 @@ export class MockSoroStreamClient {
     const stream = this.streams.get(params.streamId);
     if (!stream) throw new Error(`Stream not found: ${params.streamId}`);
     if (stream.status !== 'Active') throw new Error('Stream is not active');
+    const now = nowSec();
+    if (stream.lockUntil !== undefined && now < stream.lockUntil) {
+      throw new Error(
+        `Stream ${params.streamId} is locked until ${stream.lockUntil} (now: ${now})`,
+      );
+    }
 
     this.streams.set(params.streamId, { ...stream, status: 'Cancelled' });
-    const now = nowSec();
     this.emit({
       type: 'StreamCancelled',
       streamId: params.streamId,
@@ -309,6 +376,24 @@ export class MockSoroStreamClient {
       txHash: `mock-tx-topup-${params.streamId}`,
       newEndTime: new Date(newEndTime * 1000),
     };
+  }
+
+  /**
+   * Tops up a stream to extend its duration, given a positional `streamId` and
+   * `amount`.
+   *
+   * Convenience wrapper around {@link topUp} so the mock mirrors the
+   * `SoroStreamClient.topUpStream` API.
+   *
+   * @param streamId - ID of the stream to top up.
+   * @param amount - Additional amount to deposit in stroops (must be > 0).
+   * @returns `{ txHash, newEndTime }` — confirming transaction hash and updated end time.
+   */
+  async topUpStream(
+    streamId: string,
+    amount: bigint,
+  ): Promise<{ txHash: string; newEndTime: Date }> {
+    return this.topUp({ streamId, amount });
   }
 
   async batchCancel(streamIds: string[], _batchSize = 8): Promise<BatchCancelResult[]> {
@@ -379,10 +464,7 @@ export class MockSoroStreamClient {
 
   private streamDelegates = new Map<string, Set<string>>();
 
-  async grantDelegate(
-    streamId: string,
-    delegate: string,
-  ): Promise<{ txHash: string }> {
+  async grantDelegate(streamId: string, delegate: string): Promise<{ txHash: string }> {
     if (!this.streams.has(streamId)) throw new Error(`Stream not found: ${streamId}`);
     if (!this.streamDelegates.has(streamId)) {
       this.streamDelegates.set(streamId, new Set());
@@ -391,10 +473,7 @@ export class MockSoroStreamClient {
     return { txHash: `mock-tx-grant-stream-delegate-${streamId}-${delegate}` };
   }
 
-  async revokeDelegateFromStream(
-    streamId: string,
-    delegate: string,
-  ): Promise<{ txHash: string }> {
+  async revokeDelegateFromStream(streamId: string, delegate: string): Promise<{ txHash: string }> {
     if (!this.streams.has(streamId)) throw new Error(`Stream not found: ${streamId}`);
     this.streamDelegates.get(streamId)?.delete(delegate);
     return { txHash: `mock-tx-revoke-stream-delegate-${streamId}-${delegate}` };
@@ -1114,6 +1193,22 @@ export class SoroStreamSandbox extends MockSoroStreamClient {
       'getStreamsByRecipient',
       () => super.getStreamsByRecipient(recipient, pagination, filter),
       [recipient, pagination, filter],
+    );
+  }
+
+  override async lockUntil(streamId: string, timestamp: Date): Promise<{ txHash: string }> {
+    return this.recordAndExecute(
+      'lockUntil',
+      () => super.lockUntil(streamId, timestamp),
+      [streamId, timestamp],
+    );
+  }
+
+  override async simulateStream(params: CreateStreamParams): Promise<SimulateStreamResult> {
+    return this.recordAndExecute(
+      'simulateStream',
+      () => super.simulateStream(params),
+      [params],
     );
   }
 }
