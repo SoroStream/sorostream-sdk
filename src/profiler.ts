@@ -7,6 +7,7 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 import type { Network } from './types.js';
+import { parseStreamId } from './utils.js';
 
 const NETWORK_PASSPHRASES: Record<Network, string> = {
   mainnet: 'Public Global Stellar Network ; September 2015',
@@ -110,7 +111,7 @@ export class GasProfiler {
       () => {
         return this.contract.call(
           'withdraw',
-          nativeToScVal(BigInt(params.streamId), { type: 'u64' }),
+          nativeToScVal(parseStreamId(params.streamId), { type: 'u64' }),
           nativeToScVal(params.recipient, { type: 'address' }),
         );
       },
@@ -130,7 +131,7 @@ export class GasProfiler {
       () => {
         return this.contract.call(
           'cancel_stream',
-          nativeToScVal(BigInt(params.streamId), { type: 'u64' }),
+          nativeToScVal(parseStreamId(params.streamId), { type: 'u64' }),
           nativeToScVal(params.sender, { type: 'address' }),
         );
       },
@@ -152,7 +153,7 @@ export class GasProfiler {
       () => {
         return this.contract.call(
           'top_up',
-          nativeToScVal(BigInt(params.streamId), { type: 'u64' }),
+          nativeToScVal(parseStreamId(params.streamId), { type: 'u64' }),
           nativeToScVal(params.sender, { type: 'address' }),
           nativeToScVal(params.amount, { type: 'i128' }),
         );
@@ -162,13 +163,13 @@ export class GasProfiler {
 
   async profileGetStream(streamId: string): Promise<SimulationProfile> {
     return this.simulateAndProfile('get_stream', { streamId }, () => {
-      return this.contract.call('get_stream', nativeToScVal(BigInt(streamId), { type: 'u64' }));
+      return this.contract.call('get_stream', nativeToScVal(parseStreamId(streamId), { type: 'u64' }));
     });
   }
 
   async profileGetClaimable(streamId: string): Promise<SimulationProfile> {
     return this.simulateAndProfile('get_claimable', { streamId }, () => {
-      return this.contract.call('get_claimable', nativeToScVal(BigInt(streamId), { type: 'u64' }));
+      return this.contract.call('get_claimable', nativeToScVal(parseStreamId(streamId), { type: 'u64' }));
     });
   }
 

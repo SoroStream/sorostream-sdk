@@ -1,7 +1,7 @@
 // ── Issue #336: Portfolio analytics ──────────────────────────────────────────
 
 import type { Stream, PortfolioStats } from './types.js';
-import { claimableNow, isExpired } from './utils.js';
+import { claimableNow, isExpired, safeClaimable } from './utils.js';
 
 /** Number of seconds in a month (30 days) for monthly outflow/inflow calcs. */
 const SECONDS_PER_MONTH = 30 * 24 * 60 * 60;
@@ -46,13 +46,13 @@ export async function getPortfolioStats(
   // Monthly outflow = sum over active sent streams of (flowRate * 30 days)
   let totalMonthlyOutflow = 0n;
   for (const s of activeSent) {
-    totalMonthlyOutflow += s.flowRate * BigInt(SECONDS_PER_MONTH);
+    totalMonthlyOutflow += safeClaimable(s.flowRate, BigInt(SECONDS_PER_MONTH));
   }
 
   // Monthly inflow = sum over active received streams of (flowRate * 30 days)
   let totalMonthlyInflow = 0n;
   for (const s of activeReceived) {
-    totalMonthlyInflow += s.flowRate * BigInt(SECONDS_PER_MONTH);
+    totalMonthlyInflow += safeClaimable(s.flowRate, BigInt(SECONDS_PER_MONTH));
   }
 
   return {

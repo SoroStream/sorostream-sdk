@@ -1,68 +1,98 @@
 # SoroStream SDK — Troubleshooting Guide
 
-This guide details common errors, root causes, diagnostic steps, and recommended fixes when integrating `@sorostream/sdk`.
+This guide covers common errors encountered when using `@sorostream/sdk`, their underlying root causes, and recommended solutions.
 
 ---
 
-## 1. Account & Balance Errors
+## 1. `InsecureRpcUrlError`
 
-### `AccountNotFoundError`
+### Symptom
+```
+InsecureRpcUrlError: RPC endpoint URL must use HTTPS protocol (received http://rpc.example.com).
+```
 
-* **Symptom**: `AccountNotFoundError: Account G... does not exist on Stellar network.`
-* **Root Cause**: The sender or recipient Stellar address has not been created on-chain with the minimum XLM reserve (1 XLM on mainnet / testnet).
-* **Fix**:
-  * **Testnet**: Fund the account using Stellar Friendbot (`https://friendbot.stellar.org?addr=YOUR_ADDRESS`).
-  * **Mainnet**: Send at least 1 XLM to the account address before initiating stream creation.
+### Cause
+The SDK enforces secure TLS (`https://`) RPC endpoints in production environments to protect private transaction data from eavesdropping.
 
-### `InsufficientAmountError`
-
-* **Symptom**: `InsufficientAmountError: Amount must be strictly greater than 0.`
-* **Root Cause**: Passed `0n` or negative value for `amount` in `createStream` or `topUp`.
-* **Fix**: Use `toStroops('10.00')` to convert decimal strings to valid positive `bigint` base units.
+### Solution
+Use an `https://` endpoint URL (e.g. `https://soroban-testnet.stellar.org`). For local testing with Soroban Quickstart, loopback addresses (`http://localhost:8000` or `http://127.0.0.1:8000`) are permitted.
 
 ---
 
-## 2. Stream Validation & Idempotency Errors
+## 2. `StartTimeInPastError`
 
-### `SelfStreamError`
+### Symptom
+```
+StartTimeInPastError: Stream startTime cannot be set in the past.
+```
 
-* **Symptom**: `SelfStreamError: Sender and recipient addresses cannot be identical.`
-* **Root Cause**: `params.recipient` matches the connected wallet sender address.
-* **Fix**: Ensure the recipient address is distinct from the sender address.
+### Cause
+`startTime` was specified with a timestamp earlier than the current ledger time.
 
-### `DuplicateStreamError`
-
-* **Symptom**: `DuplicateStreamError: An active stream already exists for this recipient and token.`
-* **Root Cause**: Duplicate creation check detected an existing `Active` stream between the same sender, recipient, and token contract.
-* **Fix**:
-  * Top up the existing stream using `client.topUp({ streamId, amount })` instead of creating a new stream.
-  * Or disable duplicate checks by setting `checkDuplicate: false` in `SoroStreamClientConfig` if multiple concurrent streams are intended.
-
----
-
-## 3. Network & Circuit Breaker Errors
-
-### `CircuitBreakerOpenError`
-
-* **Symptom**: `CircuitBreakerOpenError: Circuit breaker is OPEN for RPC host soroban-testnet.stellar.org`
-* **Root Cause**: Consecutive RPC request failures or timeouts exceeded the failure threshold, triggering automatic RPC isolation.
-* **Fix**:
-  * Provide multiple RPC fallback URLs in `rpcUrl`: `['https://soroban-testnet.stellar.org', 'https://rpc-fallback.example.com']`.
-  * Check network connectivity or status at `https://dashboard.stellar.org`.
-  * Reset circuit breaker manually if needed: `client.resetCircuitBreaker()`.
+### Solution
+Omit `startTime` to default to current ledger time, or pass `Math.floor(Date.now() / 1000)`:
+```ts
+const startTime = Math.floor(Date.now() / 1000) + 60; // start 1 min in future
+```
 
 ---
 
-## 4. Wallet Signing & Hardware Errors
+## 3. `NonceNotSupportedError`
 
-### Freighter Popup Blocked or Rejected
+### Symptom
+```
+NonceNotSupportedError: Deployed contract version does not support caller-supplied nonces.
+```
 
-* **Symptom**: `UserDeclinedError: User rejected transaction in Freighter.`
-* **Root Cause**: User dismissed the Freighter extension modal or popups are blocked in the browser.
-* **Fix**: Wrap transaction calls in user click event handlers to ensure browser popup permissions are granted.
+### Cause
+The client passed a `nonce` parameter for stream idempotency, but the deployed Soroban contract version on-chain does not expose `get_version` or nonce support.
 
-### Ledger Transport Timeout
+### Solution
+Check capability prior to submission with `client.supportsNonce()`:
+```ts
+if (await client.supportsNonce()) {
+  await client.createStream({ ...params, nonce: 'my-unique-key' });
+} else {
+  await client.createStream(params);
+}
+```
 
-* **Symptom**: `LedgerError: Transport status 0x6804 or device locked.`
-* **Root Cause**: Ledger device is locked, app is closed, or USB/WebHID permission was denied.
-* **Fix**: Ensure Stellar App is open on Ledger device and blind signing is enabled in device settings.
+---
+
+## 4. `WalletConnectSessionExpiredError` & Wallet Lock Errors
+
+### Symptom
+```
+WalletConnectSessionExpiredError: The active WalletConnect session has expired or been terminated by the user.
+```
+
+### Cause
+The user locked their wallet or the session topic expired mid-session.
+
+### Solution
+Wallet adapters expose `onConnectionChange()` listeners. Re-trigger the connection handshake:
+```ts
+const adapter = await createFreighterAdapter();
+if (!(await adapter.isConnected())) {
+  await adapter.connect();
+}
+```
+
+---
+
+## 5. Expo / React Native `crypto.getRandomValues` Missing
+
+### Symptom
+```
+TypeError: global.crypto.getRandomValues is not a function
+```
+
+### Cause
+React Native and Expo JS engines lack `globalThis.crypto.getRandomValues` out of the box.
+
+### Solution
+Import `@sorostream/sdk-react-native` and invoke `setupExpoPolyfills`:
+```ts
+import { setupExpoPolyfills } from '@sorostream/sdk-react-native';
+setupExpoPolyfills();
+```

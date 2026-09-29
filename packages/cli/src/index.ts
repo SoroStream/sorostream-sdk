@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import type { GlobalOptions } from './commands.js';
 import {
   cmdGet,
@@ -12,6 +12,7 @@ import {
   cmdStreamCreate,
 } from './commands.js';
 import { cmdAnalyze } from './analyze.js';
+import { OUTPUT_FORMATS } from './output.js';
 
 const program = new Command();
 
@@ -22,6 +23,11 @@ program
   .requiredOption('-c, --contract-id <address>', 'StreamContract address')
   .option('-n, --network <network>', 'Stellar network (mainnet/testnet/futurenet)', 'testnet')
   .option('-r, --rpc <urls...>', 'RPC URL(s) — specify multiple for failover')
+  .addOption(
+    new Option('-o, --output <format>', 'Output format for results')
+      .choices([...OUTPUT_FORMATS])
+      .default('json'),
+  )
   .requiredOption(
     '-s, --secret <key>',
     'Stellar secret key (or set SOROSTREAM_SECRET env var)',
@@ -37,11 +43,7 @@ program
   .option('--amount <usdc>', 'Amount in USDC (e.g. 100.50)')
   .option('--duration <seconds>', 'Duration in seconds', parseInt)
   .option('--auto-renew', 'Enable auto-renewal', false)
-  .option(
-    '--json',
-    'Read all params from flags non-interactively (for CI use)',
-    false,
-  )
+  .option('--json', 'Read all params from flags non-interactively (for CI use)', false)
   .action(async (opts) => {
     const global = program.opts<GlobalOptions>();
     await cmdStreamCreate({ ...global, ...opts });

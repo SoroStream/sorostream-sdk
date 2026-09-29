@@ -1,7 +1,7 @@
 {
   "name": "@sorostream/sdk-react-native",
   "version": "0.1.0",
-  "description": "React Native adapters for the SoroStream SDK (issue #199)",
+  "description": "React Native and Expo adapters for the SoroStream SDK (issue #199, #654)",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "build": "tsup src/index.ts --format cjs,esm --dts --sourcemap --clean",
     "lint": "tsc --noEmit"
   },
   "keywords": [
@@ -21,7 +21,8 @@
     "soroban",
     "streaming",
     "payments",
-    "react-native"
+    "react-native",
+    "expo"
   ],
   "license": "MIT",
   "peerDependencies": {

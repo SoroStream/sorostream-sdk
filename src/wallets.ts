@@ -29,8 +29,14 @@ export {
   LedgerWalletAdapter,
   createLedgerWalletAdapter,
   createLedgerAdapter,
+  createHardwareWalletAdapter,
 } from './wallet.js';
-export type { ClaimDelegateConfig, WalletConnectV2AdapterConfig } from './wallet.js';
+export type {
+  ClaimDelegateConfig,
+  WalletConnectV2AdapterConfig,
+  HardwareWalletDevice,
+  HardwareWalletAdapterConfig,
+} from './wallet.js';
 export type {
   AlbedoWalletAdapterConfig,
   LobstrWalletAdapterConfig,

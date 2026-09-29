@@ -10,7 +10,7 @@
     "sorostream-generate-schemas": "./dist/schemas.js"
   },
   "scripts": {
-    "build": "tsup src/index.ts src/analyze.ts src/schemas.ts --format cjs --dts --clean",
+    "build": "tsup src/index.ts src/analyze.ts src/schemas.ts --format cjs --dts --sourcemap --clean",
     "lint": "tsc --noEmit"
   },
   "keywords": [

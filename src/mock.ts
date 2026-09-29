@@ -54,7 +54,7 @@ import type {
   BatchStreamsResult,
   SimulateStreamResult,
 } from './types.js';
-import { streamToJSON, filterStreams } from './utils.js';
+import { streamToJSON, filterStreams, safeClaimable } from './utils.js';
 import { InsufficientAmountError, SelfStreamError } from './errors.js';
 import { SoroStreamObservable, shareLatest } from './observable.js';
 
@@ -66,16 +66,15 @@ function nowSec(): number {
 
 function claimableAt(stream: Stream, atSec: number): bigint {
   if (stream.status === 'Cancelled' || stream.status === 'Completed') return 0n;
-  // Enforce lockUntil: no withdrawals until the lock expires
   if (stream.lockUntil !== undefined && atSec < stream.lockUntil) return 0n;
   if (stream.status === 'Paused') {
     const effectiveNow = Math.min(stream.pausedAt ?? atSec, stream.endTime);
     const elapsed = Math.max(0, effectiveNow - stream.lastWithdrawTime);
-    return stream.flowRate * BigInt(elapsed);
+    return safeClaimable(stream.flowRate, BigInt(elapsed), stream.deposit);
   }
   const effectiveNow = Math.min(atSec, stream.endTime);
   const elapsed = Math.max(0, effectiveNow - stream.lastWithdrawTime);
-  return stream.flowRate * BigInt(elapsed);
+  return safeClaimable(stream.flowRate, BigInt(elapsed), stream.deposit);
 }
 
 type Listener = {
@@ -422,8 +421,8 @@ export class MockSoroStreamClient {
     if (!stream) throw new Error(`Stream not found: ${params.streamId}`);
     if (stream.status !== 'Active') throw new Error('Stream is not active');
 
-    const streamedSoFar = stream.flowRate * BigInt(nowSec() - stream.startTime);
-    const remaining = stream.deposit - streamedSoFar;
+    const streamedSoFar = safeClaimable(stream.flowRate, BigInt(Math.max(0, nowSec() - stream.startTime)), stream.deposit);
+    const remaining = stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
     const newEndTime = nowSec() + Number(remaining / params.newFlowRate);
 
     this.streams.set(params.streamId, {
@@ -547,7 +546,7 @@ export class MockSoroStreamClient {
 
     const now = nowSec();
     const remainingDuration = stream.endTime - Math.max(now, stream.lastWithdrawTime);
-    const remainingBalance = stream.flowRate * BigInt(Math.max(0, remainingDuration));
+    const remainingBalance = safeClaimable(stream.flowRate, BigInt(Math.max(0, remainingDuration)), stream.deposit);
 
     // Calculate split amounts based on ratio
     const ratioA = BigInt(params.ratioNumerator);

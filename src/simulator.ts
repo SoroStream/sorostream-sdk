@@ -17,6 +17,7 @@
  */
 
 import type { Stream } from './types.js';
+import { safeClaimable } from './utils.js';
 
 export type StreamExpiryCallback = (stream: Stream) => void;
 
@@ -65,11 +66,11 @@ export class StreamSimulator {
     if (stream.status === 'Paused') {
       const effectiveNow = Math.min(stream.pausedAt ?? now, stream.endTime);
       const elapsed = Math.max(0, effectiveNow - stream.lastWithdrawTime);
-      return stream.flowRate * BigInt(elapsed);
+      return safeClaimable(stream.flowRate, BigInt(elapsed), stream.deposit);
     }
     const effectiveNow = Math.min(now, stream.endTime);
     const elapsed = Math.max(0, effectiveNow - stream.lastWithdrawTime);
-    return stream.flowRate * BigInt(elapsed);
+    return safeClaimable(stream.flowRate, BigInt(elapsed), stream.deposit);
   }
 
   /** Resets the simulated clock to real time and clears expiry-firing state. */
