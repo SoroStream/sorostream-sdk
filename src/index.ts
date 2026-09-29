@@ -122,7 +122,7 @@ export type { CircuitState, CircuitBreakerOptions } from './circuitBreaker.js';
 export { WriteRateLimiter } from './writeRateLimiter.js';
 export type { WriteRateLimitOptions } from './writeRateLimiter.js';
 export { ConnectionPool } from './connectionPool.js';
-export type { ConnectionPoolOptions, PoolEvent, PoolEventType } from './connectionPool.js';
+export type { ConnectionPoolOptions, ConnectionPriority, PoolEvent, PoolEventType } from './connectionPool.js';
 export { InMemoryEventBus } from './eventBus.js';
 export type { IEventBus, Unsubscribe } from './eventBus.js';
 export { PriorityRequestQueue, createRequestQueue } from './request-queue.js';
