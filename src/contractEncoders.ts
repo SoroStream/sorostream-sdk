@@ -1,7 +1,7 @@
 import { Contract, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import type { ContractVersion, CreateStreamParams, SplitStreamParams } from './types.js';
 import { isValidStellarAddress, parseStreamId } from './utils.js';
-import { InvalidAddressError } from './errors.js';
+import { InvalidAddressError, MetadataTooLargeError } from './errors.js';
 
 // Issue #458: sanitise caller-supplied strings at the boundary before they
 // are interpolated into a contract call, so malformed input is rejected
@@ -41,11 +41,12 @@ class V1Encoder implements ContractCallEncoder {
     // ensuring non-ASCII characters (emoji, accented chars) survive
     // the XDR round-trip. Empty/undefined namespace is sent as empty string.
     const namespace = params.namespace ?? '';
-    if (namespace.length > 256) {
-      console.warn(
-        '[SoroStream SDK] createStream: metadata/namespace exceeds 256 characters, ' +
-          'it may be truncated by the contract.',
-      );
+    // Check the UTF-8 byte length, not the character count. Multi-byte
+    // characters (emoji, accented letters, CJK) can push the encoded payload
+    // past 256 bytes even when the JS string length is under 256.
+    const namespaceBytes = new TextEncoder().encode(namespace).length;
+    if (namespaceBytes > 256) {
+      throw new MetadataTooLargeError(namespaceBytes, 256);
     }
     return this.contract.call(
       'create_stream',
