@@ -23,6 +23,7 @@ export class Cache<K, V> {
   private store = new Map<K, CacheEntry<V>>();
   private defaultTtlMs: number;
   private maxSize: number;
+  private writesSincePrune = 0;
 
   constructor(defaultTtlMs = 60_000, maxSize = 1_000) {
     this.defaultTtlMs = defaultTtlMs;
@@ -43,6 +44,9 @@ export class Cache<K, V> {
   }
 
   set(key: K, value: V, ttlMs?: number): void {
+    // Periodically reclaim expired entries that are never read again, so
+    // completed stream objects don't linger in memory (issue #624).
+    if (++this.writesSincePrune >= 100) this.prune();
     if (this.store.has(key)) {
       this.store.delete(key);
     } else if (this.store.size >= this.maxSize) {
@@ -68,6 +72,21 @@ export class Cache<K, V> {
 
   clear(): void {
     this.store.clear();
+    this.writesSincePrune = 0;
+  }
+
+  /** Removes all expired entries. Returns the number of entries removed. */
+  prune(): number {
+    this.writesSincePrune = 0;
+    const t = now();
+    let removed = 0;
+    for (const [key, entry] of this.store) {
+      if (t > entry.expiresAt) {
+        this.store.delete(key);
+        removed++;
+      }
+    }
+    return removed;
   }
 
   /**

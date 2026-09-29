@@ -4,9 +4,9 @@ type Attributes = Record<string, string | number | boolean>;
 interface SpanOptions {
   attributes?: Attributes;
 }
-interface Span {
+export interface Span {
   setAttributes(attrs: Attributes): void;
-  end(): void;
+  end(endTime?: number): void;
   recordException(e: Error): void;
   setAttribute(k: string, v: unknown): void;
 }
@@ -62,10 +62,39 @@ export class Telemetry {
     return this.tracer.startSpan(name, options);
   }
 
+  /**
+   * Queues a span to be ended as part of the next batch instead of emitting
+   * it immediately (issue #623). The original end time is preserved.
+   */
   endSpan(span: Span | null, attributes?: Attributes): void {
     if (!span) return;
-    if (attributes) span.setAttributes(attributes);
-    span.end();
+    this.pending.push({ span, attributes, endTime: Date.now() });
+    if (this.pending.length >= this.maxBatchSize) {
+      this.flush();
+    } else if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => this.flush(), this.flushIntervalMs);
+      const t = this.flushTimer as { unref?: () => void };
+      if (typeof t.unref === 'function') t.unref();
+    }
+  }
+
+  /** Number of finished spans waiting to be flushed. */
+  get pendingCount(): number {
+    return this.pending.length;
+  }
+
+  /** Ends all queued spans in a single batch. */
+  flush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    const batch = this.pending;
+    this.pending = [];
+    for (const { span, attributes, endTime } of batch) {
+      if (attributes) span.setAttributes(attributes);
+      span.end(endTime);
+    }
   }
 
   setAttributes(span: Span | null, attributes: Attributes): void {

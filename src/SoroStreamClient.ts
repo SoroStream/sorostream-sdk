@@ -1075,6 +1075,9 @@ destroy(): void {
      if (this.destroyed) return;
      this.destroyed = true;
      clientFinalizers?.unregister(this);
+     // Flush batched telemetry and release cached stream objects (issues #623, #624).
+     this.telemetry?.flush();
+     this.streamCache.clear();
      this.eventPoller = null;
      this.pool = null;
      // Issue #423: drop shared observables so their poll loops are not kept
