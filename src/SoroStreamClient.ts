@@ -68,6 +68,43 @@ import type { StreamMonitorConfig } from './stream-monitor.js';
 // the cache immediately regardless of this TTL.
 const STREAM_CACHE_TTL_MS = 5_000;
 
+/** Number of operations encoded before yielding back to the event loop (issue #613). */
+const ENCODE_YIELD_EVERY = 16;
+
+/** Yields to the event loop so large encode batches don't block the main thread. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * Issue #613: encodes items in slices, yielding to the event loop between
+ * slices so large batches do not freeze the UI thread.
+ */
+async function encodeAsync<T, R>(items: readonly T[], encode: (item: T) => R): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i++) {
+    if (i > 0 && i % ENCODE_YIELD_EVERY === 0) await yieldToEventLoop();
+    out.push(encode(items[i]!));
+  }
+  return out;
+}
+
+/**
+ * Issue #612: rejects start timestamps that are not finite, non-negative
+ * integer Unix seconds, or that are earlier than the ledger's "now".
+ */
+function assertFutureStartTime(startTime: number | undefined, ledgerNow: number): void {
+  if (startTime === undefined) return;
+  if (!Number.isFinite(startTime) || !Number.isInteger(startTime) || startTime < 0) {
+    throw new SoroStreamError(
+      `start_time must be a non-negative integer Unix timestamp in seconds, got ${startTime}`,
+    );
+  }
+  if (startTime < ledgerNow) {
+    throw new StartTimeInPastError(startTime, ledgerNow);
+  }
+}
+
 /** Minimum allowed stream duration in seconds. */
 export const MIN_STREAM_DURATION_SECONDS = 1;
 
@@ -2593,6 +2630,8 @@ const txBuilder = new TransactionBuilder(account, {
     const ledgerNow = await this.getLedgerTimestamp();
     const startTimeParam =
       params.startTime ?? (params as CreateStreamParams & { start_time?: number }).start_time;
+    // Issue #612: reject malformed timestamps (NaN, fractional, negative).
+    assertFutureStartTime(startTimeParam, Number.NEGATIVE_INFINITY);
     if (startTimeParam !== undefined && startTimeParam < ledgerNow) {
       // Issue #411: the contract rejects a start_time in the past. Surface a
       // client-side warning and throw instead of submitting a doomed tx.
@@ -2966,14 +3005,14 @@ async createStream(
 
       const startTimeParam =
         params.startTime ?? (params as CreateStreamParams & { start_time?: number }).start_time;
-      if (startTimeParam !== undefined && startTimeParam < ledgerNow) {
-        throw new StartTimeInPastError(startTimeParam, ledgerNow);
-      }
+      assertFutureStartTime(startTimeParam, ledgerNow);
     }
 
     const sender = await this.requireWalletAdapter().getPublicKey();
 
-    const operations = paramsArray.map((params) => this.encoder.createStream(sender, params));
+    const operations = await encodeAsync(paramsArray, (params) =>
+      this.encoder.createStream(sender, params),
+    );
 
     if (options?.simulateOnly) {
       const result = await this.simulateOp(operations[0]!);
@@ -3129,18 +3168,15 @@ async withdraw(
 
       // Fetch claimable amounts first — individual failures here are recorded
       // but do not prevent us from attempting the remaining streams.
+      // Issue #615: fetch claimable amounts in parallel rather than one-by-one.
       const amounts: Map<string, string> = new Map();
-      for (const id of chunk) {
-        try {
-          const claimable = await this.getClaimable(id);
-          amounts.set(id, claimable.toString());
-        } catch {
-          amounts.set(id, '0');
-        }
-      }
+      const settled = await Promise.allSettled(chunk.map((id) => this.getClaimable(id)));
+      settled.forEach((r, idx) => {
+        amounts.set(chunk[idx]!, r.status === 'fulfilled' ? r.value.toString() : '0');
+      });
 
       try {
-        const operations = chunk.map((id) => this.encoder.withdraw(id, recipient));
+        const operations = await encodeAsync(chunk, (id) => this.encoder.withdraw(id, recipient));
         await this.executeBatch(operations);
         for (const id of chunk) {
           successes.push(id);
@@ -3499,7 +3535,7 @@ async cancelStream(
 
     for (let i = 0; i < streamIds.length; i += batchSize) {
       const chunk = streamIds.slice(i, i + batchSize);
-      const operations = chunk.map((id) => this.encoder.cancelStream(id, sender));
+      const operations = await encodeAsync(chunk, (id) => this.encoder.cancelStream(id, sender));
       const txHash = await this.executeBatch(operations);
       results.push({ txHash, streamIds: chunk });
     }
@@ -4710,6 +4746,17 @@ async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
     // poison the cache with data fetched under a different network.
     const networkAtCallTime = this.network;
     const cacheKey = `${networkAtCallTime}:${streamId}`;
+
+    // Issue #614: serve rapid repeat calls straight from the TTL cache when no
+    // write is pending for this stream, without any async hop or network call.
+    if (
+      !options?.refresh &&
+      !this._lastWriteLedger.has(streamId) &&
+      !this._lastWriteAt.has(streamId)
+    ) {
+      const cached = this.streamCache.get(cacheKey);
+      if (cached) return cached;
+    }
 
     // Issue #271: if a prior write has been recorded for this stream, wait for
     // the confirmed ledger before serving data — this guarantees the read is
