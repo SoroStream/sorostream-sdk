@@ -34,6 +34,10 @@ describe('#202 detectNetworkFromRpcUrl', () => {
     expect(detectNetworkFromRpcUrl('https://soroban-testnet.stellar.org')).toBe('testnet');
   });
 
+  it('resolves futurenet URLs (#384)', () => {
+    expect(detectNetworkFromRpcUrl('https://rpc-futurenet.stellar.org')).toBe('futurenet');
+  });
+
   it('resolves mainnet URLs', () => {
     expect(detectNetworkFromRpcUrl('https://soroban-mainnet.stellar.org')).toBe('mainnet');
   });

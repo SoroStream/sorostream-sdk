@@ -19,6 +19,8 @@ describe('await-async-sdk-methods', () => {
           code: `async function run(client, id) { await client.withdraw(id); }`,
           options: [{ methods: ['withdraw'] }],
         },
+        `async function run(client, params) { const res = await client.createStream(params); return res; }`,
+        `const cancel = async (client, id) => { await client.cancelStream(id); };`,
       ],
       invalid: [
         {
@@ -28,6 +30,10 @@ describe('await-async-sdk-methods', () => {
         {
           code: `async function run(client, id) { client.createStream({ id }); }`,
           errors: [{ messageId: 'missingAwait', data: { method: 'createStream' } }],
+        },
+        {
+          code: `const cancel = (client, id) => { client.cancelStream(id); };`,
+          errors: [{ messageId: 'missingAwait', data: { method: 'cancelStream' } }],
         },
         {
           // Custom `methods` option covers a project-specific method name.

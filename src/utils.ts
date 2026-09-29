@@ -50,6 +50,78 @@ export interface PayoutSchedulePoint {
 const STROOP_FACTOR = 10_000_000n;
 
 /**
+ * Maximum value representable as a Soroban i128 (2^127 - 1).
+ * Any intermediate multiplication that exceeds this is nonsensical on-chain.
+ */
+const I128_MAX = (1n << 127n) - 1n;
+
+/**
+ * Safely computes `flowRate * elapsed` with overflow protection (issue #609).
+ *
+ * Returns `min(flowRate * elapsed, cap)` when `cap` is provided (typically
+ * the stream's deposit — you can never claim more than was deposited).
+ * Throws a `SoroStreamError` if the uncapped product exceeds the Soroban
+ * i128 maximum, which would indicate corrupt or adversarial stream data.
+ */
+export function safeClaimable(flowRate: bigint, elapsed: bigint, cap?: bigint): bigint {
+  if (flowRate <= 0n || elapsed <= 0n) return 0n;
+  const result = flowRate * elapsed;
+  if (cap !== undefined && result > cap) return cap;
+  if (result > I128_MAX) {
+    throw new SoroStreamError(
+      `Claimable calculation overflow: flowRate(${flowRate}) * elapsed(${elapsed}) exceeds i128 max`,
+    );
+  }
+  return result;
+}
+
+/**
+ * Safely converts a value returned by `scValToNative` to `bigint` without
+ * precision loss (issue #610).
+ *
+ * `scValToNative` may return `number` for u64 fields in some Stellar SDK
+ * versions. A plain `BigInt(value as number)` silently drops precision for
+ * values above `Number.MAX_SAFE_INTEGER` (2^53 - 1). This helper detects
+ * that case and throws instead of returning a wrong value.
+ */
+export function safeBigInt(value: unknown): bigint {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) {
+      throw new SoroStreamError(
+        `Precision loss: value ${value} exceeds Number.MAX_SAFE_INTEGER. ` +
+          'The Soroban u64/i128 value cannot be safely represented as a JavaScript number.',
+      );
+    }
+    return BigInt(value);
+  }
+  if (typeof value === 'string') return BigInt(value);
+  return BigInt(value as any);
+}
+
+/**
+ * Safely converts a u64 stream ID from `scValToNative` to a string without
+ * precision loss (issue #610).
+ *
+ * When `scValToNative` returns a `number` for a u64 stream ID above 2^53,
+ * `String(number)` would stringify the already-imprecise value. This helper
+ * uses `bigint` for the conversion path to preserve all 64 bits.
+ */
+export function safeIdString(value: unknown): string {
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) {
+      throw new SoroStreamError(
+        `Stream ID precision loss: value exceeds Number.MAX_SAFE_INTEGER (2^53 - 1). ` +
+          'The contract returned a u64 stream ID that cannot be safely represented as a JavaScript number.',
+      );
+    }
+    return String(value);
+  }
+  return String(value);
+}
+
+/**
  * Converts a token amount (as a decimal string like "100.50") to stroops/smallest unit.
  * Also handles scientific notation strings like "1e-3", "1.5e7", "2.5E-4".
  * @param amount - Amount as a decimal string (may be in scientific notation).
@@ -193,16 +265,18 @@ export async function toFiatDisplay(
 /**
  * Attempts to detect the Stellar network from an RPC URL.
  *
- * URLs containing `"testnet"` resolve to `"testnet"`; URLs containing
- * `"mainnet"` or `"horizon.stellar.org"` resolve to `"mainnet"`. Returns
- * `undefined` for URLs that don't match a known pattern (e.g. futurenet or
- * a custom/self-hosted RPC), in which case the network must be set explicitly.
+ * URLs containing `"futurenet"` resolve to `"futurenet"`; URLs containing
+ * `"testnet"` resolve to `"testnet"`; URLs containing `"mainnet"` or
+ * `"horizon.stellar.org"` resolve to `"mainnet"`. Returns `undefined` for
+ * URLs that don't match a known pattern (e.g. a custom/self-hosted RPC), in
+ * which case the network must be set explicitly.
  *
  * @param rpcUrl - The RPC endpoint URL to inspect.
  * @returns The detected network, or `undefined` if it can't be determined.
  */
 export function detectNetworkFromRpcUrl(rpcUrl: string): Network | undefined {
   const lower = rpcUrl.toLowerCase();
+  if (lower.includes('futurenet')) return 'futurenet';
   if (lower.includes('testnet')) return 'testnet';
   if (lower.includes('mainnet') || lower.includes('horizon.stellar.org')) return 'mainnet';
   return undefined;
@@ -467,7 +541,7 @@ export function claimableNow(stream: Stream): bigint {
   const now = Math.floor(Date.now() / 1000);
   const effectiveNow = Math.min(now, stream.endTime);
   const elapsed = Math.max(0, effectiveNow - stream.lastWithdrawTime);
-  return stream.flowRate * BigInt(elapsed);
+  return safeClaimable(stream.flowRate, BigInt(elapsed), stream.deposit);
 }
 
 /**
@@ -502,7 +576,7 @@ export function calculateVestingSchedule(
   // exceeds Number.MAX_SAFE_INTEGER.
   const totalSecondsBig = BigInt(stream.endTime - stream.startTime);
   const cliffSecondsBig = BigInt(cliffSeconds);
-  const totalAmount = stream.flowRate * totalSecondsBig;
+  const totalAmount = safeClaimable(stream.flowRate, totalSecondsBig, stream.deposit);
 
   let effectiveClaimable: bigint;
   if (inCliff) {
@@ -515,7 +589,7 @@ export function calculateVestingSchedule(
     const minNowBig = BigInt(Math.min(currentTime, stream.endTime));
     const vestingStartBig = BigInt(Math.max(cliffEndTime, stream.startTime));
     const elapsedBig = minNowBig > vestingStartBig ? minNowBig - vestingStartBig : 0n;
-    effectiveClaimable = stream.flowRate * (cliffSecondsBig + elapsedBig);
+    effectiveClaimable = safeClaimable(stream.flowRate, cliffSecondsBig + elapsedBig, stream.deposit);
   }
 
   const milestones: Array<{ time: number; vested: bigint }> = [];
@@ -523,7 +597,7 @@ export function calculateVestingSchedule(
   if (cliffSecondsBig < totalSecondsBig) {
     milestones.push({
       time: cliffEndTime,
-      vested: stream.flowRate * cliffSecondsBig,
+      vested: safeClaimable(stream.flowRate, cliffSecondsBig, stream.deposit),
     });
   }
 
@@ -538,7 +612,7 @@ export function calculateVestingSchedule(
     if (t > cliffEndTime) {
       milestones.push({
         time: t,
-        vested: stream.flowRate * secondsAtPct,
+        vested: safeClaimable(stream.flowRate, secondsAtPct, stream.deposit),
       });
     }
   }
@@ -1022,9 +1096,9 @@ export function isStreamStalled(stream: Stream, staleThresholdSeconds: number = 
  */
 export function isStreamUnderfunded(stream: Stream): boolean {
   if (stream.status !== 'Active' || stream.flowRate === 0n) return false;
-  const streamedSoFar = stream.flowRate * BigInt(stream.lastWithdrawTime - stream.startTime);
-  const remainingDeposit = stream.deposit - streamedSoFar;
-  const expectedRemaining = stream.flowRate * BigInt(stream.endTime - stream.lastWithdrawTime);
+  const streamedSoFar = safeClaimable(stream.flowRate, BigInt(Math.max(0, stream.lastWithdrawTime - stream.startTime)), stream.deposit);
+  const remainingDeposit = stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
+  const expectedRemaining = safeClaimable(stream.flowRate, BigInt(Math.max(0, stream.endTime - stream.lastWithdrawTime)));
   return remainingDeposit < expectedRemaining;
 }
 
@@ -1118,7 +1192,8 @@ export function aggregateStreamsByToken(streams: Stream[]): TokenAggregate[] {
     existing.streamCount += 1;
     existing.deposited += s.deposit;
     existing.claimable += claimableNow(s);
-    existing.claimedSoFar += s.deposit - s.flowRate * BigInt(s.endTime - s.lastWithdrawTime);
+    const remaining = safeClaimable(s.flowRate, BigInt(Math.max(0, s.endTime - s.lastWithdrawTime)), s.deposit);
+    existing.claimedSoFar += s.deposit > remaining ? s.deposit - remaining : 0n;
     map.set(s.token, existing);
   }
 
@@ -1153,9 +1228,10 @@ export function totalValueStreamed(streams: Stream[]): StreamTotals {
   for (const s of streams) {
     totalDeposited += s.deposit;
     totalClaimable += claimableNow(s);
-    const claimed = s.deposit - s.flowRate * BigInt(s.endTime - s.lastWithdrawTime);
-    totalClaimed += claimed > 0n ? claimed : 0n;
-    totalRemaining += s.deposit - (claimed > 0n ? claimed : 0n);
+    const remaining = safeClaimable(s.flowRate, BigInt(Math.max(0, s.endTime - s.lastWithdrawTime)), s.deposit);
+    const claimed = s.deposit > remaining ? s.deposit - remaining : 0n;
+    totalClaimed += claimed;
+    totalRemaining += remaining;
   }
 
   return {
@@ -1218,7 +1294,7 @@ export function aggregateStreams(streams: Stream[]): StreamsAggregate {
       // Released = flowRate × elapsed, where elapsed = min(now, endTime) - startTime.
       const effectiveNow = Math.min(nowSecs, s.endTime);
       const elapsedSecs = BigInt(Math.max(0, effectiveNow - s.startTime));
-      const released = s.flowRate * elapsedSecs;
+      const released = safeClaimable(s.flowRate, elapsedSecs, s.deposit);
       const remaining = s.deposit > released ? s.deposit - released : 0n;
       totalValueLocked += remaining;
       rateSum += s.flowRate;
@@ -1470,8 +1546,8 @@ export function aggregateStreamsByRecipient(streams: Stream[]): RecipientAggrega
     existing.streamCount += 1;
     existing.deposited += s.deposit;
     existing.claimable += claimableNow(s);
-    const claimed = s.deposit - s.flowRate * BigInt(s.endTime - s.lastWithdrawTime);
-    existing.claimedSoFar += claimed > 0n ? claimed : 0n;
+    const remaining = safeClaimable(s.flowRate, BigInt(Math.max(0, s.endTime - s.lastWithdrawTime)), s.deposit);
+    existing.claimedSoFar += s.deposit > remaining ? s.deposit - remaining : 0n;
     map.set(s.recipient, existing);
   }
 
@@ -1954,7 +2030,7 @@ export function getStreamHealth(stream: Stream, now?: number): StreamHealthResul
   const remainingSeconds = Math.max(0, stream.endTime - nowSecs);
 
   // Remaining balance = deposit − (flowRate × elapsed since start, capped at deposit)
-  const streamedSoFar = stream.flowRate * BigInt(elapsedSeconds);
+  const streamedSoFar = safeClaimable(stream.flowRate, BigInt(elapsedSeconds), stream.deposit);
   const remainingBalance = stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
 
   const secondsSinceLastWithdrawal =
@@ -1975,7 +2051,7 @@ export function getStreamHealth(stream: Stream, now?: number): StreamHealthResul
   }
 
   // Check underfunding: remaining balance can't cover what's left to stream
-  const remainingToStream = stream.flowRate * BigInt(remainingSeconds);
+  const remainingToStream = safeClaimable(stream.flowRate, BigInt(remainingSeconds));
   const isUnderfunded = remainingBalance < remainingToStream;
   if (isUnderfunded) {
     score -= 30;
@@ -2115,7 +2191,7 @@ export function simulateStream(
   // Integer division: flowRate stroops/second
   const flowRate = amount / BigInt(durationSeconds);
   // Total amount actually streamable given integer arithmetic
-  const totalAmount = flowRate * BigInt(durationSeconds);
+  const totalAmount = safeClaimable(flowRate, BigInt(durationSeconds));
 
   // Build intermediate timestamps at regular intervals
   const count = Math.max(1, snapshotCount);
@@ -2135,7 +2211,7 @@ export function simulateStream(
 
   const snapshots: StreamSimulationSnapshot[] = sortedTimestamps.map((ts) => {
     const elapsedSec = Math.max(0, Math.min(ts - startTime, durationSeconds));
-    const streamed = flowRate * BigInt(elapsedSec);
+    const streamed = safeClaimable(flowRate, BigInt(elapsedSec), totalAmount);
     const remaining = totalAmount - streamed;
     const percentComplete = totalAmount > 0n ? Number((streamed * 100n) / totalAmount) : 0;
     return { timestamp: ts, streamed, remaining, percentComplete };
@@ -2204,7 +2280,7 @@ export function subscribeToActivityFeed(
 export function projectCost(ratePerSecond: bigint, durationSeconds: number): bigint {
   if (ratePerSecond <= 0n) throw new Error('ratePerSecond must be > 0');
   if (durationSeconds <= 0) throw new Error('durationSeconds must be > 0');
-  return ratePerSecond * BigInt(Math.floor(durationSeconds));
+  return safeClaimable(ratePerSecond, BigInt(Math.floor(durationSeconds)));
 }
 
 // ── Issue #436: calculateStreamDelta ─────────────────────────────────────────
@@ -2225,7 +2301,7 @@ export function calculateStreamDelta(
   } else {
     const effectiveNow = Math.min(now, stream.endTime);
     const elapsed = Math.max(0, effectiveNow - stream.lastWithdrawTime);
-    current = stream.flowRate * BigInt(elapsed);
+    current = safeClaimable(stream.flowRate, BigInt(elapsed), stream.deposit);
   }
   const delta = current - previousClaimable;
   return delta > 0n ? delta : 0n;

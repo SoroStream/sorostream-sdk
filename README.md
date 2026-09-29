@@ -7,11 +7,37 @@
 
 TypeScript SDK for the **SoroStream** payment streaming protocol on Stellar Soroban. Stream USDC by the second for salaries, subscriptions, vesting schedules, and grant disbursements.
 
+📖 **[v1.0.0 Migration Guide](docs/MIGRATION_V1.md)** — upgrading from v0.0.x / v0.1.0? Start here.
+🔐 **[Security Best Practices](SECURITY.md)** — key management, wallet adapters, TLS, rate limiting.
+
 ## Installation
 
+**npm / yarn / pnpm:**
 ```bash
 npm install @sorostream/sdk
 ```
+
+**CDN — Browser Script Tag (no bundler required):**
+```html
+<!-- unpkg -->
+<script src="https://unpkg.com/@sorostream/sdk/dist/sorostream.global.js"></script>
+
+<!-- jsDelivr -->
+<script src="https://cdn.jsdelivr.net/npm/@sorostream/sdk/dist/sorostream.global.js"></script>
+
+<script>
+  // The SDK is available as the global variable `SoroStream`
+  const { SoroStreamClient } = SoroStream;
+  const client = new SoroStreamClient({
+    network: "testnet",
+    contractId: "YOUR_CONTRACT_ID",
+  });
+</script>
+```
+
+> **Tip:** Pin to an exact version in production (e.g., `@sorostream/sdk@1.0.0/dist/sorostream.global.js`)
+> and use Subresource Integrity (SRI). See [SECURITY.md](SECURITY.md) for details.
+
 
 ## Quick Start
 

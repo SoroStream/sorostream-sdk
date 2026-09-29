@@ -742,6 +742,72 @@ export function createLedgerAdapter(config: LedgerWalletAdapterConfig): WalletAd
 }
 
 /**
+ * Minimal device interface for hardware wallets (Trezor, Keystone, etc.).
+ * Implementations wrap the vendor SDK and sign raw transaction hashes on-device.
+ */
+export interface HardwareWalletDevice {
+  /** Returns the Stellar public key (G...) for the given derivation path. */
+  getPublicKey(bip32Path: string): Promise<string>;
+  /** Signs a 32-byte transaction hash on the device and returns the raw ed25519 signature. */
+  signHash(bip32Path: string, txHash: Buffer): Promise<Uint8Array>;
+  /** Optional device connectivity check. Defaults to `true`. */
+  isConnected?(): Promise<boolean>;
+}
+
+/** Configuration for {@link createHardwareWalletAdapter} (issue #636). */
+export interface HardwareWalletAdapterConfig {
+  /** Vendor-specific device wrapper. */
+  device: HardwareWalletDevice;
+  /** BIP32 derivation path for the Stellar key. Defaults to "44'/148'/0'". */
+  bip32Path?: string;
+}
+
+/**
+ * Creates a WalletAdapter that signs with any hardware wallet exposing a
+ * {@link HardwareWalletDevice} interface (issue #636).
+ */
+export function createHardwareWalletAdapter(config: HardwareWalletAdapterConfig): WalletAdapter {
+  const { device } = config;
+  const bip32Path = config.bip32Path ?? "44'/148'/0'";
+  let publicKey: string | undefined;
+
+  const getPublicKey = async (): Promise<string> => {
+    publicKey ??= await device.getPublicKey(bip32Path);
+    return publicKey;
+  };
+
+  return {
+    getPublicKey,
+    async isConnected(): Promise<boolean> {
+      try {
+        return device.isConnected ? await device.isConnected() : true;
+      } catch {
+        return false;
+      }
+    },
+    async signTransaction(xdrStr: string, _network: Network): Promise<string> {
+      try {
+        const txEnvelope = xdr.TransactionEnvelope.fromXDR(xdrStr, 'base64');
+        const signature = await device.signHash(bip32Path, hash(txEnvelope.toXDR()));
+        const kp = Keypair.fromPublicKey(await getPublicKey());
+        txEnvelope
+          .v1()
+          .signatures()
+          .push(
+            new xdr.DecoratedSignature({
+              hint: kp.signatureHint(),
+              signature: Buffer.from(signature),
+            }),
+          );
+        return txEnvelope.toXDR('base64');
+      } catch (err: any) {
+        throw new Error(`Hardware wallet signTransaction failed: ${err?.message || err}`);
+      }
+    },
+  };
+}
+
+/**
  * WalletAdapter implementation that delegates signing to an external KMS provider (issue #306).
  * Private key material never enters local memory or key storage.
  */
