@@ -7,6 +7,45 @@ import type { StreamRetryPolicy } from './events.js';
 /** Status of a payment stream. */
 export type StreamStatus = 'Active' | 'Cancelled' | 'Completed' | 'Paused';
 
+// ── Branded primitive types ───────────────────────────────────────────────────
+
+/**
+ * A Stellar account (G…) or contract (C…) address that has been validated
+ * against the base-32 checksum format (`/^[GC][A-Z2-7]{55}$/`).
+ *
+ * Obtain a value of this type through {@link assertStellarAddress} or
+ * {@link isStellarAddress}. Plain `string` is intentionally not assignable,
+ * so passing an unvalidated address to any API that expects `StellarAddress`
+ * is a **compile-time error**.
+ *
+ * @example
+ * ```ts
+ * import { assertStellarAddress } from '@sorostream/sdk';
+ *
+ * const token: StellarAddress = assertStellarAddress(process.env.USDC_ADDRESS!);
+ * const { streamId } = await client.createStream({ token, recipient, ... });
+ * ```
+ */
+export type StellarAddress = string & { readonly __stellarAddress: unique symbol };
+
+/**
+ * A strictly-positive (`> 0n`) bigint flow rate in stroops-per-second.
+ *
+ * Obtain a value of this type through {@link asPositiveFlowRate}.
+ * A plain `bigint` — including `0n` and negative values — is intentionally
+ * not assignable, so passing an unvalidated rate to {@link UpdateFlowRateParams}
+ * is a **compile-time error**.
+ *
+ * @example
+ * ```ts
+ * import { asPositiveFlowRate, toStroops } from '@sorostream/sdk';
+ *
+ * const rate: PositiveFlowRate = asPositiveFlowRate(toStroops('10') / 86_400n);
+ * await client.updateFlowRate({ streamId, newFlowRate: rate });
+ * ```
+ */
+export type PositiveFlowRate = bigint & { readonly __positiveFlowRate: unique symbol };
+
 // ── Event types (#1) ─────────────────────────────────────────────────────────
 
 export type StreamEventType =
@@ -180,15 +219,15 @@ export interface Stream {
   /** Unique stream identifier. */
   id: string;
   /** Address of the stream creator / payer. */
-  sender: string;
+  sender: StellarAddress;
   /** Address of the stream beneficiary. */
-  recipient: string;
+  recipient: StellarAddress;
   /** SAC token contract address (e.g. USDC). */
-  token: string;
+  token: StellarAddress;
   /** Total token deposit locked in stroops. */
   deposit: bigint;
   /** Tokens released per second in stroops. */
-  flowRate: bigint;
+  flowRate: PositiveFlowRate;
   /** Unix timestamp (seconds) when the stream started. */
   startTime: number;
   /** Unix timestamp (seconds) when the stream ends. */
@@ -220,9 +259,9 @@ export interface CreateStreamParams {
   /** If true, validate parameters and simulate via RPC without submitting (issue #439). */
   dryRun?: boolean;
   /** Beneficiary address. */
-  recipient: string;
+  recipient: StellarAddress;
   /** SAC token contract address. */
-  token: string;
+  token: StellarAddress;
   /** Total amount to stream in stroops. */
   amount: bigint;
   /** Stream duration in seconds. */
@@ -370,7 +409,7 @@ export interface BatchCancelResult {
 /** Parameters for updating a stream's flow rate. */
 export interface UpdateFlowRateParams {
   streamId: string;
-  newFlowRate: bigint;
+  newFlowRate: PositiveFlowRate;
 }
 
 /** Parameters for setting an operator on a stream. */
@@ -389,7 +428,7 @@ export interface OperatorTopUpParams {
 /** Parameters for transferring a stream to a new recipient. */
 export interface TransferStreamParams {
   streamId: string;
-  newRecipient: string;
+  newRecipient: StellarAddress;
 }
 
 /** Parameters for pausing a stream. */
@@ -628,11 +667,11 @@ export interface WalletAdapterSignResult {
 
 /** A single row for bulk stream creation. */
 export interface BulkStreamRow {
-  recipient: string;
+  recipient: StellarAddress;
   amount: bigint;
   durationSeconds: number;
   /** Optional per-row token override. Falls back to BulkCreateOptions.token when omitted. */
-  token?: string;
+  token?: StellarAddress;
   /** Optional cliff duration in seconds for this row (issue #74). Defaults to 0. */
   cliffSeconds?: number;
 }
@@ -640,7 +679,7 @@ export interface BulkStreamRow {
 /** Options for bulkCreateStreams. */
 export interface BulkCreateOptions {
   /** SAC token contract address. Applied as default when a row omits `token`. */
-  token: string;
+  token: StellarAddress;
   /** Whether auto-renew is enabled (default false). */
   autoRenew?: boolean;
   /** Max operations per transaction (default 8). */
@@ -781,9 +820,9 @@ export interface SplitStreamParams {
   /** Denominator of the split ratio (e.g. 100 for 70/100 = 70%). */
   ratioDenominator: number;
   /** First destination address for the split stream. */
-  recipientA: string;
+  recipientA: StellarAddress;
   /** Second destination address for the split stream. */
-  recipientB: string;
+  recipientB: StellarAddress;
 }
 
 /** Result of splitting a stream. */
@@ -1051,7 +1090,7 @@ export interface StreamHealthReport {
 /** Per-recipient aggregate of a set of streams. */
 export interface RecipientAggregate {
   /** Recipient address. */
-  recipient: string;
+  recipient: StellarAddress;
   /** Number of streams targeting this recipient. */
   streamCount: number;
   /** Total deposited in stroops. */

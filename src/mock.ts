@@ -53,6 +53,8 @@ import type {
   GetStreamsOptions,
   BatchStreamsResult,
   SimulateStreamResult,
+  StellarAddress,
+  PositiveFlowRate,
 } from './types.js';
 import { streamToJSON, filterStreams, safeClaimable } from './utils.js';
 import { InsufficientAmountError, SelfStreamError } from './errors.js';
@@ -85,14 +87,14 @@ type Listener = {
 export class MockSoroStreamClient {
   private streams = new Map<string, Stream>();
   private listeners = new Map<string, Listener>();
-  private senderKey: string;
+  private senderKey: StellarAddress;
 
-  constructor(senderKey = 'GMOCK_SENDER') {
+  constructor(senderKey = 'GMOCK_SENDER_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' as StellarAddress) {
     this.senderKey = senderKey;
   }
 
   /** Override the mock's current "sender" address (simulates wallet.getPublicKey). */
-  setSender(address: string): void {
+  setSender(address: StellarAddress): void {
     this.senderKey = address;
   }
 
@@ -172,7 +174,7 @@ export class MockSoroStreamClient {
 
     const id = String(nextId++);
     const now = nowSec();
-    const flowRate = params.amount / BigInt(params.durationSeconds);
+    const flowRate = (params.amount / BigInt(params.durationSeconds)) as PositiveFlowRate;
     const stream: Stream = {
       id,
       sender: this.senderKey,
@@ -556,8 +558,8 @@ export class MockSoroStreamClient {
     const amountA = (remainingBalance * ratioA) / totalRatio;
     const amountB = (remainingBalance * ratioB) / totalRatio;
 
-    const flowRateA = amountA / BigInt(Math.max(1, remainingDuration));
-    const flowRateB = amountB / BigInt(Math.max(1, remainingDuration));
+    const flowRateA = (amountA / BigInt(Math.max(1, remainingDuration))) as PositiveFlowRate;
+    const flowRateB = (amountB / BigInt(Math.max(1, remainingDuration))) as PositiveFlowRate;
 
     const idA = String(nextId++);
     const idB = String(nextId++);

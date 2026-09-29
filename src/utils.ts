@@ -4,6 +4,7 @@ import {
   FederationResolutionError,
   InsecureRpcUrlError,
   InvalidStreamIdError,
+  InvalidAddressError,
 } from './errors.js';
 import { jitterDelay } from './internal.js';
 export { redactSecretKey, jitterDelay } from './internal.js';
@@ -37,6 +38,9 @@ import type {
   MemoHash,
   StreamHealthResult,
   StreamCompletedSummary,
+  StellarAddress,
+  PositiveFlowRate,
+  StreamStatus,
 } from './types.js';
 
 /** A single point in a stream's payout forecast. */
@@ -312,6 +316,67 @@ export function assertSecureRpcUrl(rpcUrl: string): void {
  */
 export function isValidStellarAddress(address: string): boolean {
   return typeof address === 'string' && /^[GC][A-Z2-7]{55}$/.test(address);
+}
+
+/**
+ * Type-guard that narrows `address` to {@link StellarAddress} when it matches
+ * the Stellar base-32 format (`/^[GC][A-Z2-7]{55}$/`).
+ *
+ * Use this when you want a conditional branch:
+ * ```ts
+ * if (isStellarAddress(raw)) {
+ *   await client.createStream({ recipient: raw, token, ... });
+ * }
+ * ```
+ */
+export function isStellarAddress(address: string): address is StellarAddress {
+  return isValidStellarAddress(address);
+}
+
+/**
+ * Asserts that `address` is a valid Stellar address and returns it as a
+ * {@link StellarAddress} branded type.
+ *
+ * Throws {@link InvalidAddressError} when the format check fails, so invalid
+ * addresses are caught at the **call site** rather than silently forwarded to
+ * the contract encoder or the RPC layer.
+ *
+ * @example
+ * ```ts
+ * import { assertStellarAddress } from '@sorostream/sdk';
+ *
+ * const token = assertStellarAddress(process.env.USDC_ADDRESS!);
+ * const recipient = assertStellarAddress(userInput);
+ * await client.createStream({ token, recipient, amount, durationSeconds, autoRenew: false });
+ * ```
+ */
+export function assertStellarAddress(address: string): StellarAddress {
+  if (!isValidStellarAddress(address)) {
+    throw new InvalidAddressError(address);
+  }
+  return address as StellarAddress;
+}
+
+/**
+ * Constructs a {@link PositiveFlowRate} from a `bigint` value.
+ *
+ * Throws {@link SoroStreamError} when `rate` is zero or negative, turning a
+ * silent contract rejection into an **immediate compile-time-visible** error.
+ *
+ * @example
+ * ```ts
+ * import { asPositiveFlowRate, toStroops } from '@sorostream/sdk';
+ *
+ * // 10 USDC per day in stroops-per-second
+ * const rate = asPositiveFlowRate(toStroops('10') / 86_400n);
+ * await client.updateFlowRate({ streamId, newFlowRate: rate });
+ * ```
+ */
+export function asPositiveFlowRate(rate: bigint): PositiveFlowRate {
+  if (rate <= 0n) {
+    throw new SoroStreamError(`Flow rate must be > 0, got ${rate}`);
+  }
+  return rate as PositiveFlowRate;
 }
 
 /**
@@ -1843,11 +1908,11 @@ export function deserializeStreamFromJSON(json: string): import('./types.js').St
 
   const stream: import('./types.js').Stream = {
     id,
-    sender: String(parsed['sender'] ?? ''),
-    recipient: String(parsed['recipient'] ?? ''),
-    token: String(parsed['token'] ?? ''),
+    sender: String(parsed['sender'] ?? '') as StellarAddress,
+    recipient: String(parsed['recipient'] ?? '') as StellarAddress,
+    token: String(parsed['token'] ?? '') as StellarAddress,
     deposit,
-    flowRate,
+    flowRate: flowRate as PositiveFlowRate,
     startTime: Number(parsed['startTime'] ?? 0),
     endTime: Number(parsed['endTime'] ?? 0),
     lastWithdrawTime: Number(parsed['lastWithdrawTime'] ?? 0),
@@ -1968,6 +2033,32 @@ export function parseMemo(value: string | null | undefined): import('@stellar/st
 }
 
 // ── Issue #398: getStreamHealth ──────────────────────────────────────────────
+
+/**
+ * Exhaustiveness helper for {@link StreamStatus} switch statements.
+ *
+ * TypeScript will emit a **compile-time error** if a `switch` over
+ * `StreamStatus` reaches this call, which means a future status value was
+ * added to the union but the `switch` was not updated.
+ *
+ * @example
+ * ```ts
+ * import { assertExhaustiveStreamStatus } from '@sorostream/sdk';
+ *
+ * function label(status: StreamStatus): string {
+ *   switch (status) {
+ *     case 'Active':    return 'Live';
+ *     case 'Paused':    return 'Paused';
+ *     case 'Cancelled': return 'Cancelled';
+ *     case 'Completed': return 'Done';
+ *     default:          return assertExhaustiveStreamStatus(status);
+ *   }
+ * }
+ * ```
+ */
+export function assertExhaustiveStreamStatus(status: never): never {
+  throw new SoroStreamError(`Unhandled StreamStatus: ${String(status)}`);
+}
 
 /**
  * Returns a health score (0–100) and status string for a stream based on its

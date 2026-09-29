@@ -7,10 +7,12 @@ import { useWithdraw } from '../src/useWithdraw.js';
 import type { StreamReaderLike, WithdrawClientLike } from '../src/types.js';
 
 import { MockSoroStreamClient } from '../../../src/mock.js';
-import type { Stream } from '../../../src/types.js';
+import type { Stream, StellarAddress, PositiveFlowRate } from '../../../src/types.js';
+import { assertStellarAddress } from '../../../src/utils.js';
 
-const RECIPIENT = 'GAXXZ5XSL2VTQPGWB3LPU5273HSJXMK7VHLZTF2XKW65QFZVA3XKULQZ';
-const TOKEN = 'CAVTXNC2WCHINDNP4VBLSOQA2667VE3RPQZNGD5TFI4U2QSHTVAC667T';
+const RECIPIENT = assertStellarAddress('GAXXZ5XSL2VTQPGWB3LPU5273HSJXMK7VHLZTF2XKW65QFZVA3XKULQZ');
+const TOKEN = assertStellarAddress('CAVTXNC2WCHINDNP4VBLSOQA2667VE3RPQZNGD5TFI4U2QSHTVAC667T');
+const MOCK_SENDER = assertStellarAddress('GMOCK_SENDER_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
 
 const flush = async (): Promise<void> => {
   await nextTick();
@@ -22,11 +24,11 @@ const flush = async (): Promise<void> => {
 function makeStream(id: string, overrides: Partial<Stream> = {}): Stream {
   return {
     id,
-    sender: 'GSENDER',
+    sender: MOCK_SENDER,
     recipient: RECIPIENT,
     token: TOKEN,
     deposit: 1_000_000n,
-    flowRate: 100n,
+    flowRate: 100n as PositiveFlowRate,
     startTime: 1_700_000_000,
     endTime: 1_700_010_000,
     lastWithdrawTime: 1_700_000_000,

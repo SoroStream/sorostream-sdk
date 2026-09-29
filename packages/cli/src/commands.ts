@@ -1,4 +1,4 @@
-import { SoroStreamClient, toStroops, formatUSDC } from '@sorostream/sdk';
+import { SoroStreamClient, toStroops, formatUSDC, assertStellarAddress } from '@sorostream/sdk';
 import { createKeypairAdapter } from './wallet.js';
 import * as readline from 'node:readline';
 import { printOutput, type OutputFormat } from './output.js';
@@ -101,8 +101,8 @@ export async function cmdStreamCreate(opts: StreamCreateOptions): Promise<void> 
   const params = await resolveCreateParams(opts);
 
   const result = await client.createStream({
-    recipient: params.recipient,
-    token: params.token,
+    recipient: assertStellarAddress(params.recipient),
+    token: assertStellarAddress(params.token),
     amount: toStroops(params.amount),
     durationSeconds: params.duration,
     autoRenew: params.autoRenew,
@@ -130,8 +130,8 @@ export async function cmdCreate(
   const client = createClient(opts);
 
   const result = await client.createStream({
-    recipient: opts.recipient,
-    token: opts.token,
+    recipient: assertStellarAddress(opts.recipient),
+    token: assertStellarAddress(opts.token),
     amount: toStroops(opts.amount),
     durationSeconds: opts.duration,
     autoRenew: opts.autoRenew,
