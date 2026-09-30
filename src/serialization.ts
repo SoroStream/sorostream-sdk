@@ -6,7 +6,7 @@
  */
 
 import { Account, Contract, Memo, Networks, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
-import type { BuildUnsignedXdrParams, Network, Stream } from './types.js';
+import type { BuildUnsignedXdrParams, Network, Stream, StellarAddress, PositiveFlowRate } from './types.js';
 import { createContractEncoder } from './contractEncoders.js';
 
 const NETWORK_PASSPHRASES: Record<Network, string> = {
@@ -92,11 +92,11 @@ export function serializeStream(stream: Stream): SerializedStream {
 export function deserializeStream(data: SerializedStream): Stream {
   return {
     id: data.id,
-    sender: data.sender,
-    recipient: data.recipient,
-    token: data.token,
+    sender: data.sender as StellarAddress,
+    recipient: data.recipient as StellarAddress,
+    token: data.token as StellarAddress,
     deposit: BigInt(data.deposit),
-    flowRate: BigInt(data.flowRate),
+    flowRate: BigInt(data.flowRate) as PositiveFlowRate,
     startTime: data.startTime,
     endTime: data.endTime,
     lastWithdrawTime: data.lastWithdrawTime,

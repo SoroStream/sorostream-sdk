@@ -241,6 +241,8 @@ import type {
   DrainFlowResult,
   ProjectCostResult,
   ProjectStreamCost,
+  StellarAddress,
+  PositiveFlowRate,
 } from './types.js';
 import { withRetry, type RetryOptions } from './retry.js';
 import type { EventPollerOptions, StreamRetryPolicy } from './events.js';
@@ -563,11 +565,11 @@ function streamToJSONMethod(this: Stream): Record<string, unknown> {
 function nativeToStream(raw: Record<string, unknown>): Stream {
   return {
     id: safeIdString(raw['id']),
-    sender: String(raw['sender']),
-    recipient: String(raw['recipient']),
-    token: String(raw['token']),
+    sender: String(raw['sender']) as StellarAddress,
+    recipient: String(raw['recipient']) as StellarAddress,
+    token: String(raw['token']) as StellarAddress,
     deposit: safeBigInt(raw['deposit']),
-    flowRate: safeBigInt(raw['flow_rate']),
+    flowRate: safeBigInt(raw['flow_rate']) as PositiveFlowRate,
     startTime: Number(raw['start_time']),
     endTime: Number(raw['end_time']),
     lastWithdrawTime: Number(raw['last_withdraw_time']),
@@ -586,11 +588,11 @@ function scValToStream(val: xdr.ScVal): Stream {
   const raw = scValToNative(val) as Record<string, unknown>;
   return {
     id: safeIdString(raw['id']),
-    sender: String(raw['sender']),
-    recipient: String(raw['recipient']),
-    token: String(raw['token']),
+    sender: String(raw['sender']) as StellarAddress,
+    recipient: String(raw['recipient']) as StellarAddress,
+    token: String(raw['token']) as StellarAddress,
     deposit: safeBigInt(raw['deposit']),
-    flowRate: safeBigInt(raw['flow_rate']),
+    flowRate: safeBigInt(raw['flow_rate']) as PositiveFlowRate,
     startTime: Number(raw['start_time']),
     endTime: Number(raw['end_time']),
     lastWithdrawTime: Number(raw['last_withdraw_time']),

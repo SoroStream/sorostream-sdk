@@ -3,6 +3,7 @@ import { renderHook, act } from '@testing-library/react';
 
 import { useWithdraw } from '../src/useWithdraw.js';
 import type { WithdrawParams } from '../../../src/types.js';
+import { assertStellarAddress } from '../../../src/utils.js';
 
 function makeClient(withdrawImpl: ReturnType<typeof vi.fn>): {
   withdraw: typeof withdrawImpl;
@@ -103,8 +104,8 @@ describe('useWithdraw', () => {
     const { MockSoroStreamClient } = await import('../../../src/mock.js');
     const mock = new MockSoroStreamClient();
     const { streamId } = await mock.createStream({
-      recipient: 'GAXXZ5XSL2VTQPGWB3LPU5273HSJXMK7VHLZTF2XKW65QFZVA3XKULQZ',
-      token: 'CAVTXNC2WCHINDNP4VBLSOQA2667VE3RPQZNGD5TFI4U2QSHTVAC667T',
+      recipient: assertStellarAddress('GAXXZ5XSL2VTQPGWB3LPU5273HSJXMK7VHLZTF2XKW65QFZVA3XKULQZ'),
+      token: assertStellarAddress('CAVTXNC2WCHINDNP4VBLSOQA2667VE3RPQZNGD5TFI4U2QSHTVAC667T'),
       amount: 1_000_000n,
       durationSeconds: 3600,
       autoRenew: false,
