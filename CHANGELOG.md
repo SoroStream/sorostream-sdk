@@ -6,6 +6,17 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 
 ## [Unreleased]
 
+### Fixed
+- Fix `nativeToStream` referencing an undefined `stream` variable in dead code left over from a merge, which made every stream read throw `ReferenceError` (#611)
+- Fix `createStream` validating the token contract (an RPC round-trip) before cheap offline checks like `durationSeconds`, so malformed input unnecessarily waited on a network call before failing (#542)
+- Fix `createStream`'s token-contract validation running before the recipient/sender account-existence checks, so a failed account lookup during that validation could surface as a raw, unwrapped error instead of `AccountNotFoundError` (#542)
+- Fix the default `fetch` adapter (`getDefaultFetchAdapter`, `SoroStreamClient`'s fallback) binding to the global `fetch` reference at construction time instead of looking it up per call, so a `fetch` polyfill or test stub installed afterward was silently ignored (#216)
+- Fix `Cache`'s monotonic-clock selection being resolved once at module load instead of per call, so an environment change to `performance.now`/`process.hrtime` availability after that point had no effect (#203)
+- Fix the Lobstr wallet adapter's `signTransaction` throwing a generic "failed to sign" error when no provider is configured at all, instead of the same "provider is not available" error `getPublicKey` already throws for that case (#431)
+- Fix the `no-magic-flow-rate` ESLint rule checking for a `flowRate` property name on `updateFlowRate()` calls when the SDK's actual parameter is named `newFlowRate`, and missing negative numeric literals (`-500`), which parse as a `UnaryExpression` rather than a `Literal` (#633)
+- Fix the `require-claimable-before-withdraw` ESLint rule's auto-fixer not re-indenting the statement following its inserted `getClaimable` call (#634)
+- Fix `WriteRateLimiter`'s burst-allowance change bypassing queue-capacity backpressure entirely for any call using a bucket that hasn't been used yet, defeating the `queueSize` cap (#542)
+
 ## [1.0.0] - 2026-09-28
 
 ### Added

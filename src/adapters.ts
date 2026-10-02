@@ -52,5 +52,11 @@ export function getDefaultWebSocketFactory(): WebSocketFactory | null {
 
 /** Returns a {@link FetchAdapter} backed by the global `fetch`, or `null` if unavailable. */
 export function getDefaultFetchAdapter(): FetchAdapter | null {
-  return typeof fetch === 'undefined' ? null : fetch;
+  if (typeof fetch === 'undefined') return null;
+  // Looks up the global at call time rather than returning a reference bound
+  // now, so a global `fetch` installed/stubbed after this point (a polyfill,
+  // or vi.stubGlobal in tests) still takes effect.
+  const lazyFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+    fetch(input, init);
+  return lazyFetch as FetchAdapter;
 }

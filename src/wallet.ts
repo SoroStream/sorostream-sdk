@@ -1116,6 +1116,9 @@ export class LobstrWalletAdapter implements WalletAdapter {
     if (this.walletConnectAdapter) {
       return await this.walletConnectAdapter.signTransaction(xdrStr, network);
     }
+    if (!provider) {
+      throw new Error('Lobstr wallet provider is not available');
+    }
     throw new Error('Lobstr wallet failed to sign transaction');
   }
 

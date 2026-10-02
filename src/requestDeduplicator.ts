@@ -127,12 +127,14 @@ export class RequestDeduplicator {
     // Release the slot on settle. `finally` ensures cleanup runs whether the
     // promise fulfills or rejects, preventing leaks from timeouts or other
     // rejection scenarios.
-    shared.finally(() => {
-      if (this.inFlight.get(key) === shared) {
-        this.inFlight.delete(key);
-        this.startedAt.delete(key);
-      }
-    }).catch(() => {});
+    shared
+      .finally(() => {
+        if (this.inFlight.get(key) === shared) {
+          this.inFlight.delete(key);
+          this.startedAt.delete(key);
+        }
+      })
+      .catch(() => {});
 
     return shared;
   }

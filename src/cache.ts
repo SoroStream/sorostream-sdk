@@ -1,18 +1,18 @@
 // A monotonic clock for TTL checks that is not affected by system sleep.
-// Uses performance.now() in the browser, process.hrtime in Node.js, and falls back to Date.now().
-const now = (() => {
+// Uses performance.now() in the browser, process.hrtime in Node.js, and falls
+// back to Date.now(). Checked on every call (not cached at module load) so a
+// runtime environment change — e.g. a polyfill, or a test deleting these
+// globals to force the fallback — is picked up immediately.
+function now(): number {
   if (typeof performance !== 'undefined' && performance.now) {
-    return () => performance.now();
+    return performance.now();
   }
-  // Check for Node.js process.hrtime
   if (typeof process !== 'undefined' && process.hrtime) {
-    return () => {
-      const [seconds, nanoseconds] = process.hrtime();
-      return seconds * 1000 + nanoseconds / 1e6;
-    };
+    const [seconds, nanoseconds] = process.hrtime();
+    return seconds * 1000 + nanoseconds / 1e6;
   }
-  return () => Date.now();
-})();
+  return Date.now();
+}
 
 interface CacheEntry<T> {
   value: T;

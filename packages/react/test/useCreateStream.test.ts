@@ -41,9 +41,9 @@ describe('validateCreateStreamParams', () => {
   });
 
   it('rejects a missing recipient', () => {
-    expect(() =>
-      validateCreateStreamParams(validParams({ recipient: '' })),
-    ).toThrow(/recipient is required/);
+    expect(() => validateCreateStreamParams(validParams({ recipient: '' }))).toThrow(
+      /recipient is required/,
+    );
   });
 
   it('rejects a missing token', () => {
@@ -53,15 +53,15 @@ describe('validateCreateStreamParams', () => {
   });
 
   it('rejects a non-positive amount', () => {
-    expect(() =>
-      validateCreateStreamParams(validParams({ amount: 0n })),
-    ).toThrow(/amount is required/);
+    expect(() => validateCreateStreamParams(validParams({ amount: 0n }))).toThrow(
+      /amount is required/,
+    );
   });
 
   it('rejects a missing durationSeconds', () => {
-    expect(() =>
-      validateCreateStreamParams(validParams({ durationSeconds: NaN })),
-    ).toThrow(/durationSeconds is required/);
+    expect(() => validateCreateStreamParams(validParams({ durationSeconds: NaN }))).toThrow(
+      /durationSeconds is required/,
+    );
   });
 
   it('rejects a missing autoRenew', () => {

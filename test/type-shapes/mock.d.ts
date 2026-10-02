@@ -19,15 +19,15 @@
  * const claimable = await mock.getClaimable(streamId);
  * ```
  */
-import type { BatchCancelResult, CancelStreamParams, CloneStreamOverrides, CreateStreamParams, PaginatedStreams, PaginationParams, SetOperatorParams, SplitStreamParams, SplitStreamResult, Stream, StreamBalance, StreamEvent, StreamEventFilter, StreamFilterCriteria, StreamSnapshot, StreamSubscription, SoroStreamPlugin, TopUpParams, TransferStreamParams, PauseStreamParams, ResumeStreamParams, UpdateFlowRateParams, OperatorTopUpParams, WithdrawParams, WriteOptions, GetStreamsOptions, BatchStreamsResult } from './types.js';
+import type { BatchCancelResult, CancelStreamParams, CloneStreamOverrides, CreateStreamParams, PaginatedStreams, PaginationParams, SetOperatorParams, SplitStreamParams, SplitStreamResult, Stream, StreamBalance, StreamEvent, StreamEventFilter, StreamFilterCriteria, StreamSnapshot, StreamSubscription, SoroStreamPlugin, TopUpParams, TransferStreamParams, PauseStreamParams, ResumeStreamParams, UpdateFlowRateParams, OperatorTopUpParams, WithdrawParams, WriteOptions, GetStreamsOptions, BatchStreamsResult, SimulateStreamResult, StellarAddress } from './types.js';
 import { SoroStreamObservable } from './observable.js';
 export declare class MockSoroStreamClient {
     private streams;
     private listeners;
     private senderKey;
-    constructor(senderKey?: string);
+    constructor(senderKey?: StellarAddress);
     /** Override the mock's current "sender" address (simulates wallet.getPublicKey). */
-    setSender(address: string): void;
+    setSender(address: StellarAddress): void;
     /** Directly inject a pre-built stream — useful for testing edge cases. */
     seedStream(stream: Stream): void;
     /** Simulate `seconds` of time passing on a stream by shifting its timestamps backward. */
@@ -35,6 +35,10 @@ export declare class MockSoroStreamClient {
     private emit;
     createStream(params: CreateStreamParams, _signal?: AbortSignal, options?: WriteOptions): Promise<{
         streamId: string;
+        txHash: string;
+    }>;
+    simulateStream(params: CreateStreamParams): Promise<SimulateStreamResult>;
+    lockUntil(streamId: string, timestamp: Date): Promise<{
         txHash: string;
     }>;
     withdraw(params: WithdrawParams, _signal?: AbortSignal, options?: WriteOptions): Promise<{
@@ -72,7 +76,7 @@ export declare class MockSoroStreamClient {
     addDelegate(delegate: string): Promise<{
         txHash: string;
     }>;
-    getDelegates(delegator?: string): Promise<string[]>;
+    getDelegates(delegator?: StellarAddress): Promise<string[]>;
     revokeDelegate(delegate: string): Promise<{
         txHash: string;
     }>;
@@ -179,7 +183,7 @@ export declare class SoroStreamSandbox extends MockSoroStreamClient {
     private callLog;
     private scenarios;
     private unexpectedCallPolicy;
-    constructor(senderKey?: string);
+    constructor(senderKey?: StellarAddress);
     /** Configures the unexpected call handling policy. */
     setUnexpectedCallPolicy(policy: SandboxUnexpectedCallPolicy): void;
     /** Configures a custom mock handler or scenario for an SDK operation. */
@@ -206,5 +210,9 @@ export declare class SoroStreamSandbox extends MockSoroStreamClient {
     getMultipleStreamBalances(streamIds: string[]): Promise<StreamBalance[]>;
     getStreamsBySender(sender: string, pagination?: PaginationParams, filter?: StreamFilterCriteria): Promise<Stream[] | PaginatedStreams>;
     getStreamsByRecipient(recipient: string, pagination?: PaginationParams, filter?: StreamFilterCriteria): Promise<Stream[] | PaginatedStreams>;
+    lockUntil(streamId: string, timestamp: Date): Promise<{
+        txHash: string;
+    }>;
+    simulateStream(params: CreateStreamParams): Promise<SimulateStreamResult>;
 }
 //# sourceMappingURL=mock.d.ts.map

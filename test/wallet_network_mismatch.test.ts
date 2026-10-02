@@ -34,9 +34,7 @@ describe('#559 wallet network mismatch detection', () => {
     // The mismatch is detected on the first operation that requires the
     // wallet — `connect()`-style entry point. We drive it via the internal
     // check used by write operations.
-    await expect(client._checkWalletNetwork(adapter)).rejects.toThrow(
-      NetworkMismatchError,
-    );
+    await expect(client._checkWalletNetwork(adapter)).rejects.toThrow(NetworkMismatchError);
 
     const err = await client._checkWalletNetwork(adapter).catch((e) => e);
     expect(err).toBeInstanceOf(NetworkMismatchError);
@@ -72,9 +70,7 @@ describe('#559 wallet network mismatch detection', () => {
 
     // The event is emitted before the throw, so a handler can observe it.
     // We catch the throw because the default behaviour is to throw.
-    await expect(client._checkWalletNetwork(adapter)).rejects.toThrow(
-      NetworkMismatchError,
-    );
+    await expect(client._checkWalletNetwork(adapter)).rejects.toThrow(NetworkMismatchError);
 
     expect(mismatch).toHaveBeenCalledWith(
       expect.objectContaining({

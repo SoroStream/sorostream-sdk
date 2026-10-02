@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Keypair } from '@stellar/stellar-sdk';
+import { Keypair, Account } from '@stellar/stellar-sdk';
 
 import { SoroStreamClient } from '../src/SoroStreamClient.js';
 import { InMemoryEventBus } from '../src/eventBus.js';
@@ -112,7 +112,12 @@ describe('SoroStreamClient event bus integration', () => {
     });
 
     (client as any).server = {
-      getAccount: vi.fn().mockResolvedValue({ accountId: () => TEST_PK }),
+      // A real Account instance (not a bare { accountId } stub): createStream's
+      // token-contract validation simulates a transaction, which needs a
+      // working sequenceNumber() to build.
+      getAccount: vi.fn().mockImplementation(async (id: string) => new Account(id, '0')),
+      // No `error` field — simulateTransaction's result is read as a success.
+      simulateTransaction: vi.fn().mockResolvedValue({ result: { retval: undefined } }),
     };
     vi.spyOn(client, 'buildAndSubmit' as any).mockResolvedValue({
       txHash: 'txhash_create',

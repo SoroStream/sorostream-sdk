@@ -6,8 +6,15 @@
  */
 
 import { Account, Contract, Memo, Networks, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
-import type { BuildUnsignedXdrParams, Network, Stream, StellarAddress, PositiveFlowRate } from './types.js';
+import type {
+  BuildUnsignedXdrParams,
+  Network,
+  Stream,
+  StellarAddress,
+  PositiveFlowRate,
+} from './types.js';
 import { createContractEncoder } from './contractEncoders.js';
+import { assertStellarAddress } from './utils.js';
 
 const NETWORK_PASSPHRASES: Record<Network, string> = {
   mainnet: 'Public Global Stellar Network ; September 2015',
@@ -148,8 +155,8 @@ export function buildUnsignedXdr(
     switch (operation) {
       case 'createStream':
         op = encoder.createStream(sender, {
-          recipient: params.recipient!,
-          token: params.token!,
+          recipient: assertStellarAddress(params.recipient!),
+          token: assertStellarAddress(params.token!),
           amount: typeof params.amount === 'bigint' ? params.amount : BigInt(params.amount ?? 0),
           durationSeconds: Number(params.durationSeconds ?? 0),
           startTime: params.startTime,

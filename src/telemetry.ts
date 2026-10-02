@@ -34,10 +34,25 @@ function getOtel(): any | null {
  */
 export type TelemetryEventFilter = readonly string[] | ((eventType: string) => boolean);
 
+interface PendingSpan {
+  span: Span;
+  attributes?: Attributes;
+  endTime: number;
+}
+
 export class Telemetry {
   private tracer: Tracer | null = null;
   readonly enabled: boolean;
   private readonly eventFilter?: TelemetryEventFilter;
+
+  /** Spans queued to be ended as part of the next batch (issue #623). */
+  private pending: PendingSpan[] = [];
+  /** Maximum number of queued spans before an immediate flush is forced. */
+  private readonly maxBatchSize = 20;
+  /** Timer that triggers a flush after `flushIntervalMs` of inactivity. */
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Milliseconds to wait before auto-flushing a non-full batch. */
+  private readonly flushIntervalMs = 5_000;
 
   constructor(enabled: boolean, eventFilter?: TelemetryEventFilter) {
     this.enabled = enabled;

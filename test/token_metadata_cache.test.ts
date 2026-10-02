@@ -39,6 +39,9 @@ function viewResult(value: unknown): rpc.Api.SimulateTransactionSuccessResponse 
   return {
     result: { retval: nativeToScVal(value) },
     latestLedger: 100,
+    // isSimulationSuccess() checks for the presence of this field, not its
+    // contents, to distinguish a success response from an error one.
+    transactionData: {},
   } as unknown as rpc.Api.SimulateTransactionSuccessResponse;
 }
 

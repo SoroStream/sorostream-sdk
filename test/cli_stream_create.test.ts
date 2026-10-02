@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { RpcTransportAdapter } from '../src/transport.js';
-import { Keypair, Account, TransactionBuilder } from '@stellar/stellar-sdk';
+import { Keypair, Account, TransactionBuilder, nativeToScVal } from '@stellar/stellar-sdk';
 
 import { cmdStreamCreate, resolveCreateParams } from '../packages/cli/src/commands.js';
 import type { StreamCreateOptions } from '../packages/cli/src/commands.js';
@@ -22,35 +22,48 @@ function baseOptions(overrides: Partial<StreamCreateOptions> = {}): StreamCreate
   };
 }
 
+/**
+ * The contract's `get_streams_by_sender` returns a vec of stream structs
+ * with snake_case fields; `SoroStreamClient.getStreamsBySender` decodes this
+ * via `scValToNative` + `nativeToStream`. `createStream`'s post-submission
+ * flow calls `getStreamsBySender` to discover the newly-created stream's ID,
+ * so the generic simulation mock needs a retval shaped like that response
+ * (every other simulated call, e.g. token-contract validation, only checks
+ * for the *absence* of an `error` field and ignores this retval).
+ */
+function makeStreamsBySenderRetval(sender: string) {
+  return nativeToScVal([
+    {
+      id: 1n,
+      sender,
+      recipient: RECIPIENT,
+      token: TOKEN,
+      deposit: 100_000_000n,
+      flow_rate: 100n,
+      start_time: 1000,
+      end_time: 2000,
+      last_withdraw_time: 1000,
+      status: 'Active',
+      auto_renew: false,
+    },
+  ]);
+}
+
 function makeTransport(): RpcTransportAdapter {
   return {
     getAccount: vi.fn().mockImplementation(async (addr: string) => new Account(addr, '1')),
     getHealth: vi.fn(),
     getLatestLedger: vi.fn(),
     getTransaction: vi.fn().mockResolvedValue({ status: 'SUCCESS', hash: 'tx-abc' }),
-    simulateTransaction: vi.fn().mockResolvedValue({
+    simulateTransaction: vi.fn().mockImplementation(async () => ({
       id: 'sim',
       minResourceFee: '100',
       events: [],
       transactionData: {},
-    }),
+      result: { retval: makeStreamsBySenderRetval(SENDER_KP.publicKey()) },
+    })),
     prepareTransaction: vi.fn().mockImplementation(async (tx: any) => tx),
     sendTransaction: vi.fn().mockResolvedValue({ hash: 'tx-abc', successful: true }),
-    getStreamsBySender: vi.fn().mockImplementation((sender: string) => {
-      return [
-        {
-          id: '1',
-          sender,
-          recipient: RECIPIENT,
-          token: TOKEN,
-          deposit: 100_000_000n,
-          flowRate: 100n,
-          startTime: 1000,
-          endTime: 2000,
-          autoRenew: false,
-        },
-      ];
-    }),
     getEvents: vi.fn(),
   };
 }

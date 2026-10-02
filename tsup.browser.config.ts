@@ -1,13 +1,13 @@
-import { defineConfig } from "tsup";
+import { defineConfig } from 'tsup';
 
 export default defineConfig({
   entry: {
-    "sorostream.global": "src/index.ts",
+    'sorostream.global': 'src/index.ts',
   },
-  format: ["iife"],
-  globalName: "SoroStream",
+  format: ['iife'],
+  globalName: 'SoroStream',
   minify: true,
-  outDir: "dist",
+  outDir: 'dist',
   dts: false,
   sourcemap: false,
   clean: false,

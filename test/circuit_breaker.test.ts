@@ -44,7 +44,7 @@ describe('CircuitBreaker (#540)', () => {
 
     // Try to call while OPEN and cooldown not elapsed
     await expect(circuitBreaker.call(() => Promise.resolve('success'))).rejects.toThrow(
-      'RPC endpoint unavailable (circuit breaker open)'
+      'RPC endpoint unavailable (circuit breaker open)',
     );
     expect(circuitBreaker.getState()).toBe('OPEN'); // Should still be OPEN
   });
@@ -100,7 +100,7 @@ describe('CircuitBreaker (#540)', () => {
 
     // Immediately try again - should still be OPEN (cooldown reset)
     await expect(circuitBreaker.call(succeedingFn)).rejects.toThrow(
-      'RPC endpoint unavailable (circuit breaker open)'
+      'RPC endpoint unavailable (circuit breaker open)',
     );
     expect(circuitBreaker.getState()).toBe('OPEN');
   });

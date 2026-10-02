@@ -163,13 +163,19 @@ export class GasProfiler {
 
   async profileGetStream(streamId: string): Promise<SimulationProfile> {
     return this.simulateAndProfile('get_stream', { streamId }, () => {
-      return this.contract.call('get_stream', nativeToScVal(parseStreamId(streamId), { type: 'u64' }));
+      return this.contract.call(
+        'get_stream',
+        nativeToScVal(parseStreamId(streamId), { type: 'u64' }),
+      );
     });
   }
 
   async profileGetClaimable(streamId: string): Promise<SimulationProfile> {
     return this.simulateAndProfile('get_claimable', { streamId }, () => {
-      return this.contract.call('get_claimable', nativeToScVal(parseStreamId(streamId), { type: 'u64' }));
+      return this.contract.call(
+        'get_claimable',
+        nativeToScVal(parseStreamId(streamId), { type: 'u64' }),
+      );
     });
   }
 

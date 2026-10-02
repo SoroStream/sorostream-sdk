@@ -289,10 +289,12 @@ describe('Issue #558 — drainFlow', () => {
     });
 
     const order: string[] = [];
-    (client as any).buildAndSubmit = vi.fn().mockImplementation(async (op, _signal, _feeBump, name) => {
-      order.push(name);
-      return { txHash: `${name}-tx`, ledger: 1 };
-    });
+    (client as any).buildAndSubmit = vi
+      .fn()
+      .mockImplementation(async (op, _signal, _feeBump, name) => {
+        order.push(name);
+        return { txHash: `${name}-tx`, ledger: 1 };
+      });
 
     const result = await client.drainFlow({ streamId: '42' });
 
@@ -330,13 +332,15 @@ describe('Issue #558 — drainFlow', () => {
     });
 
     const order: string[] = [];
-    (client as any).buildAndSubmit = vi.fn().mockImplementation(async (op, _signal, _feeBump, name) => {
-      order.push(name);
-      if (name === 'withdraw') {
-        throw new Error('withdraw failed');
-      }
-      return { txHash: `${name}-tx`, ledger: 1 };
-    });
+    (client as any).buildAndSubmit = vi
+      .fn()
+      .mockImplementation(async (op, _signal, _feeBump, name) => {
+        order.push(name);
+        if (name === 'withdraw') {
+          throw new Error('withdraw failed');
+        }
+        return { txHash: `${name}-tx`, ledger: 1 };
+      });
 
     const result = await client.drainFlow({ streamId: '42' });
 
@@ -360,10 +364,12 @@ describe('Issue #558 — drainFlow', () => {
     (client as any).getClaimable = vi.fn().mockResolvedValue(0n);
 
     const order: string[] = [];
-    (client as any).buildAndSubmit = vi.fn().mockImplementation(async (op, _signal, _feeBump, name) => {
-      order.push(name);
-      return { txHash: `${name}-tx`, ledger: 1 };
-    });
+    (client as any).buildAndSubmit = vi
+      .fn()
+      .mockImplementation(async (op, _signal, _feeBump, name) => {
+        order.push(name);
+        return { txHash: `${name}-tx`, ledger: 1 };
+      });
 
     const result = await client.drainFlow({ streamId: '42' });
 

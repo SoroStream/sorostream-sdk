@@ -275,8 +275,13 @@ export function createPooledRpcTransport(
       }
     },
     teardown() {
-      // Keep the pooled servers so their connections are reused on the next
-      // call instead of being re-created (issue #621).
+      // teardown() is called once, from SoroStreamClient's explicit
+      // disconnect/destroy path — not per request — so it's safe to fully
+      // release the pool here. (Connection reuse across *individual calls*
+      // while the client is alive is handled by getServer()'s round-robin
+      // over the existing `servers` array, not by keeping it populated
+      // across a teardown.)
+      servers = [];
       activeRequests = 0;
     },
     getAccount: (address) => execute((s) => s.getAccount(address)),

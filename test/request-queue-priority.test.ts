@@ -67,12 +67,16 @@ describe('PriorityRequestQueue — per-request priority (issue #566)', () => {
       return 'n';
     });
 
-    queue.enqueue('write', async () => {
-      order.push('high-write-start');
-      await new Promise((r) => setTimeout(r, 5));
-      order.push('high-write-end');
-      return 'h';
-    }, { priority: 'high' });
+    queue.enqueue(
+      'write',
+      async () => {
+        order.push('high-write-start');
+        await new Promise((r) => setTimeout(r, 5));
+        order.push('high-write-end');
+        return 'h';
+      },
+      { priority: 'high' },
+    );
 
     await queue.waitForDrain();
 
@@ -86,8 +90,22 @@ describe('PriorityRequestQueue — per-request priority (issue #566)', () => {
     const order: string[] = [];
     // Enqueued in reverse priority order, but all should run immediately
     // (no queueing) in enqueue order because slots are available.
-    queue.enqueue('read', async () => { order.push('low'); return 'low'; }, { priority: 'low' });
-    queue.enqueue('read', async () => { order.push('high'); return 'high'; }, { priority: 'high' });
+    queue.enqueue(
+      'read',
+      async () => {
+        order.push('low');
+        return 'low';
+      },
+      { priority: 'low' },
+    );
+    queue.enqueue(
+      'read',
+      async () => {
+        order.push('high');
+        return 'high';
+      },
+      { priority: 'high' },
+    );
     await new Promise((r) => setTimeout(r, 10));
     expect(order).toEqual(['low', 'high']);
   });

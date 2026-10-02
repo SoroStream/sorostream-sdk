@@ -83,14 +83,20 @@ describe('createFederationPlugin (issue #401)', () => {
     expect(params3.recipient).toBe('alice*example.com');
 
     // Now make the fetch succeed on the next call
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      text: async () => `FEDERATION_SERVER="https://federation.example.com"`,
-    })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ account_id: MOCK_STELLAR_ADDRESS }),
-    });
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => `FEDERATION_SERVER="https://federation.example.com"`,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ account_id: MOCK_STELLAR_ADDRESS }),
+      });
+
+    // The third call's failure cached its own negative result starting at
+    // the current (fake) time — advance past its TTL too, or the fourth
+    // call would just serve that still-fresh negative cache without fetching.
+    await vi.advanceTimersByTimeAsync(negativeTtlMs + 1);
 
     // Fourth call: should succeed and update recipient
     const params4 = { recipient: 'alice*example.com', token: 'G...', amount: 3000n };

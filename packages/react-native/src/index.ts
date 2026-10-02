@@ -187,11 +187,11 @@ const FREIGHTER_MOBILE_NETWORK_MAP: Record<Network, string> = {
 
 /**
  * Creates a WalletAdapter for Freighter Mobile using deep-link signing.
- * 
+ *
  * @example
  * ```ts
  * import { SoroStreamClient, createFreighterMobileAdapter } from "@sorostream/sdk-react-native";
- * 
+ *
  * const freighterMobileAdapter = await createFreighterMobileAdapter();
  * const client = new SoroStreamClient({
  *   network: "testnet",

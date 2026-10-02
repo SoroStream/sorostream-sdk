@@ -991,6 +991,14 @@ describe('SoroStreamClient bulkCreateStreams', () => {
     });
 
     vi.spyOn(client, 'executeBatch').mockResolvedValue('txhash_bulk');
+    // bulkCreateStreams validates every distinct token contract via a
+    // simulated `symbol()` call (issue #611) before submitting any batch —
+    // stub it to a successful (non-error) simulation result.
+    vi.spyOn(client as any, 'simulateOp').mockResolvedValue({
+      result: { retval: nativeToScVal('MOCK', { type: 'symbol' }) },
+      id: '1',
+      latestLedger: 100,
+    });
   });
 
   it('processes rows and returns batch results', async () => {

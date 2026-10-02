@@ -165,6 +165,8 @@ import {
   StartTimeInPastError,
   StreamAlreadyLockedError,
   InvalidTokenContractError,
+  MalformedWalletResponseError,
+  FeeTooHighError,
 } from './errors.js';
 import type { BulkCreateFailedSlot } from './errors.js';
 import type {
@@ -246,7 +248,17 @@ import type {
 } from './types.js';
 import { withRetry, type RetryOptions } from './retry.js';
 import type { EventPollerOptions, StreamRetryPolicy } from './events.js';
-import { calculateVestingSchedule, streamToJSON, formatUSDC, projectCost, safeClaimable, safeBigInt, safeIdString } from './utils.js';
+import {
+  calculateVestingSchedule,
+  streamToJSON,
+  formatUSDC,
+  projectCost,
+  safeClaimable,
+  safeBigInt,
+  safeIdString,
+  assertStellarAddress,
+  asPositiveFlowRate,
+} from './utils.js';
 import { buildUnsignedXdr } from './serialization.js';
 import { cachedScVal } from './scValCache.js';
 import { checkPeerDependencies } from './peerDependencies.js';
@@ -563,7 +575,7 @@ function streamToJSONMethod(this: Stream): Record<string, unknown> {
 // Builds the Stream directly, assigning optional fields in place instead of
 // spreading throwaway `{ pausedAt }` / `{}` objects (issue #617).
 function nativeToStream(raw: Record<string, unknown>): Stream {
-  return {
+  const stream: Stream = {
     id: safeIdString(raw['id']),
     sender: String(raw['sender']) as StellarAddress,
     recipient: String(raw['recipient']) as StellarAddress,
@@ -766,16 +778,16 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   private readonly auditLogEnabled: boolean;
   // Issue #389: caller-supplied audit logger
   private readonly auditLogger: import('./types.js').AuditLogger | undefined;
-// Issue #437: structured logger for SDK diagnostic messages
-   private readonly logger: Logger;
-   // Issue #554: nonce provider for transaction replay protection
-   private readonly nonceProvider?: () => string;
+  // Issue #437: structured logger for SDK diagnostic messages
+  private readonly logger: Logger;
+  // Issue #554: nonce provider for transaction replay protection
+  private readonly nonceProvider?: () => string;
   // Issue #391: timestamp of the most recent successful RPC call (ms)
   private lastRpcTimestampMs: number | null = null;
-// Issue #270: telemetry opt-out flag
-   private readonly telemetryEnabled: boolean;
-   // Issue #568: OpenTelemetry telemetry instance
-   private readonly telemetry: Telemetry;
+  // Issue #270: telemetry opt-out flag
+  private readonly telemetryEnabled: boolean;
+  // Issue #568: OpenTelemetry telemetry instance
+  private readonly telemetry: Telemetry;
   // Issue #199: injectable storage/fetch adapters (replace direct browser global use)
   private readonly storageAdapter: StorageAdapter | null;
   private readonly fetchAdapter: FetchAdapter;
@@ -812,7 +824,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   // The configured RYOW wait timeout (0 = disabled).
   private readonly ryowTimeoutMs: number;
   // The configured RYOW cache-bypass window in ms (0 = disabled).
-  private readonly ryowBypassWindowMs: number = 0;
+  private readonly ryowBypassWindowMs: number;
 
   /** TTL cache: streamId → resolved claimable amount */
   private readonly claimableCache = new Cache<string, bigint>(STREAM_CACHE_TTL_MS);
@@ -842,8 +854,8 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   /** Issue #516: "any" subscribers — receive every stream event type. */
   private readonly _anySubscribers = new Map<string, (event: StreamEvent<TEventData>) => void>();
   private _anySubscriberCounter = 0;
-   /** Subscription for StreamCancelled contract events to invalidate cache. */
-   private readonly streamCancelledSubscription: any = null;
+  /** Subscription for StreamCancelled contract events to invalidate cache. */
+  private readonly streamCancelledSubscription: any = null;
   /** Event bus used to emit SDK lifecycle events. Issue #212. */
   private eventBus: IEventBus;
   /** Issue: cross-tab event relay (BroadcastChannel). Null when disabled. */
@@ -1026,26 +1038,33 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     this.batchingOptions = options.batchingOptions;
     this.auditLogEnabled = options.auditLog ?? false;
     this.auditLogger = options.auditLogger;
-// Issue #437: structured logger — default to NoopLogger when not provided
-   this.logger = options.logger ?? new NoopLogger();
-   // Issue #554: nonce provider — default to UUID-based generator (16 random bytes as MemoHash)
-    (this as any).nonceProvider = (options.nonceProvider as any) ?? (() => {
-     // Use crypto.getRandomValues if available (modern browsers and Node.js)
-     if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-       const array = new Uint8Array(16);
-       crypto.getRandomValues(array);
-       return array;
-     }
-     // Fallback to simple random byte generation
-     const array = new Uint8Array(16);
-     for (let i = 0; i < 16; i++) {
-       array[i] = Math.floor(Math.random() * 256);
-     }
-     return array;
-   });
+    // Issue #437: structured logger — default to NoopLogger when not provided
+    this.logger = options.logger ?? new NoopLogger();
+    // Issue #554: nonce provider — default to UUID-based generator (16 random bytes as MemoHash)
+    (this as any).nonceProvider =
+      (options.nonceProvider as any) ??
+      (() => {
+        // Use crypto.getRandomValues if available (modern browsers and Node.js)
+        if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+          const array = new Uint8Array(16);
+          crypto.getRandomValues(array);
+          return array;
+        }
+        // Fallback to simple random byte generation
+        const array = new Uint8Array(16);
+        for (let i = 0; i < 16; i++) {
+          array[i] = Math.floor(Math.random() * 256);
+        }
+        return array;
+      });
     this.telemetryEnabled = options.telemetry !== false;
     this.storageAdapter = options.adapters?.storage ?? getDefaultStorageAdapter();
-    this.fetchAdapter = options.adapters?.fetch ?? getDefaultFetchAdapter() ?? fetch;
+    // The `fetch` fallback is a lambda that looks up the global at call time
+    // rather than binding to it here, so a global `fetch` installed/stubbed
+    // after construction (e.g. a polyfill, or vi.stubGlobal in tests) still
+    // takes effect.
+    this.fetchAdapter =
+      options.adapters?.fetch ?? getDefaultFetchAdapter() ?? ((...args) => fetch(...args));
     // Issue #470: opt-in localStorage-backed cache for last-known stream state
     this.persistentStreamCache =
       options.cacheStreamState && this.storageAdapter
@@ -1053,12 +1072,14 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         : null;
     // Issue #271: RYOW timeout (0 = disabled for zero-overhead backward compat)
     this.ryowTimeoutMs = options.ryowTimeoutMs ?? 10_000;
-// Issue #203: token metadata cache (10-minute default TTL)
-     this.tokenMetadataCache = new Cache<string, TokenMetadata>(
-       options.tokenMetadataTtlMs ?? 600_000,
-     );
-     // Issue #568: Initialize OpenTelemetry
-     this.telemetry = new Telemetry(this.telemetryEnabled, options.telemetryEvents);
+    // Issue #564: read-your-own-writes cache bypass window (0 = disabled).
+    this.ryowBypassWindowMs = options.readConsistencyWindowMs ?? 5_000;
+    // Issue #203: token metadata cache (10-minute default TTL)
+    this.tokenMetadataCache = new Cache<string, TokenMetadata>(
+      options.tokenMetadataTtlMs ?? 600_000,
+    );
+    // Issue #568: Initialize OpenTelemetry
+    this.telemetry = new Telemetry(this.telemetryEnabled, options.telemetryEvents);
     // Issue #149: connection pool stats tracker
     this.connectionPool = {
       maxConnections: options.maxConnections ?? 5,
@@ -1116,26 +1137,26 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    * is garbage-collected, and Node.js interval handles are `unref()`'d so they
    * do not keep the event loop alive (issue #412).
    */
-destroy(): void {
-     if (this.destroyed) return;
-     this.destroyed = true;
-     clientFinalizers?.unregister(this);
-     // Flush batched telemetry and release cached stream objects (issues #623, #624).
-     this.telemetry?.flush();
-     this.streamCache.clear();
-     this.eventPoller = null;
-     this.pool = null;
-     // Issue #423: drop shared observables so their poll loops are not kept
-     // reachable after teardown. `runClientCleanup` stops the timers themselves.
-     this.streamObservables.clear();
-     this.claimableObservables.clear();
-     // Issue #545: unsubscribe from StreamCancelled contract events
-     this.streamCancelledSubscription?.unsubscribe();
-     runClientCleanup(this.ownedTimers);
-     // Sever the relay from the event bus so post-destroy emits are no-ops.
-     this.crossTabRelay = null;
-     if (this.crossTabEventBus) this.crossTabEventBus.relay = null;
-   }
+  destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    clientFinalizers?.unregister(this);
+    // Flush batched telemetry and release cached stream objects (issues #623, #624).
+    this.telemetry?.flush();
+    this.streamCache.clear();
+    this.eventPoller = null;
+    this.pool = null;
+    // Issue #423: drop shared observables so their poll loops are not kept
+    // reachable after teardown. `runClientCleanup` stops the timers themselves.
+    this.streamObservables.clear();
+    this.claimableObservables.clear();
+    // Issue #545: unsubscribe from StreamCancelled contract events
+    this.streamCancelledSubscription?.unsubscribe();
+    runClientCleanup(this.ownedTimers);
+    // Sever the relay from the event bus so post-destroy emits are no-ops.
+    this.crossTabRelay = null;
+    if (this.crossTabEventBus) this.crossTabEventBus.relay = null;
+  }
 
   /**
    * Re-opens the cross-tab channel for the current network scope, replacing
@@ -1549,21 +1570,21 @@ destroy(): void {
    *
    * Issue #270.
    */
-get isTelemetryEnabled(): boolean {
-     return this.telemetryEnabled;
-   }
+  get isTelemetryEnabled(): boolean {
+    return this.telemetryEnabled;
+  }
 
-   /**
-    * Issue #568: Start a telemetry span for a method call.
-    * @param name - The span name
-    * @param attributes - Optional attributes to set on the span
-    * @returns The span, or null if telemetry is disabled
-    */
-   private startSpan(name: string, attributes?: Record<string, string | number | boolean>): any {
-     if (!this.telemetryEnabled) return null;
-     const span = this.telemetry.startSpan(name, { attributes });
-     return span;
-   }
+  /**
+   * Issue #568: Start a telemetry span for a method call.
+   * @param name - The span name
+   * @param attributes - Optional attributes to set on the span
+   * @returns The span, or null if telemetry is disabled
+   */
+  private startSpan(name: string, attributes?: Record<string, string | number | boolean>): any {
+    if (!this.telemetryEnabled) return null;
+    const span = this.telemetry.startSpan(name, { attributes });
+    return span;
+  }
 
   /**
    * Returns a monotonically increasing version number that increments
@@ -2186,66 +2207,66 @@ get isTelemetryEnabled(): boolean {
       { ...this.submitRetry, signal },
     );
 
-const txBuilder = new TransactionBuilder(account, {
-       fee: BASE_FEE,
-       networkPassphrase: NETWORK_PASSPHRASES[this.network],
-     }).addOperation(operation);
+    const txBuilder = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: NETWORK_PASSPHRASES[this.network],
+    }).addOperation(operation);
 
-     // Issue #554: Add nonce from nonceProvider if available
-     let finalMemo: string | MemoHash | undefined = memo;
-     if (this.nonceProvider) {
-       const nonceBytes = (this.nonceProvider as () => any)();
-       
-       if (memo !== undefined) {
-         // Both user memo and nonceProvider are present - combine them
-         let combinedBytes: Uint8Array;
-         if (typeof memo === 'string') {
-           // User memo is string - convert to bytes
-           const memoBytes = new TextEncoder().encode(memo);
-           // Combine nonceBytes + memoBytes
-           combinedBytes = new Uint8Array(nonceBytes.length + memoBytes.length);
-           combinedBytes.set(nonceBytes, 0);
-           combinedBytes.set(memoBytes, nonceBytes.length);
-         } else {
-           // User memo is already MemoHash (Uint8Array) - combine the byte arrays
-           combinedBytes = new Uint8Array(nonceBytes.length + memo.length);
-           combinedBytes.set(nonceBytes, 0);
-           combinedBytes.set(memo, nonceBytes.length);
-         }
-         
-         // If too long, truncate; if too short, pad with zeros to 32 bytes
-         if (combinedBytes.length > 32) {
-           // Truncate to 32 bytes
-           finalMemo = combinedBytes.slice(0, 32) as MemoHash;
-         } else if (combinedBytes.length < 32) {
-           // Pad to 32 bytes
-           const padded = new Uint8Array(32);
-           padded.set(combinedBytes, 0);
-           finalMemo = padded as MemoHash;
-         } else {
-           // Exactly 32 bytes
-           finalMemo = combinedBytes as MemoHash;
-         }
-       } else {
-         // No user memo, use nonce as memo (pad to 32 bytes if needed)
-         if (nonceBytes.length > 32) {
-           // Truncate to 32 bytes
-           finalMemo = nonceBytes.slice(0, 32) as MemoHash;
-         } else if (nonceBytes.length < 32) {
-           // Pad to 32 bytes
-           const padded = new Uint8Array(32);
-           padded.set(nonceBytes, 0);
-           finalMemo = padded as MemoHash;
-         } else {
-           // Exactly 32 bytes
-           finalMemo = nonceBytes as MemoHash;
-         }
-       }
-     }
+    // Issue #554: Add nonce from nonceProvider if available
+    let finalMemo: string | MemoHash | undefined = memo;
+    if (this.nonceProvider) {
+      const nonceBytes = (this.nonceProvider as () => any)();
 
-     if (finalMemo !== undefined) {
-       txBuilder.addMemo(this.buildMemo(finalMemo));
-     }
+      if (memo !== undefined) {
+        // Both user memo and nonceProvider are present - combine them
+        let combinedBytes: Uint8Array;
+        if (typeof memo === 'string') {
+          // User memo is string - convert to bytes
+          const memoBytes = new TextEncoder().encode(memo);
+          // Combine nonceBytes + memoBytes
+          combinedBytes = new Uint8Array(nonceBytes.length + memoBytes.length);
+          combinedBytes.set(nonceBytes, 0);
+          combinedBytes.set(memoBytes, nonceBytes.length);
+        } else {
+          // User memo is already MemoHash (Uint8Array) - combine the byte arrays
+          combinedBytes = new Uint8Array(nonceBytes.length + memo.length);
+          combinedBytes.set(nonceBytes, 0);
+          combinedBytes.set(memo, nonceBytes.length);
+        }
+
+        // If too long, truncate; if too short, pad with zeros to 32 bytes
+        if (combinedBytes.length > 32) {
+          // Truncate to 32 bytes
+          finalMemo = combinedBytes.slice(0, 32) as MemoHash;
+        } else if (combinedBytes.length < 32) {
+          // Pad to 32 bytes
+          const padded = new Uint8Array(32);
+          padded.set(combinedBytes, 0);
+          finalMemo = padded as MemoHash;
+        } else {
+          // Exactly 32 bytes
+          finalMemo = combinedBytes as MemoHash;
+        }
+      } else {
+        // No user memo, use nonce as memo (pad to 32 bytes if needed)
+        if (nonceBytes.length > 32) {
+          // Truncate to 32 bytes
+          finalMemo = nonceBytes.slice(0, 32) as MemoHash;
+        } else if (nonceBytes.length < 32) {
+          // Pad to 32 bytes
+          const padded = new Uint8Array(32);
+          padded.set(nonceBytes, 0);
+          finalMemo = padded as MemoHash;
+        } else {
+          // Exactly 32 bytes
+          finalMemo = nonceBytes as MemoHash;
+        }
+      }
+    }
+
+    if (finalMemo !== undefined) {
+      txBuilder.addMemo(this.buildMemo(finalMemo));
+    }
 
     const tx = txBuilder.setTimeout(30).build();
 
@@ -2545,14 +2566,14 @@ const txBuilder = new TransactionBuilder(account, {
 
   // ── Token metadata cache (Issue #203) ────────────────────────────────────
 
-/**
+  /**
    * Fetches and caches the SAC token metadata (name, symbol, decimals).
    * Concurrent calls for the same token share a single in-flight request.
    */
   async getTokenMetadata(tokenAddress: string): Promise<TokenMetadata> {
     // Issue #568: Add OpenTelemetry tracing span
     const span = this.startSpan('getTokenMetadata', {
-      'token.address': tokenAddress
+      'token.address': tokenAddress,
     });
     try {
       const cached = this.tokenMetadataCache.get(tokenAddress);
@@ -2571,9 +2592,18 @@ const txBuilder = new TransactionBuilder(account, {
           ]);
 
           const metadata: TokenMetadata = {
-            name: rpc.Api.isSimulationSuccess(nameRes) && nameRes.result ? String(scValToNative(nameRes.result.retval)) : 'Token',
-            symbol: rpc.Api.isSimulationSuccess(symbolRes) && symbolRes.result ? String(scValToNative(symbolRes.result.retval)) : 'TKN',
-            decimals: rpc.Api.isSimulationSuccess(decimalsRes) && decimalsRes.result ? Number(scValToNative(decimalsRes.result.retval)) : 7,
+            name:
+              rpc.Api.isSimulationSuccess(nameRes) && nameRes.result
+                ? String(scValToNative(nameRes.result.retval))
+                : 'Token',
+            symbol:
+              rpc.Api.isSimulationSuccess(symbolRes) && symbolRes.result
+                ? String(scValToNative(symbolRes.result.retval))
+                : 'TKN',
+            decimals:
+              rpc.Api.isSimulationSuccess(decimalsRes) && decimalsRes.result
+                ? Number(scValToNative(decimalsRes.result.retval))
+                : 7,
           };
           this.tokenMetadataCache.set(tokenAddress, metadata);
           return metadata;
@@ -2606,7 +2636,7 @@ const txBuilder = new TransactionBuilder(account, {
   async resolveFederationAddress(address: string): Promise<string | null> {
     // Issue #568: Add OpenTelemetry tracing span
     const span = this.startSpan('resolveFederationAddress', {
-      'federation.address': address
+      'federation.address': address,
     });
     try {
       try {
@@ -2640,8 +2670,9 @@ const txBuilder = new TransactionBuilder(account, {
       throw new InvalidAddressError(params.token);
     }
 
-    await this.validateTokenContract(params.token);
-
+    // Pure, offline-checkable parameter validation runs before any
+    // network-dependent checks (token contract simulation, account lookups)
+    // so malformed input fails fast without an RPC round-trip.
     if (params.durationSeconds < MIN_STREAM_DURATION_SECONDS) {
       throw new ZeroDurationError(
         `Stream duration must be >= ${MIN_STREAM_DURATION_SECONDS}s, got ${params.durationSeconds}s`,
@@ -2704,6 +2735,12 @@ const txBuilder = new TransactionBuilder(account, {
     } catch {
       throw new AccountNotFoundError(sender);
     }
+
+    // Runs last: this simulates a transaction (via simulateOp), which itself
+    // calls getAccount(sender) to build the simulation. Running it after the
+    // explicit account checks above keeps their errors from being shadowed
+    // by a raw/unwrapped failure surfacing through the simulation path.
+    await this.validateTokenContract(params.token);
   }
 
   /**
@@ -2824,179 +2861,181 @@ const txBuilder = new TransactionBuilder(account, {
     });
   }
 
-async createStream(
-     params: CreateStreamParams,
-     signal?: AbortSignal,
-     options?: WriteOptions,
-   ): Promise<{ streamId: string; txHash: string } | CreateStreamDryRunResult> {
-     return this.runWithMiddleware('createStream', [params], async () => {
-       // Issue #568: Add OpenTelemetry tracing span
-       const span = this.startSpan('createStream', {
-         'stream.recipient': params.recipient,
-         'stream.token': params.token,
-         'stream.amount': params.amount.toString(),
-         'stream.durationSeconds': params.durationSeconds,
-         'stream.cliffSeconds': params.cliffSeconds ?? 0
-       });
-       try {
-         if (params.amount <= 0n) throw new InsufficientAmountError();
-         await this.validateCliff(params.cliffSeconds ?? 0);
+  async createStream(
+    params: CreateStreamParams,
+    signal?: AbortSignal,
+    options?: WriteOptions,
+  ): Promise<{ streamId: string; txHash: string } | CreateStreamDryRunResult> {
+    return this.runWithMiddleware('createStream', [params], async () => {
+      // Issue #568: Add OpenTelemetry tracing span
+      const span = this.startSpan('createStream', {
+        'stream.recipient': params.recipient,
+        'stream.token': params.token,
+        'stream.amount': params.amount.toString(),
+        'stream.durationSeconds': params.durationSeconds,
+        'stream.cliffSeconds': params.cliffSeconds ?? 0,
+      });
+      try {
+        if (params.amount <= 0n) throw new InsufficientAmountError();
+        await this.validateCliff(params.cliffSeconds ?? 0);
 
-         this.logger.info(
-           `createStream: creating stream for recipient ${params.recipient}, amount=${params.amount}, duration=${params.durationSeconds}s`,
-         );
-
-         // Issue #231: Warn (or throw when strict:true) if the caller provides a
-         // nonce field but the contract does not support it.
-         if (params.nonce !== undefined) {
-           const nonceOk = await this.supportsNonce();
-           if (!nonceOk) {
-             if (options?.strict) {
-               throw new NonceNotSupportedError();
-             } else {
-               console.warn(
-                 '[SoroStream SDK] createStream: nonce was provided but the deployed ' +
-                   'contract does not support nonce-based idempotency. ' +
-                   'Retries will NOT be deduplicated and may create duplicate streams. ' +
-                   'Upgrade the contract or pass strict: true in WriteOptions to turn ' +
-                   'this into an error.',
-               );
-             }
-           }
-         }
-
-         // Resolve federation address if needed, with caching
-         if (isFederationAddress(params.recipient)) {
-           const cached = this.federationCache.get(params.recipient);
-           if (cached) {
-             params = { ...params, recipient: cached };
-           } else {
-             const resolved = await resolveFederationAddress(params.recipient, this.fetchAdapter);
-             this.federationCache.set(params.recipient, resolved);
-             params = { ...params, recipient: resolved };
-           }
-         }
-
-         const sender = await this.requireWalletAdapter().getPublicKey();
-
-         // Issue #232: Prevent self-streaming (recipient === sender).
-         // Checked before validateStreamParams so SelfStreamError is never
-         // shadowed by an AccountNotFoundError from the on-chain account lookup.
-         if (params.recipient === sender) {
-        throw new SelfStreamError();
-      }
-
-      // Issue #405: optional trust score / KYC integration.
-      // Called after the self-stream check but before on-chain validation so
-      // the provider sees the resolved (non-federation) recipient address.
-      // Any error thrown by the provider propagates unchanged to the caller.
-      if (this.onRecipientTrustScore) {
-        await this.onRecipientTrustScore(params.recipient);
-      }
-
-      if (this.checkDuplicate) {
-        const existingResult = await this.getStreamsBySender(sender);
-        const existingStreams = Array.isArray(existingResult)
-          ? existingResult
-          : existingResult.streams;
-        const isDup = existingStreams.some(
-          (s) =>
-            s.recipient === params.recipient && s.token === params.token && s.status === 'Active',
+        this.logger.info(
+          `createStream: creating stream for recipient ${params.recipient}, amount=${params.amount}, duration=${params.durationSeconds}s`,
         );
-        if (isDup) {
-          throw new DuplicateStreamError();
+
+        // Issue #231: Warn (or throw when strict:true) if the caller provides a
+        // nonce field but the contract does not support it.
+        if (params.nonce !== undefined) {
+          const nonceOk = await this.supportsNonce();
+          if (!nonceOk) {
+            if (options?.strict) {
+              throw new NonceNotSupportedError();
+            } else {
+              console.warn(
+                '[SoroStream SDK] createStream: nonce was provided but the deployed ' +
+                  'contract does not support nonce-based idempotency. ' +
+                  'Retries will NOT be deduplicated and may create duplicate streams. ' +
+                  'Upgrade the contract or pass strict: true in WriteOptions to turn ' +
+                  'this into an error.',
+              );
+            }
+          }
+        }
+
+        // Resolve federation address if needed, with caching
+        if (isFederationAddress(params.recipient)) {
+          const cached = this.federationCache.get(params.recipient);
+          if (cached) {
+            params = { ...params, recipient: assertStellarAddress(cached) };
+          } else {
+            const resolved = await resolveFederationAddress(params.recipient, this.fetchAdapter);
+            this.federationCache.set(params.recipient, resolved);
+            params = { ...params, recipient: assertStellarAddress(resolved) };
+          }
+        }
+
+        const sender = await this.requireWalletAdapter().getPublicKey();
+
+        // Issue #232: Prevent self-streaming (recipient === sender).
+        // Checked before validateStreamParams so SelfStreamError is never
+        // shadowed by an AccountNotFoundError from the on-chain account lookup.
+        if (params.recipient === sender) {
+          throw new SelfStreamError();
+        }
+
+        // Issue #405: optional trust score / KYC integration.
+        // Called after the self-stream check but before on-chain validation so
+        // the provider sees the resolved (non-federation) recipient address.
+        // Any error thrown by the provider propagates unchanged to the caller.
+        if (this.onRecipientTrustScore) {
+          await this.onRecipientTrustScore(params.recipient);
+        }
+
+        if (this.checkDuplicate) {
+          const existingResult = await this.getStreamsBySender(sender);
+          const existingStreams = Array.isArray(existingResult)
+            ? existingResult
+            : existingResult.streams;
+          const isDup = existingStreams.some(
+            (s) =>
+              s.recipient === params.recipient && s.token === params.token && s.status === 'Active',
+          );
+          if (isDup) {
+            throw new DuplicateStreamError();
+          }
+        }
+
+        // Full validation (format checks + on-chain account verification) runs
+        // after the self-stream and duplicate checks so those errors always take
+        // priority and are never shadowed by AccountNotFoundError.
+        await this.validateStreamParams(params);
+
+        if (!params.skipAllowanceCheck) {
+          await this.checkAllowance(params.token, params.amount);
+        }
+
+        const operation = this.encoder.createStream(sender, params);
+
+        // Issue #268: explain mode — return dry-run description without submitting.
+        if (options?.explain) {
+          const durationDays = (params.durationSeconds / 86400).toFixed(1);
+          const amountUsdc = formatUSDC(params.amount);
+          return this.explainOperation(
+            operation,
+            'createStream',
+            () =>
+              `Create a stream of ${amountUsdc} USDC over ${durationDays} days ` +
+              `from ${sender} to ${params.recipient}`,
+            [sender, params.recipient, params.token],
+            () => [
+              { address: sender, token: params.token, delta: -params.amount },
+              { address: params.recipient, token: params.token, delta: params.amount },
+            ],
+          ) as unknown as { streamId: string; txHash: string };
+        }
+
+        // Issue #439: dryRun mode — validate parameters and simulate without broadcasting
+        if (options?.dryRun || (params as any).dryRun) {
+          const simResult = await this.simulateOp(operation);
+          const isSuccess = rpc.Api.isSimulationSuccess(simResult);
+          const minFee = isSuccess
+            ? String(
+                (simResult as rpc.Api.SimulateTransactionSuccessResponse).minResourceFee ??
+                  BASE_FEE,
+              )
+            : BASE_FEE;
+          return {
+            dryRun: true,
+            simulated: isSuccess,
+            expectedFee: minFee,
+            minResourceFee: minFee,
+            result: simResult,
+            params,
+          } as unknown as { streamId: string; txHash: string };
+        }
+
+        const feeBump = this.resolveFeeBump(options?.feeBump);
+        const { txHash, ledger } = await this.buildAndSubmit(
+          operation,
+          signal,
+          feeBump,
+          'createStream',
+          options?.memo,
+          options?.timeoutMs ?? options?.timeout,
+        );
+
+        const result = await this.getStreamsBySender(sender);
+        const streams = Array.isArray(result) ? result : result.streams;
+        const latest = streams[streams.length - 1];
+        if (!latest)
+          throw new StreamNotFoundError('(unknown — post-creation fetch returned empty)');
+
+        // Issue #271 / #564: record the confirmed ledger and the write timestamp
+        // so a subsequent getStream for the new stream bypasses the cache.
+        this._recordWriteTimestamp(latest.id, ledger);
+
+        // Issue #274: store namespace in the off-chain registry
+        if (params.namespace) {
+          this.namespaceRegistry.set(latest.id, params.namespace);
+        }
+
+        // Issue #212: notify subscribers of the custom event bus.
+        this.eventBus.emit('stream.created', {
+          streamId: latest.id,
+          sender,
+          recipient: params.recipient,
+          token: params.token,
+          txHash,
+        });
+
+        return { streamId: latest.id, txHash };
+      } finally {
+        if (span) {
+          this.telemetry.endSpan(span);
         }
       }
-
-      // Full validation (format checks + on-chain account verification) runs
-      // after the self-stream and duplicate checks so those errors always take
-      // priority and are never shadowed by AccountNotFoundError.
-      await this.validateStreamParams(params);
-
-      if (!params.skipAllowanceCheck) {
-        await this.checkAllowance(params.token, params.amount);
-      }
-
-      const operation = this.encoder.createStream(sender, params);
-
-      // Issue #268: explain mode — return dry-run description without submitting.
-      if (options?.explain) {
-        const durationDays = (params.durationSeconds / 86400).toFixed(1);
-        const amountUsdc = formatUSDC(params.amount);
-        return this.explainOperation(
-          operation,
-          'createStream',
-          () =>
-            `Create a stream of ${amountUsdc} USDC over ${durationDays} days ` +
-            `from ${sender} to ${params.recipient}`,
-          [sender, params.recipient, params.token],
-          () => [
-            { address: sender, token: params.token, delta: -params.amount },
-            { address: params.recipient, token: params.token, delta: params.amount },
-          ],
-        ) as unknown as { streamId: string; txHash: string };
-      }
-
-      // Issue #439: dryRun mode — validate parameters and simulate without broadcasting
-      if (options?.dryRun || (params as any).dryRun) {
-        const simResult = await this.simulateOp(operation);
-        const isSuccess = rpc.Api.isSimulationSuccess(simResult);
-        const minFee = isSuccess
-          ? String(
-              (simResult as rpc.Api.SimulateTransactionSuccessResponse).minResourceFee ?? BASE_FEE,
-            )
-          : BASE_FEE;
-        return {
-          dryRun: true,
-          simulated: isSuccess,
-          expectedFee: minFee,
-          minResourceFee: minFee,
-          result: simResult,
-          params,
-        } as unknown as { streamId: string; txHash: string };
-      }
-
-      const feeBump = this.resolveFeeBump(options?.feeBump);
-      const { txHash, ledger } = await this.buildAndSubmit(
-        operation,
-        signal,
-        feeBump,
-        'createStream',
-        options?.memo,
-        options?.timeoutMs ?? options?.timeout,
-      );
-
-      const result = await this.getStreamsBySender(sender);
-      const streams = Array.isArray(result) ? result : result.streams;
-      const latest = streams[streams.length - 1];
-      if (!latest) throw new StreamNotFoundError('(unknown — post-creation fetch returned empty)');
-
-      // Issue #271 / #564: record the confirmed ledger and the write timestamp
-      // so a subsequent getStream for the new stream bypasses the cache.
-      this._recordWriteTimestamp(latest.id, ledger);
-
-      // Issue #274: store namespace in the off-chain registry
-      if (params.namespace) {
-        this.namespaceRegistry.set(latest.id, params.namespace);
-      }
-
-// Issue #212: notify subscribers of the custom event bus.
-       this.eventBus.emit('stream.created', {
-         streamId: latest.id,
-         sender,
-         recipient: params.recipient,
-         token: params.token,
-         txHash,
-       });
-
-       return { streamId: latest.id, txHash };
-     } finally {
-       if (span) {
-         this.telemetry.endSpan(span);
-       }
-     }
-     });
-   }
+    });
+  }
 
   /**
    * Creates multiple payment streams in a single batched transaction.
@@ -3079,76 +3118,76 @@ async createStream(
    * console.log(`Withdrew ${formatUSDC(BigInt(amount))} USDC — tx: ${txHash}`);
    * ```
    */
-async withdraw(
-     params: WithdrawParams,
-     signal?: AbortSignal,
-     options?: WriteOptions,
-   ): Promise<{ txHash: string; amount: string }> {
-     // Issue #568: Add OpenTelemetry tracing span
-     const span = this.startSpan('withdraw', {
-       'stream.id': params.streamId
-     });
-     try {
-       const recipient = await this.requireWalletAdapter().getPublicKey();
-       const claimable = await this.getClaimable(params.streamId);
+  async withdraw(
+    params: WithdrawParams,
+    signal?: AbortSignal,
+    options?: WriteOptions,
+  ): Promise<{ txHash: string; amount: string }> {
+    // Issue #568: Add OpenTelemetry tracing span
+    const span = this.startSpan('withdraw', {
+      'stream.id': params.streamId,
+    });
+    try {
+      const recipient = await this.requireWalletAdapter().getPublicKey();
+      const claimable = await this.getClaimable(params.streamId);
 
-       this.logger.info(`withdraw: stream ${params.streamId}, claimable=${claimable}`);
-       const operation = this.encoder.withdraw(params.streamId, recipient);
+      this.logger.info(`withdraw: stream ${params.streamId}, claimable=${claimable}`);
+      const operation = this.encoder.withdraw(params.streamId, recipient);
 
-       // Issue #268: explain mode — return dry-run description without submitting.
-       if (options?.explain) {
-         const amountUsdc = formatUSDC(claimable);
-         // Fetch stream to get token address for balance delta.
-         const stream = await this.getStream(params.streamId).catch(() => null);
-         const tokenAddress = stream?.token ?? '(unknown token)';
-         const result = this.explainOperation(
-           operation,
-           'withdraw',
-           () => `Withdraw ${amountUsdc} USDC from stream ${params.streamId}`,
-           [recipient, tokenAddress],
-           () =>
-             claimable > 0n ? [{ address: recipient, token: tokenAddress, delta: claimable }] : [],
-         ) as unknown as { txHash: string; amount: string };
-         
-         // Issue #568: End the span before returning
-         if (span) {
-           this.telemetry.endSpan(span);
-         }
-         return result;
-       }
+      // Issue #268: explain mode — return dry-run description without submitting.
+      if (options?.explain) {
+        const amountUsdc = formatUSDC(claimable);
+        // Fetch stream to get token address for balance delta.
+        const stream = await this.getStream(params.streamId).catch(() => null);
+        const tokenAddress = stream?.token ?? '(unknown token)';
+        const result = this.explainOperation(
+          operation,
+          'withdraw',
+          () => `Withdraw ${amountUsdc} USDC from stream ${params.streamId}`,
+          [recipient, tokenAddress],
+          () =>
+            claimable > 0n ? [{ address: recipient, token: tokenAddress, delta: claimable }] : [],
+        ) as unknown as { txHash: string; amount: string };
 
-       const feeBump = this.resolveFeeBump(options?.feeBump);
-       const { txHash } = await this.buildAndSubmit(
-         operation,
-         signal,
-         feeBump,
-         'withdraw',
-         options?.memo,
-         options?.timeoutMs ?? options?.timeout,
-       );
+        // Issue #568: End the span before returning
+        if (span) {
+          this.telemetry.endSpan(span);
+        }
+        return result;
+      }
 
-       // Issue #212: notify subscribers of the custom event bus.
-       this.eventBus.emit('stream.withdrawn', {
-         streamId: params.streamId,
-         amount: claimable.toString(),
-         txHash,
-       });
+      const feeBump = this.resolveFeeBump(options?.feeBump);
+      const { txHash } = await this.buildAndSubmit(
+        operation,
+        signal,
+        feeBump,
+        'withdraw',
+        options?.memo,
+        options?.timeoutMs ?? options?.timeout,
+      );
 
-       // Issue #568: End the span before returning
-       if (span) {
-         this.telemetry.endSpan(span);
-       }
+      // Issue #212: notify subscribers of the custom event bus.
+      this.eventBus.emit('stream.withdrawn', {
+        streamId: params.streamId,
+        amount: claimable.toString(),
+        txHash,
+      });
 
-       return { txHash, amount: claimable.toString() };
-     } catch (err) {
-       // Issue #568: Record error on span before re-throwing
-       if (span) {
-         this.telemetry.recordError(span, err instanceof Error ? err : new Error(String(err)));
-         this.telemetry.endSpan(span);
-       }
-       throw err;
-     }
-   }
+      // Issue #568: End the span before returning
+      if (span) {
+        this.telemetry.endSpan(span);
+      }
+
+      return { txHash, amount: claimable.toString() };
+    } catch (err) {
+      // Issue #568: Record error on span before re-throwing
+      if (span) {
+        this.telemetry.recordError(span, err instanceof Error ? err : new Error(String(err)));
+        this.telemetry.endSpan(span);
+      }
+      throw err;
+    }
+  }
 
   /**
    * Withdraws from multiple streams, collecting partial results instead of
@@ -3247,73 +3286,79 @@ async withdraw(
    * const { txHash } = await client.cancelStream({ streamId: "42" });
    * ```
    */
-async cancelStream(
-     params: CancelStreamParams,
-     signal?: AbortSignal,
-     options?: WriteOptions,
-   ): Promise<{ txHash: string }> {
-     // Issue #568: Add OpenTelemetry tracing span
-     const span = this.startSpan('cancelStream', {
-       'stream.id': params.streamId
-     });
-     try {
-       const sender = await this.requireWalletAdapter().getPublicKey();
-       const operation = this.encoder.cancelStream(params.streamId, sender);
+  async cancelStream(
+    params: CancelStreamParams,
+    signal?: AbortSignal,
+    options?: WriteOptions,
+  ): Promise<{ txHash: string }> {
+    // Issue #568: Add OpenTelemetry tracing span
+    const span = this.startSpan('cancelStream', {
+      'stream.id': params.streamId,
+    });
+    try {
+      const sender = await this.requireWalletAdapter().getPublicKey();
+      const operation = this.encoder.cancelStream(params.streamId, sender);
 
-       // Issue #268: explain mode — return dry-run description without submitting.
-       if (options?.explain) {
-         const stream = await this.getStream(params.streamId).catch(() => null);
-         const tokenAddress = stream?.token ?? '(unknown token)';
-         // Estimate refund as the portion of deposit not yet streamed.
-         const now = Math.floor(Date.now() / 1000);
-         const elapsed = stream ? Math.max(0, now - stream.startTime) : 0;
-         const streamed = stream ? safeClaimable(stream.flowRate, BigInt(elapsed), stream.deposit) : 0n;
-         const refund = stream ? (stream.deposit > streamed ? stream.deposit - streamed : 0n) : 0n;
-         const refundUsdc = formatUSDC(refund);
-         const result = this.explainOperation(
-           operation,
-           'cancelStream',
-           () =>
-             `Cancel stream ${params.streamId} — refund estimated ${refundUsdc} USDC to sender ${sender}`,
-           [sender, tokenAddress],
-           () => (refund > 0n ? [{ address: sender, token: tokenAddress, delta: refund }] : []),
-         ) as unknown as { txHash: string };
-         
-         // Issue #568: End the span before returning
-         if (span) {
-           this.telemetry.endSpan(span);
-         }
-         return result;
-       }
+      // Issue #268: explain mode — return dry-run description without submitting.
+      if (options?.explain) {
+        const stream = await this.getStream(params.streamId).catch(() => null);
+        const tokenAddress = stream?.token ?? '(unknown token)';
+        // Estimate refund as the portion of deposit not yet streamed.
+        const now = Math.floor(Date.now() / 1000);
+        const elapsed = stream ? Math.max(0, now - stream.startTime) : 0;
+        const streamed = stream
+          ? safeClaimable(stream.flowRate, BigInt(elapsed), stream.deposit)
+          : 0n;
+        const refund = stream ? (stream.deposit > streamed ? stream.deposit - streamed : 0n) : 0n;
+        const refundUsdc = formatUSDC(refund);
+        const result = this.explainOperation(
+          operation,
+          'cancelStream',
+          () =>
+            `Cancel stream ${params.streamId} — refund estimated ${refundUsdc} USDC to sender ${sender}`,
+          [sender, tokenAddress],
+          () => (refund > 0n ? [{ address: sender, token: tokenAddress, delta: refund }] : []),
+        ) as unknown as { txHash: string };
 
-       const feeBump = this.resolveFeeBump(options?.feeBump);
-       const { txHash } = await this.buildAndSubmit(
-         operation,
-         signal,
-         feeBump,
-         'cancelStream',
-         options?.memo,
-         options?.timeoutMs ?? options?.timeout,
-       );
+        // Issue #568: End the span before returning
+        if (span) {
+          this.telemetry.endSpan(span);
+        }
+        return result;
+      }
 
-       // Issue #212: notify subscribers of the custom event bus.
-       this.eventBus.emit('stream.cancelled', { streamId: params.streamId, txHash });
+      const feeBump = this.resolveFeeBump(options?.feeBump);
+      const { txHash, ledger } = await this.buildAndSubmit(
+        operation,
+        signal,
+        feeBump,
+        'cancelStream',
+        options?.memo,
+        options?.timeoutMs ?? options?.timeout,
+      );
 
-       // Issue #568: End the span before returning
-       if (span) {
-         this.telemetry.endSpan(span);
-       }
+      // Issue #564/#271: record the write so a subsequent getStream() for
+      // this stream bypasses the cache and waits for the confirmed ledger.
+      this._recordWriteTimestamp(params.streamId, ledger);
 
-       return { txHash };
-     } catch (err) {
-       // Issue #568: Record error on span before re-throwing
-       if (span) {
-         this.telemetry.recordError(span, err instanceof Error ? err : new Error(String(err)));
-         this.telemetry.endSpan(span);
-       }
-       throw err;
-     }
-   }
+      // Issue #212: notify subscribers of the custom event bus.
+      this.eventBus.emit('stream.cancelled', { streamId: params.streamId, txHash });
+
+      // Issue #568: End the span before returning
+      if (span) {
+        this.telemetry.endSpan(span);
+      }
+
+      return { txHash };
+    } catch (err) {
+      // Issue #568: Record error on span before re-throwing
+      if (span) {
+        this.telemetry.recordError(span, err instanceof Error ? err : new Error(String(err)));
+        this.telemetry.endSpan(span);
+      }
+      throw err;
+    }
+  }
 
   /**
    * Atomically cancels a stream and withdraws the claimable balance (issue #558).
@@ -3386,7 +3431,8 @@ async cancelStream(
       return {
         ok: false,
         cancelResult: { txHash: cancelTxHash },
-        withdrawError: withdrawError instanceof Error ? withdrawError : new Error(String(withdrawError)),
+        withdrawError:
+          withdrawError instanceof Error ? withdrawError : new Error(String(withdrawError)),
       };
     }
   }
@@ -3409,12 +3455,19 @@ async cancelStream(
   async getProjectCost(streamIds: string[]): Promise<ProjectCostResult> {
     const streams = await this.getStreams(streamIds, { strict: true });
     const byStream: ProjectStreamCost[] = [];
-    const tokenMap = new Map<string, { deposited: bigint; claimable: bigint; claimedSoFar: bigint; streamCount: number }>();
+    const tokenMap = new Map<
+      string,
+      { deposited: bigint; claimable: bigint; claimedSoFar: bigint; streamCount: number }
+    >();
 
     for (const stream of streams) {
       const duration = Math.max(0, stream.endTime - stream.startTime);
       const projectedCost = projectCost(stream.flowRate, duration);
-      const withdrawn = safeClaimable(stream.flowRate, BigInt(Math.max(0, stream.lastWithdrawTime - stream.startTime)), stream.deposit);
+      const withdrawn = safeClaimable(
+        stream.flowRate,
+        BigInt(Math.max(0, stream.lastWithdrawTime - stream.startTime)),
+        stream.deposit,
+      );
       const netCost = projectedCost > withdrawn ? projectedCost - withdrawn : 0n;
 
       byStream.push({
@@ -3425,20 +3478,27 @@ async cancelStream(
         netCost,
       });
 
-      const existing = tokenMap.get(stream.token) ?? { deposited: 0n, claimable: 0n, claimedSoFar: 0n, streamCount: 0 };
+      const existing = tokenMap.get(stream.token) ?? {
+        deposited: 0n,
+        claimable: 0n,
+        claimedSoFar: 0n,
+        streamCount: 0,
+      };
       existing.deposited += stream.deposit;
       existing.claimedSoFar += withdrawn;
       existing.streamCount += 1;
       tokenMap.set(stream.token, existing);
     }
 
-    const byToken: ProjectCostResult['byToken'] = Array.from(tokenMap.entries()).map(([token, agg]) => ({
-      token,
-      streamCount: agg.streamCount,
-      deposited: agg.deposited,
-      claimable: agg.deposited - agg.claimedSoFar,
-      claimedSoFar: agg.claimedSoFar,
-    }));
+    const byToken: ProjectCostResult['byToken'] = Array.from(tokenMap.entries()).map(
+      ([token, agg]) => ({
+        token,
+        streamCount: agg.streamCount,
+        deposited: agg.deposited,
+        claimable: agg.deposited - agg.claimedSoFar,
+        claimedSoFar: agg.claimedSoFar,
+      }),
+    );
 
     const total = byStream.reduce((sum, s) => sum + s.netCost, 0n);
 
@@ -3807,61 +3867,61 @@ async cancelStream(
     return { txHash };
   }
 
-/**
-    * Transfers a stream to a new recipient address.
-    *
-    * @param params - Transfer recipient parameters.
-    * @param params.streamId - ID of the stream to transfer.
-    * @param params.newRecipient - The new recipient Stellar address.
-    * @param signal - Optional `AbortSignal` to cancel in-flight transaction polling.
-    * @param options - Optional write options.
-    * @returns `{ txHash }` — confirming transaction hash.
-    * @throws {InvalidAddressError} If `newRecipient` is not a valid Stellar address.
-    * @throws {StreamNotFoundError} If the stream does not exist.
-    * @throws {TransactionFailedError} If the transaction fails.
-    */
-   async transferRecipient(
-     params: TransferStreamParams,
-     signal?: AbortSignal,
-     options?: WriteOptions,
-   ): Promise<{ txHash: string }> {
-     if (!isValidStellarAddress(params.newRecipient)) {
-       throw new InvalidAddressError(params.newRecipient);
-     }
-     const sender = await this.requireWalletAdapter().getPublicKey();
-     const operation = this.encoder.transferStream(params.streamId, sender, params.newRecipient);
-     const feeBump = this.resolveFeeBump(options?.feeBump);
-     const { txHash } = await this.buildAndSubmit(
-       operation,
-       signal,
-       feeBump,
-       'transferRecipient',
-       options?.memo,
-       options?.timeoutMs ?? options?.timeout,
-     );
-     this.clearStreamCache(params.streamId);
-     this.emit({
-       type: 'StreamTransferred',
-       streamId: params.streamId,
-       txHash,
-       ledger: 0, // placeholder, will be updated when transaction is confirmed
-       timestamp: Date.now(),
-       data: { newRecipient: params.newRecipient } as any,
-     });
-     return { txHash };
-   }
+  /**
+   * Transfers a stream to a new recipient address.
+   *
+   * @param params - Transfer recipient parameters.
+   * @param params.streamId - ID of the stream to transfer.
+   * @param params.newRecipient - The new recipient Stellar address.
+   * @param signal - Optional `AbortSignal` to cancel in-flight transaction polling.
+   * @param options - Optional write options.
+   * @returns `{ txHash }` — confirming transaction hash.
+   * @throws {InvalidAddressError} If `newRecipient` is not a valid Stellar address.
+   * @throws {StreamNotFoundError} If the stream does not exist.
+   * @throws {TransactionFailedError} If the transaction fails.
+   */
+  async transferRecipient(
+    params: TransferStreamParams,
+    signal?: AbortSignal,
+    options?: WriteOptions,
+  ): Promise<{ txHash: string }> {
+    if (!isValidStellarAddress(params.newRecipient)) {
+      throw new InvalidAddressError(params.newRecipient);
+    }
+    const sender = await this.requireWalletAdapter().getPublicKey();
+    const operation = this.encoder.transferStream(params.streamId, sender, params.newRecipient);
+    const feeBump = this.resolveFeeBump(options?.feeBump);
+    const { txHash } = await this.buildAndSubmit(
+      operation,
+      signal,
+      feeBump,
+      'transferRecipient',
+      options?.memo,
+      options?.timeoutMs ?? options?.timeout,
+    );
+    this.clearStreamCache(params.streamId);
+    this.emit({
+      type: 'StreamTransferred',
+      streamId: params.streamId,
+      txHash,
+      ledger: 0, // placeholder, will be updated when transaction is confirmed
+      timestamp: Date.now(),
+      data: { newRecipient: params.newRecipient } as any,
+    });
+    return { txHash };
+  }
 
-   /**
-    * Pauses an active stream. While paused, no new claimable tokens accumulate.
-    *
-    * @param params - Pause parameters.
-    * @param params.streamId - ID of the stream to pause.
-    * @param signal - Optional `AbortSignal` to cancel in-flight transaction polling.
-    * @param options - Optional write options.
-    * @returns `{ txHash }` — confirming transaction hash.
-    * @throws {TransactionFailedError} If the transaction is rejected (e.g. stream already paused).
-    */
-   async pause(
+  /**
+   * Pauses an active stream. While paused, no new claimable tokens accumulate.
+   *
+   * @param params - Pause parameters.
+   * @param params.streamId - ID of the stream to pause.
+   * @param signal - Optional `AbortSignal` to cancel in-flight transaction polling.
+   * @param options - Optional write options.
+   * @returns `{ txHash }` — confirming transaction hash.
+   * @throws {TransactionFailedError} If the transaction is rejected (e.g. stream already paused).
+   */
+  async pause(
     params: PauseStreamParams,
     signal?: AbortSignal,
     options?: WriteOptions,
@@ -4037,14 +4097,14 @@ async cancelStream(
    * @throws {Error} If `amount` is 0 or negative, or `durationSeconds` is 0 or negative.
    */
   /**
- * Estimates the fee cost to create a stream with the given parameters.
- * 
- * @param params - The stream creation parameters to estimate fee for.
- * @returns Promise resolving to FeeEstimate with the estimated cost.
- * @throws {InsufficientAmountError} If the amount is 0 or negative.
- * @throws {ZeroDurationError} If the duration is less than or equal to 0.
- */
-async estimateCreateStreamFee(params: CreateStreamParams): Promise<FeeEstimate> {
+   * Estimates the fee cost to create a stream with the given parameters.
+   *
+   * @param params - The stream creation parameters to estimate fee for.
+   * @returns Promise resolving to FeeEstimate with the estimated cost.
+   * @throws {InsufficientAmountError} If the amount is 0 or negative.
+   * @throws {ZeroDurationError} If the duration is less than or equal to 0.
+   */
+  async estimateCreateStreamFee(params: CreateStreamParams): Promise<FeeEstimate> {
     if (params.amount <= 0n) throw new Error('Amount must be > 0');
     if (params.durationSeconds <= 0) throw new Error('Duration must be > 0');
 
@@ -4066,14 +4126,14 @@ async estimateCreateStreamFee(params: CreateStreamParams): Promise<FeeEstimate> 
    * @throws {Error} If `amount` is 0 or negative, or `durationSeconds` is 0 or negative.
    */
   /**
- * Estimates the cost to create a stream with the given parameters.
- * 
- * @param params - The stream creation parameters to estimate cost for.
- * @returns Promise resolving to StreamCostBreakdown with fee details.
- * @throws {InsufficientAmountError} If the amount is 0 or negative.
- * @throws {ZeroDurationError} If the duration is less than or equal to 0.
- */
-async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
+   * Estimates the cost to create a stream with the given parameters.
+   *
+   * @param params - The stream creation parameters to estimate cost for.
+   * @returns Promise resolving to StreamCostBreakdown with fee details.
+   * @throws {InsufficientAmountError} If the amount is 0 or negative.
+   * @throws {ZeroDurationError} If the duration is less than or equal to 0.
+   */
+  async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
     if (params.amount <= 0n) throw new Error('Amount must be > 0');
     if (params.durationSeconds <= 0) throw new Error('Duration must be > 0');
 
@@ -4404,7 +4464,7 @@ async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
     callback: (event: StreamEvent<TEventData>) => void,
   ): StreamSubscription;
   on(
-    eventType: StreamEventType | (keyof SoroStreamEventMap),
+    eventType: StreamEventType | keyof SoroStreamEventMap,
     handlerOrCallback: ((payload: unknown) => void) | ((event: StreamEvent<TEventData>) => void),
   ): (() => void) | StreamSubscription {
     // Stream lifecycle events are dispatched through the event poller.
@@ -4427,10 +4487,7 @@ async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
       });
     }
     // SDK lifecycle events are dispatched through the event bus.
-    return this.eventBus.on(
-      eventType as string,
-      handlerOrCallback as (data: unknown) => void,
-    );
+    return this.eventBus.on(eventType as string, handlerOrCallback as (data: unknown) => void);
   }
 
   /**
@@ -4766,15 +4823,15 @@ async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
    * @param streamId - The stream ID to look up.
    * @param options - Set `{ refresh: true }` to bypass the TTL cache and force
    *   a network read (the in-flight deduplication still applies).
-* @returns The `Stream` record.
-    * @throws {StreamNotFoundError} If no stream exists with the given ID.
-    *
-    * @example
-    * ```ts
-    * const stream = await client.getStream("123");
-    * console.log("Stream recipient:", stream.recipient);
-    * ```
-    */
+   * @returns The `Stream` record.
+   * @throws {StreamNotFoundError} If no stream exists with the given ID.
+   *
+   * @example
+   * ```ts
+   * const stream = await client.getStream("123");
+   * console.log("Stream recipient:", stream.recipient);
+   * ```
+   */
   async getStream(streamId: string, options?: { refresh?: boolean }): Promise<Stream> {
     // Capture the current network so a concurrent `setNetwork` call can't
     // poison the cache with data fetched under a different network.
@@ -4802,8 +4859,7 @@ async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
     // single read so a lagging RPC node can't serve stale pre-write state.
     // The record is cleared after the first read so later reads are not
     // penalised.
-    const bypassCache =
-      !options?.refresh && this._shouldBypassCache(streamId);
+    const bypassCache = !options?.refresh && this._shouldBypassCache(streamId);
 
     // 1. Fast path: serve from TTL cache.
     if (!options?.refresh && !bypassCache) {
@@ -4823,9 +4879,7 @@ async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
         this.logger.debug(`getStream: fetching stream ${streamId} via RPC`);
         const result = await withRetry(
           () =>
-            this.simulateOp(
-              this.contract.call('get_stream', cachedScVal(BigInt(streamId), 'u64')),
-            ),
+            this.simulateOp(this.contract.call('get_stream', cachedScVal(BigInt(streamId), 'u64'))),
           this.readRetry,
         );
 
@@ -4853,27 +4907,27 @@ async getStreamCost(params: CreateStreamParams): Promise<StreamCostBreakdown> {
   }
 
   /**
- * Returns multiple streams by their IDs.
- * 
- * @param ids - Array of stream IDs to look up.
- * @param options - Optional configuration for the request.
- * @returns Promise resolving to an array of Stream objects.
- * @throws {StreamNotFoundError} If any of the stream IDs cannot be found on-chain.
- */
-async getStreams(ids: string[], options?: GetStreamsOptions): Promise<Stream[]> {
+   * Returns multiple streams by their IDs.
+   *
+   * @param ids - Array of stream IDs to look up.
+   * @param options - Optional configuration for the request.
+   * @returns Promise resolving to an array of Stream objects.
+   * @throws {StreamNotFoundError} If any of the stream IDs cannot be found on-chain.
+   */
+  async getStreams(ids: string[], options?: GetStreamsOptions): Promise<Stream[]> {
     const { streams } = await this.getStreamsBatch(ids, options);
     return streams;
   }
 
   /**
- * Returns multiple streams by their IDs in batch mode for efficiency.
- * 
- * @param ids - Array of stream IDs to look up.
- * @param options - Optional configuration for the request.
- * @returns Promise resolving to BatchStreamsResult containing streams, missing IDs, cached IDs, and RPC call count.
- * @throws {StreamNotFoundError} If any of the stream IDs cannot be found on-chain.
- */
-async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<BatchStreamsResult> {
+   * Returns multiple streams by their IDs in batch mode for efficiency.
+   *
+   * @param ids - Array of stream IDs to look up.
+   * @param options - Optional configuration for the request.
+   * @returns Promise resolving to BatchStreamsResult containing streams, missing IDs, cached IDs, and RPC call count.
+   * @throws {StreamNotFoundError} If any of the stream IDs cannot be found on-chain.
+   */
+  async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<BatchStreamsResult> {
     if (!Array.isArray(ids)) {
       throw new TypeError('getStreams: `ids` must be an array of stream IDs');
     }
@@ -4912,9 +4966,8 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
 
     for (const id of requested) {
       const bypass = bypassIds.has(id);
-      const hit = !bypass && useCache
-        ? this.streamCache.get(`${networkAtCallTime}:${id}`)
-        : undefined;
+      const hit =
+        !bypass && useCache ? this.streamCache.get(`${networkAtCallTime}:${id}`) : undefined;
       if (hit) {
         resolved.set(id, hit);
         cached.push(id);
@@ -4977,9 +5030,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
     networkAtCallTime: Network,
     options?: GetStreamsOptions,
   ): Promise<Stream[]> {
-    const idsScVal = xdr.ScVal.scvVec(
-      chunk.map((id) => cachedScVal(BigInt(id), 'u64')),
-    );
+    const idsScVal = xdr.ScVal.scvVec(chunk.map((id) => cachedScVal(BigInt(id), 'u64')));
 
     const result = await withRetry(
       () => this.simulateOp(this.contract.call('get_streams', idsScVal)),
@@ -5054,16 +5105,16 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
    * (retried automatically, then thrown). A contract-level simulation error
    * indicates the stream does not exist; network failures are retried.
    *
-* @param streamId - The stream ID to check.
-    * @returns The claimable amount in stroops, or `0n` if the stream does not exist.
-    * @throws {StreamNotFoundError} If the stream cannot be found on-chain.
-    *
-    * @example
-    * ```ts
-    * const claimable = await client.getClaimable("123");
-    * console.log("Claimable amount:", claimable.toString());
-    * ```
-    */
+   * @param streamId - The stream ID to check.
+   * @returns The claimable amount in stroops, or `0n` if the stream does not exist.
+   * @throws {StreamNotFoundError} If the stream cannot be found on-chain.
+   *
+   * @example
+   * ```ts
+   * const claimable = await client.getClaimable("123");
+   * console.log("Claimable amount:", claimable.toString());
+   * ```
+   */
   async getClaimable(streamId: string): Promise<bigint> {
     // 1. Fast path: serve from TTL cache.
     const cached = this.claimableCache.get(streamId);
@@ -5145,11 +5196,11 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
    * to `0n` regardless of the code path taken.
    *
    * @param streamIds - The stream IDs to look up.
-* @returns One `StreamBalance` entry per unique input ID, in first-seen
-    *   order, with `balance` in stroops (`0n` when the stream does not exist).
-    * @throws {StreamNotFoundError} If any of the stream IDs cannot be found on-chain.
-    *
-    * @example
+   * @returns One `StreamBalance` entry per unique input ID, in first-seen
+   *   order, with `balance` in stroops (`0n` when the stream does not exist).
+   * @throws {StreamNotFoundError} If any of the stream IDs cannot be found on-chain.
+   *
+   * @example
    * ```ts
    * const balances = await client.getMultipleStreamBalances(["1", "2", "3"]);
    * for (const { streamId, balance } of balances) {
@@ -5878,7 +5929,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
     return {
       ...snapshot.stream,
       deposit: BigInt(snapshot.stream.deposit),
-      flowRate: BigInt(snapshot.stream.flowRate),
+      flowRate: asPositiveFlowRate(BigInt(snapshot.stream.flowRate)),
     };
   }
 
@@ -6705,38 +6756,38 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
         callbacks.add(cb);
         // Emit the last known total immediately if available
         if (lastTotal !== undefined) cb(lastTotal);
-},
-     };
-   };
+      },
+    };
+  }
 
-   /**
-    * Returns the total claimable amount across all streams for a given recipient
-    * address. This is a one-time fetch of the total claimable balance.
-    *
-    * @param address - The recipient Stellar address to aggregate claimable for.
-    * @returns The total claimable amount in stroops across all streams for the address.
-    * @throws {Error} If there is an error fetching streams or claimable balances.
-    */
-   async getTotalClaimable(address: string): Promise<bigint> {
-     try {
-       const result = await this.getStreamsByRecipient(address);
-       const streams = Array.isArray(result) ? result : result.streams;
+  /**
+   * Returns the total claimable amount across all streams for a given recipient
+   * address. This is a one-time fetch of the total claimable balance.
+   *
+   * @param address - The recipient Stellar address to aggregate claimable for.
+   * @returns The total claimable amount in stroops across all streams for the address.
+   * @throws {Error} If there is an error fetching streams or claimable balances.
+   */
+  async getTotalClaimable(address: string): Promise<bigint> {
+    try {
+      const result = await this.getStreamsByRecipient(address);
+      const streams = Array.isArray(result) ? result : result.streams;
 
-       if (streams.length === 0) {
-         return 0n;
-       }
+      if (streams.length === 0) {
+        return 0n;
+      }
 
-       const amounts = await Promise.all(
-         streams.map((s) => this.getClaimable(s.id).catch(() => 0n)),
-       );
-       return amounts.reduce((sum, a) => sum + a, 0n);
-     } catch (error) {
-       // Re-throw to allow caller to handle
-       throw error;
-     }
-   }
+      const amounts = await Promise.all(
+        streams.map((s) => this.getClaimable(s.id).catch(() => 0n)),
+      );
+      return amounts.reduce((sum, a) => sum + a, 0n);
+    } catch (error) {
+      // Re-throw to allow caller to handle
+      throw error;
+    }
+  }
 
-   // ── Issue #333: Fee estimation cache ─────────────────────────────────────
+  // ── Issue #333: Fee estimation cache ─────────────────────────────────────
 
   /** Cache for fee estimation results. Key = operation type string. */
   private feeEstimationCache: Cache<string, FeeEstimate> | null = null;
@@ -6961,10 +7012,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
       if (!isValidStellarAddress(target)) {
         throw new InvalidAddressError(target);
       }
-      const operation = this.contract.call(
-        'get_delegates',
-        cachedScVal(target, 'address'),
-      );
+      const operation = this.contract.call('get_delegates', cachedScVal(target, 'address'));
       const result = await this.simulateOp(operation);
       if (rpc.Api.isSimulationSuccess(result) && result.result) {
         const delegates = scValToNative(result.result.retval) as string[];
@@ -7105,10 +7153,7 @@ async getStreamsBatch(ids: string[], options?: GetStreamsOptions): Promise<Batch
   async getStreamDelegates(streamId: string): Promise<string[]> {
     return this.runWithMiddleware('getStreamDelegates', [streamId], async () => {
       validateStringLength('streamId', streamId);
-      const operation = this.contract.call(
-        'get_stream_delegates',
-        cachedScVal(streamId, 'string'),
-      );
+      const operation = this.contract.call('get_stream_delegates', cachedScVal(streamId, 'string'));
       const result = await this.simulateOp(operation);
       if (rpc.Api.isSimulationSuccess(result) && result.result) {
         const delegates = scValToNative(result.result.retval) as string[];

@@ -1,4 +1,3 @@
-import { RateLimitExceededError } from './errors.js';
 /**
  * Client-side rate limiting for SDK write operations (issue #464).
  *
@@ -14,8 +13,6 @@ import { RateLimitExceededError } from './errors.js';
  * Disabled by default — existing clients are unaffected until they opt in
  * via `SoroStreamClientOptions.writeRateLimit`.
  */
-import { RateLimitExceededError } from './errors.js';
-
 import { RateLimitExceededError } from './errors.js';
 
 /** Configuration for the write-operation rate limiter. */

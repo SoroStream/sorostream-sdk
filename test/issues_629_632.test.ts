@@ -44,7 +44,10 @@ describe('RetryBackoff / withRetry with custom backoff (#632)', () => {
 
   it('withRetry calls a custom backoff function with the attempt index', async () => {
     const backoff = vi.fn(() => 0);
-    const fn = vi.fn().mockRejectedValueOnce(new Error('a')).mockRejectedValueOnce(new Error('b'))
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('a'))
+      .mockRejectedValueOnce(new Error('b'))
       .mockResolvedValue('ok');
     await expect(withRetry(fn, { maxAttempts: 3, backoff, jitter: false })).resolves.toBe('ok');
     expect(backoff.mock.calls.map((c) => c[0])).toEqual([0, 1]);

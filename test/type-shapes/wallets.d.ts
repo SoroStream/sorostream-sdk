@@ -10,7 +10,7 @@
  * // Node / server (no browser code pulled in)
  * import { SoroStreamClient } from "@sorostream/sdk";
  */
-export { createFreighterAdapter, connectWallet, createMultisigAdapter, createClaimDelegateAdapter, KmsWalletAdapter, createKmsWalletAdapter, createKmsAdapter, createWalletConnectV2Adapter, createXDEFIAdapter, AlbedoWalletAdapter, createAlbedoWalletAdapter, createAlbedoAdapter, LobstrWalletAdapter, createLobstrWalletAdapter, createLobstrAdapter, LedgerWalletAdapter, createLedgerWalletAdapter, createLedgerAdapter, } from './wallet.js';
-export type { ClaimDelegateConfig, WalletConnectV2AdapterConfig } from './wallet.js';
+export { createFreighterAdapter, connectWallet, createMultisigAdapter, createClaimDelegateAdapter, KmsWalletAdapter, createKmsWalletAdapter, createKmsAdapter, createWalletConnectV2Adapter, createXDEFIAdapter, AlbedoWalletAdapter, createAlbedoWalletAdapter, createAlbedoAdapter, LobstrWalletAdapter, createLobstrWalletAdapter, createLobstrAdapter, LedgerWalletAdapter, createLedgerWalletAdapter, createLedgerAdapter, createHardwareWalletAdapter, } from './wallet.js';
+export type { ClaimDelegateConfig, WalletConnectV2AdapterConfig, HardwareWalletDevice, HardwareWalletAdapterConfig, } from './wallet.js';
 export type { AlbedoWalletAdapterConfig, LobstrWalletAdapterConfig, KmsWalletAdapterConfig, LedgerWalletAdapterConfig, } from './types.js';
 //# sourceMappingURL=wallets.d.ts.map

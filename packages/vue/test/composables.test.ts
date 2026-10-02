@@ -12,7 +12,9 @@ import { assertStellarAddress } from '../../../src/utils.js';
 
 const RECIPIENT = assertStellarAddress('GAXXZ5XSL2VTQPGWB3LPU5273HSJXMK7VHLZTF2XKW65QFZVA3XKULQZ');
 const TOKEN = assertStellarAddress('CAVTXNC2WCHINDNP4VBLSOQA2667VE3RPQZNGD5TFI4U2QSHTVAC667T');
-const MOCK_SENDER = assertStellarAddress('GMOCK_SENDER_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+const MOCK_SENDER = assertStellarAddress(
+  'GMOCKSENDERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+);
 
 const flush = async (): Promise<void> => {
   await nextTick();

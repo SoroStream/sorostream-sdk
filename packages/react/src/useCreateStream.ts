@@ -1,8 +1,14 @@
 import { useState, useCallback } from 'react';
-import type { SoroStreamClient, CreateStreamParams, CreateStreamDryRunResult } from '@sorostream/sdk';
+import type {
+  SoroStreamClient,
+  CreateStreamParams,
+  CreateStreamDryRunResult,
+} from '@sorostream/sdk';
 
 export interface UseCreateStreamResult {
-  create: (params: CreateStreamParams) => Promise<{ streamId: string; txHash: string } | CreateStreamDryRunResult>;
+  create: (
+    params: CreateStreamParams,
+  ) => Promise<{ streamId: string; txHash: string } | CreateStreamDryRunResult>;
   loading: boolean;
   error: Error | null;
   txResult: { streamId: string; txHash: string } | CreateStreamDryRunResult | null;
@@ -67,7 +73,9 @@ export function validateCreateStreamParams(params: CreateStreamParams): void {
 export function useCreateStream(client: SoroStreamClient | null): UseCreateStreamResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const [txResult, setTxResult] = useState<{ streamId: string; txHash: string } | CreateStreamDryRunResult | null>(null);
+  const [txResult, setTxResult] = useState<
+    { streamId: string; txHash: string } | CreateStreamDryRunResult | null
+  >(null);
 
   const reset = useCallback(() => {
     setError(null);
@@ -75,7 +83,9 @@ export function useCreateStream(client: SoroStreamClient | null): UseCreateStrea
   }, []);
 
   const create = useCallback(
-    async (params: CreateStreamParams): Promise<{ streamId: string; txHash: string } | CreateStreamDryRunResult> => {
+    async (
+      params: CreateStreamParams,
+    ): Promise<{ streamId: string; txHash: string } | CreateStreamDryRunResult> => {
       if (!client) {
         const err = new Error('useCreateStream: no SoroStreamClient provided');
         setError(err);

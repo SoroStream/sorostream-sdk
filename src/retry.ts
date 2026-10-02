@@ -16,10 +16,7 @@ export { jitterDelay };
  * The result is always capped at `maxDelayMs`.
  */
 export type BackoffStrategy =
-  | 'exponential'
-  | 'linear'
-  | 'constant'
-  | ((attempt: number, baseDelayMs: number) => number);
+  'exponential' | 'linear' | 'constant' | ((attempt: number, baseDelayMs: number) => number);
 
 /**
  * Computes the capped (un-jittered) backoff delay for a zero-based attempt.

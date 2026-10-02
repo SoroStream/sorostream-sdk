@@ -7,6 +7,7 @@
  *         instance is dereferenced / destroyed
  */
 import { describe, it, expect, vi } from 'vitest';
+import { Account } from '@stellar/stellar-sdk';
 import { SoroStreamClient } from '../src/SoroStreamClient.js';
 import { toStroops } from '../src/utils.js';
 import { StartTimeInPastError } from '../src/errors.js';
@@ -157,9 +158,16 @@ describe('Issue #411: createStream rejects a start_time in the past', () => {
       protocolVersion: '21',
       lastLedgerCloseTime: 1_700_000_000,
     });
-    (client as any).server.getAccount = vi.fn().mockResolvedValue({
-      accountId: () => VALID_ACCOUNT,
-    });
+    // A real Account instance (not a bare { accountId } stub): createStream's
+    // token-contract validation simulates a transaction, which needs a
+    // working sequenceNumber() to build.
+    (client as any).server.getAccount = vi
+      .fn()
+      .mockImplementation(async (id: string) => new Account(id, '0'));
+    // No `error` field — simulateTransaction's result is read as a success.
+    (client as any).server.simulateTransaction = vi
+      .fn()
+      .mockResolvedValue({ result: { retval: undefined } });
     return client;
   }
 

@@ -67,25 +67,30 @@ const rule: Rule.RuleModule = {
               fix(fixer) {
                 // Get the source code
                 const sourceCode = context.getSourceCode();
-                
+
                 // Extract arguments from the withdraw call
-                const args = node.arguments
-                  .map((arg) => sourceCode.getText(arg))
-                  .join(', ');
-                
+                const args = node.arguments.map((arg) => sourceCode.getText(arg)).join(', ');
+
                 // Create the getClaimable call with proper await
                 const getClaimableCall = `await client.getClaimable(${args});`;
-                
+
                 // Try to get the parent statement to insert before it properly
                 // The structure should be: ExpressionStatement -> AwaitExpression -> CallExpression (node)
                 let parentStmt = node.parent;
                 while (parentStmt && parentStmt.type !== 'ExpressionStatement') {
                   parentStmt = parentStmt.parent;
                 }
-                
+
                 if (parentStmt) {
+                  // Preserve the withdraw statement's indentation: insertTextBefore
+                  // inserts after the leading whitespace already in the source, so
+                  // the inserted line must re-supply that same indentation for the
+                  // line that follows it.
+                  const stmtStart = parentStmt.range![0];
+                  const lineStart = sourceCode.text.lastIndexOf('\n', stmtStart - 1) + 1;
+                  const indentation = sourceCode.text.slice(lineStart, stmtStart);
                   // Insert the getClaimable call as a separate statement before the withdraw statement
-                  return fixer.insertTextBefore(parentStmt, `${getClaimableCall}\n`);
+                  return fixer.insertTextBefore(parentStmt, `${getClaimableCall}\n${indentation}`);
                 } else {
                   // Fallback: insert before the withdraw call expression (original approach)
                   return fixer.insertTextBefore(node, `${getClaimableCall} `);

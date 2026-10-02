@@ -56,7 +56,7 @@ import type {
   StellarAddress,
   PositiveFlowRate,
 } from './types.js';
-import { streamToJSON, filterStreams, safeClaimable } from './utils.js';
+import { streamToJSON, filterStreams, safeClaimable, asPositiveFlowRate } from './utils.js';
 import { InsufficientAmountError, SelfStreamError } from './errors.js';
 import { SoroStreamObservable, shareLatest } from './observable.js';
 
@@ -423,7 +423,11 @@ export class MockSoroStreamClient {
     if (!stream) throw new Error(`Stream not found: ${params.streamId}`);
     if (stream.status !== 'Active') throw new Error('Stream is not active');
 
-    const streamedSoFar = safeClaimable(stream.flowRate, BigInt(Math.max(0, nowSec() - stream.startTime)), stream.deposit);
+    const streamedSoFar = safeClaimable(
+      stream.flowRate,
+      BigInt(Math.max(0, nowSec() - stream.startTime)),
+      stream.deposit,
+    );
     const remaining = stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
     const newEndTime = nowSec() + Number(remaining / params.newFlowRate);
 
@@ -548,7 +552,11 @@ export class MockSoroStreamClient {
 
     const now = nowSec();
     const remainingDuration = stream.endTime - Math.max(now, stream.lastWithdrawTime);
-    const remainingBalance = safeClaimable(stream.flowRate, BigInt(Math.max(0, remainingDuration)), stream.deposit);
+    const remainingBalance = safeClaimable(
+      stream.flowRate,
+      BigInt(Math.max(0, remainingDuration)),
+      stream.deposit,
+    );
 
     // Calculate split amounts based on ratio
     const ratioA = BigInt(params.ratioNumerator);
@@ -909,7 +917,7 @@ export class MockSoroStreamClient {
     return {
       ...snapshot.stream,
       deposit: BigInt(snapshot.stream.deposit),
-      flowRate: BigInt(snapshot.stream.flowRate),
+      flowRate: asPositiveFlowRate(BigInt(snapshot.stream.flowRate)),
     };
   }
 
@@ -1000,7 +1008,7 @@ export class SoroStreamSandbox extends MockSoroStreamClient {
   private scenarios = new Map<string, (...args: any[]) => any>();
   private unexpectedCallPolicy: SandboxUnexpectedCallPolicy = 'allow';
 
-  constructor(senderKey = 'GSANDBOX_SENDER') {
+  constructor(senderKey = 'GSANDBOX_SENDER' as StellarAddress) {
     super(senderKey);
     return new Proxy(this, {
       get(target, prop, receiver) {
@@ -1198,18 +1206,13 @@ export class SoroStreamSandbox extends MockSoroStreamClient {
   }
 
   override async lockUntil(streamId: string, timestamp: Date): Promise<{ txHash: string }> {
-    return this.recordAndExecute(
-      'lockUntil',
-      () => super.lockUntil(streamId, timestamp),
-      [streamId, timestamp],
-    );
+    return this.recordAndExecute('lockUntil', () => super.lockUntil(streamId, timestamp), [
+      streamId,
+      timestamp,
+    ]);
   }
 
   override async simulateStream(params: CreateStreamParams): Promise<SimulateStreamResult> {
-    return this.recordAndExecute(
-      'simulateStream',
-      () => super.simulateStream(params),
-      [params],
-    );
+    return this.recordAndExecute('simulateStream', () => super.simulateStream(params), [params]);
   }
 }

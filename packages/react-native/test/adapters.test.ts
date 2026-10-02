@@ -10,8 +10,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // satisfy sibling packages' dependency on their own root package name.
 import { SoroStreamClient } from '../../../src/SoroStreamClient.js';
 import type { WalletAdapter } from '../../../src/types.js';
-import { createAsyncStorageAdapter, createReactNativeAdapters, createFreighterMobileAdapter } from '../src/index.js';
-import type { AsyncStorageLike } = from '../src/index.js';
+import {
+  createAsyncStorageAdapter,
+  createReactNativeAdapters,
+  createFreighterMobileAdapter,
+} from '../src/index.js';
+import type { AsyncStorageLike } from '../src/index.js';
 
 const VALID_CONTRACT = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
 
@@ -83,7 +87,7 @@ describe('createFreighterMobileAdapter', () => {
       await adapter.getPublicKey();
 
       expect(mockLinking.openURL).toHaveBeenCalledWith(
-        'freighter://sign/public-key?network=testnet'
+        'freighter://sign/public-key?network=testnet',
       );
     });
   });
@@ -98,7 +102,7 @@ describe('createFreighterMobileAdapter', () => {
       await adapter.signTransaction(testXDR, 'testnet');
 
       expect(mockLinking.openURL).toHaveBeenCalledWith(
-        'freighter://sign/sign-tx?network=testnet&xdr=test_xdr_string'
+        'freighter://sign/sign-tx?network=testnet&xdr=test_xdr_string',
       );
     });
 
@@ -111,7 +115,7 @@ describe('createFreighterMobileAdapter', () => {
       await adapter.signTransaction(testXDR, 'testnet');
 
       expect(mockLinking.openURL).toHaveBeenCalledWith(
-        'freighter://sign/sign-tx?network=testnet&xdr=special%20chars%20%3F%26%3D'
+        'freighter://sign/sign-tx?network=testnet&xdr=special%20chars%20%3F%26%3D',
       );
     });
   });

@@ -41,7 +41,9 @@ function injectMockServer(client: SoroStreamClient) {
   const account = new Account(SENDER, '1');
   const server = {
     getAccount: vi.fn().mockResolvedValue(account),
-    simulateTransaction: vi.fn().mockResolvedValue({ status: 'SUCCESS', result: { retval: undefined } }),
+    simulateTransaction: vi
+      .fn()
+      .mockResolvedValue({ status: 'SUCCESS', result: { retval: undefined } }),
     prepareTransaction: vi.fn().mockImplementation((tx: unknown) => tx),
     sendTransaction: vi.fn().mockResolvedValue({ status: 'PENDING', hash: 'tx-hash' }),
     getTransaction: vi.fn().mockResolvedValue({ status: 'SUCCESS', ledger: 123 }),
@@ -80,9 +82,7 @@ describe('#564 read-consistency guarantee after writes', () => {
     expect(server.simulateTransaction.mock.calls.length).toBeGreaterThan(callsBefore);
 
     // The cache was NOT consulted on the bypass read.
-    const bypassReadCalls = cacheGetSpy.mock.calls.filter(
-      (args) => args[0] === 'testnet:1',
-    );
+    const bypassReadCalls = cacheGetSpy.mock.calls.filter((args) => args[0] === 'testnet:1');
     expect(bypassReadCalls.length).toBe(0);
 
     cacheGetSpy.mockRestore();
@@ -112,9 +112,7 @@ describe('#564 read-consistency guarantee after writes', () => {
     expect(server.simulateTransaction.mock.calls.length).toBe(callsBefore);
     expect(stream).toEqual({ id: '1', stale: true });
 
-    const bypassReadCalls = cacheGetSpy.mock.calls.filter(
-      (args) => args[0] === 'testnet:1',
-    );
+    const bypassReadCalls = cacheGetSpy.mock.calls.filter((args) => args[0] === 'testnet:1');
     expect(bypassReadCalls.length).toBeGreaterThan(0);
 
     cacheGetSpy.mockRestore();
@@ -145,9 +143,7 @@ describe('#564 read-consistency guarantee after writes', () => {
     expect(server.simulateTransaction.mock.calls.length).toBeGreaterThan(callsBeforeFirst);
 
     // The cache was NOT consulted on the bypass read.
-    const firstReadCacheCalls = cacheGetSpy.mock.calls.filter(
-      (args) => args[0] === 'testnet:1',
-    );
+    const firstReadCacheCalls = cacheGetSpy.mock.calls.filter((args) => args[0] === 'testnet:1');
     expect(firstReadCacheCalls.length).toBe(0);
 
     // Second read: cache hit (bypass consumed).

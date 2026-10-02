@@ -14,27 +14,27 @@ describe('no-magic-flow-rate', () => {
         `async function run(client) {
           await client.updateFlowRate({ streamId: "123", newFlowRate: toStroops("100") });
         }`,
-        
+
         // Using ratePerSecond
         `async function run(client) {
           await client.updateFlowRate({ streamId: "123", newFlowRate: ratePerSecond(toStroops("10"), "day") });
         }`,
-        
+
         // Using a variable (not a literal)
         `async function run(client) {
           const rate = calculateFlowRate(toStroops("100"), 3600);
           await client.updateFlowRate({ streamId: "123", newFlowRate: rate });
         }`,
-        
+
         // flowRate in other contexts (not updateFlowRate or object creation)
         `async function run(client) {
           const stream = await client.getStream("123");
           console.log(stream.flowRate);
         }`,
-        
+
         // Other properties besides flowRate
         `async function run(client) {
-          await client.updateFlowRate({ streamId: "123", newFlowRate: 1000000, otherProp: 5 });
+          await client.updateFlowRate({ streamId: "123", newFlowRate: toStroops("100"), otherProp: 5 });
         }`,
       ],
       invalid: [

@@ -1,3 +1,4 @@
+export { VERSION, SDK_VERSION } from './version.js';
 export { SoroStreamClient, createClient } from './SoroStreamClient.js';
 export type {
   SoroStreamClientOptions,
@@ -126,7 +127,12 @@ export type { CircuitState, CircuitBreakerOptions } from './circuitBreaker.js';
 export { WriteRateLimiter } from './writeRateLimiter.js';
 export type { WriteRateLimitOptions } from './writeRateLimiter.js';
 export { ConnectionPool } from './connectionPool.js';
-export type { ConnectionPoolOptions, ConnectionPriority, PoolEvent, PoolEventType } from './connectionPool.js';
+export type {
+  ConnectionPoolOptions,
+  ConnectionPriority,
+  PoolEvent,
+  PoolEventType,
+} from './connectionPool.js';
 export { InMemoryEventBus } from './eventBus.js';
 export type { IEventBus, Unsubscribe } from './eventBus.js';
 export { PriorityRequestQueue, createRequestQueue } from './request-queue.js';
@@ -333,7 +339,11 @@ export type {
   SoroStreamEmitter,
 } from './types.js';
 
-export { ConnectionPoolExhaustedError, RecipientValidationError, InvalidTokenContractError } from './errors.js';
+export {
+  ConnectionPoolExhaustedError,
+  RecipientValidationError,
+  InvalidTokenContractError,
+} from './errors.js';
 export { SanitizingLogger, NoopLogger, ConsoleLogger, createLogger } from './logger.js';
 export type { Logger, LogLevel, CreateLoggerOptions } from './logger.js';
 export { StreamStateMachine, InvalidStateTransitionError } from './state-machine.js';

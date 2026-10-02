@@ -172,4 +172,3 @@ export type {
 } from './types.js';
 
 export { VERSION, SDK_VERSION } from './version.js';
-

@@ -30,7 +30,7 @@ describe('Cache', () => {
       now: () => {
         monotonicTime += 1; // increment by 1ms each call
         return monotonicTime;
-      }
+      },
     } as Performance;
     // @ts-expect-error override globalThis.performance
     globalThis.performance = mockPerformance;
@@ -90,12 +90,14 @@ describe('Cache', () => {
     // Store original values
     const originalPerformanceNow = globalThis.performance?.now;
     const originalProcessHrTime = globalThis.process?.hrtime;
-    // Make performance.now and process.hrtime unavailable to force fallback to Date.now
+    // Make performance.now and process.hrtime unavailable to force fallback to Date.now.
+    // `now` is a prototype method here, so `delete` on the instance is a no-op;
+    // assignment shadows it with an own property instead.
     if (globalThis.performance) {
-      delete globalThis.performance.now;
+      (globalThis.performance as { now?: unknown }).now = undefined;
     }
     if (globalThis.process) {
-      globalThis.process.hrtime = undefined;
+      globalThis.process.hrtime = undefined as unknown as typeof process.hrtime;
     }
 
     // Mock Date.now to jump
@@ -116,7 +118,7 @@ describe('Cache', () => {
     for (let i = 0; i < 6; i++) {
       Date.now(); // each adds 10, total 60ms
     }
-    // Now fakeDateNow is 60, which is > 50 (set at time 0? Actually set called when fakeDateNow was 0? Let's see: 
+    // Now fakeDateNow is 60, which is > 50 (set at time 0? Actually set called when fakeDateNow was 0? Let's see:
     // Before set, fakeDateNow is 0.
     // In set, we call now() which is Date.now (since performance.now and process.hrtime are deleted). That will increment fakeDateNow by 10 and return it.
     // So set happens at time 10, expiresAt = 10 + 50 = 60.

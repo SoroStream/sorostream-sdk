@@ -89,7 +89,7 @@ describe('Issue #556 — client.getProjectCost', () => {
 
     const client = new SoroStreamClient({
       network: 'testnet',
-      contractId: 'CONTRACT',
+      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
       walletAdapter: adapter,
       skipPeerCheck: true,
     });
@@ -156,9 +156,7 @@ describe('Issue #556 — client.getProjectCost', () => {
     expect(token1.streamCount).toBe(2);
 
     expect(result.total).toBe(
-      stream1.netCost +
-        result.byStream.find((s) => s.streamId === '2')!.netCost +
-        stream3.netCost
+      stream1.netCost + result.byStream.find((s) => s.streamId === '2')!.netCost + stream3.netCost,
     );
   });
 });

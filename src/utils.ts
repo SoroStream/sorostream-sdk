@@ -654,7 +654,11 @@ export function calculateVestingSchedule(
     const minNowBig = BigInt(Math.min(currentTime, stream.endTime));
     const vestingStartBig = BigInt(Math.max(cliffEndTime, stream.startTime));
     const elapsedBig = minNowBig > vestingStartBig ? minNowBig - vestingStartBig : 0n;
-    effectiveClaimable = safeClaimable(stream.flowRate, cliffSecondsBig + elapsedBig, stream.deposit);
+    effectiveClaimable = safeClaimable(
+      stream.flowRate,
+      cliffSecondsBig + elapsedBig,
+      stream.deposit,
+    );
   }
 
   const milestones: Array<{ time: number; vested: bigint }> = [];
@@ -1161,9 +1165,16 @@ export function isStreamStalled(stream: Stream, staleThresholdSeconds: number = 
  */
 export function isStreamUnderfunded(stream: Stream): boolean {
   if (stream.status !== 'Active' || stream.flowRate === 0n) return false;
-  const streamedSoFar = safeClaimable(stream.flowRate, BigInt(Math.max(0, stream.lastWithdrawTime - stream.startTime)), stream.deposit);
+  const streamedSoFar = safeClaimable(
+    stream.flowRate,
+    BigInt(Math.max(0, stream.lastWithdrawTime - stream.startTime)),
+    stream.deposit,
+  );
   const remainingDeposit = stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
-  const expectedRemaining = safeClaimable(stream.flowRate, BigInt(Math.max(0, stream.endTime - stream.lastWithdrawTime)));
+  const expectedRemaining = safeClaimable(
+    stream.flowRate,
+    BigInt(Math.max(0, stream.endTime - stream.lastWithdrawTime)),
+  );
   return remainingDeposit < expectedRemaining;
 }
 
@@ -1257,7 +1268,11 @@ export function aggregateStreamsByToken(streams: Stream[]): TokenAggregate[] {
     existing.streamCount += 1;
     existing.deposited += s.deposit;
     existing.claimable += claimableNow(s);
-    const remaining = safeClaimable(s.flowRate, BigInt(Math.max(0, s.endTime - s.lastWithdrawTime)), s.deposit);
+    const remaining = safeClaimable(
+      s.flowRate,
+      BigInt(Math.max(0, s.endTime - s.lastWithdrawTime)),
+      s.deposit,
+    );
     existing.claimedSoFar += s.deposit > remaining ? s.deposit - remaining : 0n;
     map.set(s.token, existing);
   }
@@ -1293,7 +1308,11 @@ export function totalValueStreamed(streams: Stream[]): StreamTotals {
   for (const s of streams) {
     totalDeposited += s.deposit;
     totalClaimable += claimableNow(s);
-    const remaining = safeClaimable(s.flowRate, BigInt(Math.max(0, s.endTime - s.lastWithdrawTime)), s.deposit);
+    const remaining = safeClaimable(
+      s.flowRate,
+      BigInt(Math.max(0, s.endTime - s.lastWithdrawTime)),
+      s.deposit,
+    );
     const claimed = s.deposit > remaining ? s.deposit - remaining : 0n;
     totalClaimed += claimed;
     totalRemaining += remaining;
@@ -1611,7 +1630,11 @@ export function aggregateStreamsByRecipient(streams: Stream[]): RecipientAggrega
     existing.streamCount += 1;
     existing.deposited += s.deposit;
     existing.claimable += claimableNow(s);
-    const remaining = safeClaimable(s.flowRate, BigInt(Math.max(0, s.endTime - s.lastWithdrawTime)), s.deposit);
+    const remaining = safeClaimable(
+      s.flowRate,
+      BigInt(Math.max(0, s.endTime - s.lastWithdrawTime)),
+      s.deposit,
+    );
     existing.claimedSoFar += s.deposit > remaining ? s.deposit - remaining : 0n;
     map.set(s.recipient, existing);
   }
@@ -1661,8 +1684,12 @@ export function parseCsvStreamRows(csv: string): BulkStreamRow[] {
     if (!line) continue;
     const fields = line.split(',').map((f) => f.trim());
 
-    const recipient = fields[recipientIdx];
-    if (!recipient) throw new Error(`Row ${i + 1}: missing recipient`);
+    const recipientField = fields[recipientIdx];
+    if (!recipientField) throw new Error(`Row ${i + 1}: missing recipient`);
+    // Not validated here: CSV rows are raw, untrusted input and the actual
+    // address format is checked later when each row is submitted via
+    // createStream(), which already performs that validation.
+    const recipient = recipientField as StellarAddress;
 
     const amount = BigInt(fields[amountIdx] ?? '');
     const durationSeconds = Number(fields[durationIdx] ?? '0');
@@ -1673,7 +1700,7 @@ export function parseCsvStreamRows(csv: string): BulkStreamRow[] {
 
     const row: BulkStreamRow = { recipient, amount, durationSeconds };
     if (tokenIdx !== -1 && fields[tokenIdx]) {
-      row.token = fields[tokenIdx];
+      row.token = fields[tokenIdx] as StellarAddress;
     }
 
     rows.push(row);

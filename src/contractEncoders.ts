@@ -1,7 +1,7 @@
 import { Address, Contract, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { ContractVersion, CreateStreamParams, SplitStreamParams } from './types.js';
 import { isValidStellarAddress, parseStreamId } from './utils.js';
-import { InvalidAddressError } from './errors.js';
+import { InvalidAddressError, MetadataTooLargeError } from './errors.js';
 import { cachedScVal, cachedBool } from './scValCache.js';
 
 // Issue #458: sanitise caller-supplied strings at the boundary before they

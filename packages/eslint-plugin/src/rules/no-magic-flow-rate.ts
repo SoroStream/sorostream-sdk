@@ -1,10 +1,18 @@
 import type { Rule } from 'eslint';
 
 /**
- * Check if a node represents a numeric literal
+ * Check if a node represents a numeric literal, including a negative
+ * literal, which parses as a `UnaryExpression` (`-500`) rather than a
+ * `Literal` node.
  */
 function isNumericLiteral(node: Rule.Node): boolean {
-  return node.type === 'Literal' && typeof node.value === 'number' && !Number.isNaN(node.value);
+  if (node.type === 'Literal') {
+    return typeof node.value === 'number' && !Number.isNaN(node.value);
+  }
+  if (node.type === 'UnaryExpression' && (node.operator === '-' || node.operator === '+')) {
+    return isNumericLiteral(node.argument as Rule.Node);
+  }
+  return false;
 }
 
 /**
@@ -12,18 +20,22 @@ function isNumericLiteral(node: Rule.Node): boolean {
  */
 function isFlowRateUtilCall(node: Rule.Node): boolean {
   if (node.type !== 'CallExpression') return false;
-  
+
   const callee = node.callee;
   if (callee.type !== 'MemberExpression' && callee.type !== 'Identifier') return false;
-  
+
   let functionName: string | null = null;
-  
+
   if (callee.type === 'Identifier') {
     functionName = callee.name;
-  } else if (callee.type === 'MemberExpression' && !callee.computed && callee.property.type === 'Identifier') {
+  } else if (
+    callee.type === 'MemberExpression' &&
+    !callee.computed &&
+    callee.property.type === 'Identifier'
+  ) {
     functionName = callee.property.name;
   }
-  
+
   return functionName === 'toStroops' || functionName === 'ratePerSecond';
 }
 
@@ -62,7 +74,7 @@ const rule: Rule.RuleModule = {
           }
         }
       },
-      
+
       // Check for updateFlowRate calls with numeric literals
       CallExpression(node: Rule.Node) {
         if (
@@ -80,7 +92,7 @@ const rule: Rule.RuleModule = {
                 prop.type === 'Property' &&
                 prop.key &&
                 prop.key.type === 'Identifier' &&
-                prop.key.name === 'flowRate' &&
+                prop.key.name === 'newFlowRate' &&
                 prop.value
               ) {
                 if (isNumericLiteral(prop.value)) {
