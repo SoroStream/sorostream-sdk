@@ -221,7 +221,7 @@ export class Telemetry {
 
   recordError(span: Span | null, error: Error): void {
     if (!span) return;
-    span.recordException(error);
+    span.recordException(new Error('Error details redacted'));
     span.setAttribute('error', true);
   }
 }

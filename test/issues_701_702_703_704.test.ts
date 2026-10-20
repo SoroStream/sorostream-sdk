@@ -107,6 +107,20 @@ describe('issue #702: telemetry flushes the pending batch on page unload', () =>
     vi.restoreAllMocks();
   });
 
+  it('redacts address-bearing error details before recording an exception', () => {
+    const telemetry = new Telemetry(false);
+    const span = pendingSpan();
+    const address = 'GABC2DEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
+
+    telemetry.recordError(span, new Error(`Invalid state for wallet ${address}`));
+
+    const recordedError = vi.mocked(span.recordException).mock.calls[0]![0];
+    expect(recordedError.message).toBe('Error details redacted');
+    expect(recordedError.stack).not.toContain(address);
+    expect(span.setAttribute).toHaveBeenCalledWith('error', true);
+    telemetry.dispose();
+  });
+
   it('flushes the pending batch when visibilitychange reports hidden', () => {
     stubDom('hidden');
     const telemetry = new Telemetry(true);
