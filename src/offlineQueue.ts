@@ -18,6 +18,12 @@ export interface QueuedOperation {
   queuedAt: number;
   /** Replay priority; higher values drain first. Default: 0. */
   priority: number;
+  /**
+   * Monotonically increasing insertion order within the queue.
+   * Deterministic tie-breaker so equal-priority operations are always
+   * dequeued in the order they were enqueued.
+   */
+  sequence: number;
 }
 
 /** Result of replaying a queued operation. */
@@ -62,6 +68,8 @@ export class OfflineWriteQueue {
   private isOnline = true;
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
   private healthCheckFn: (() => Promise<boolean>) | null = null;
+  /** Monotonic counter incremented on every enqueue; see {@link QueuedOperation.sequence}. */
+  private nextSequence = 0;
 
   constructor(
     private options: OfflineQueueOptions,
@@ -127,7 +135,8 @@ export class OfflineWriteQueue {
 
   /**
    * Enqueue a failed write operation.
-   * Higher `priority` operations are replayed first; equal priorities keep FIFO order.
+   * Higher `priority` operations are replayed first; equal priorities keep
+   * strict insertion (FIFO) order via a monotonic sequence tie-breaker.
    * Returns true if the operation was queued, false if the queue is full.
    */
   enqueue(operation: string, execute: () => Promise<unknown>, priority = 0): boolean {
@@ -146,12 +155,25 @@ export class OfflineWriteQueue {
       execute,
       queuedAt: Date.now(),
       priority,
+      sequence: this.nextSequence++,
     };
 
-    const index = this.queue.findIndex((op) => op.priority < priority);
+    this.insertSorted(queuedOp);
+    return true;
+  }
+
+  /**
+   * Insert an operation keeping the queue ordered by descending priority and,
+   * within equal priorities, ascending insertion sequence (strict FIFO).
+   */
+  private insertSorted(queuedOp: QueuedOperation): void {
+    const index = this.queue.findIndex(
+      (op) =>
+        op.priority < queuedOp.priority ||
+        (op.priority === queuedOp.priority && op.sequence > queuedOp.sequence),
+    );
     if (index === -1) this.queue.push(queuedOp);
     else this.queue.splice(index, 0, queuedOp);
-    return true;
   }
 
   /**
@@ -177,9 +199,12 @@ export class OfflineWriteQueue {
           success: false,
           error: err instanceof Error ? err.message : String(err),
         });
-        // Re-queue the failed operation if still offline
+        // Re-queue the failed operation if still offline. Re-insert with the
+        // same priority/sequence ordering instead of `unshift` so a retried
+        // operation can never jump ahead of higher-priority entries or of
+        // equal-priority operations enqueued while it was executing.
         if (!this.isOnline && this.queue.length < this.options.maxQueueSize) {
-          this.queue.unshift(op);
+          this.insertSorted(op);
           break;
         }
       }

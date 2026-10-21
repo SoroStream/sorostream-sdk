@@ -2578,9 +2578,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    */
   async getTokenMetadata(tokenAddress: string): Promise<TokenMetadata> {
     // Issue #568: Add OpenTelemetry tracing span
-    const span = this.startSpan('getTokenMetadata', {
-      'token.address': tokenAddress,
-    });
+    const span = this.startSpan('getTokenMetadata');
     try {
       const cached = this.tokenMetadataCache.get(tokenAddress);
       if (cached) return cached;
@@ -2641,9 +2639,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    */
   async resolveFederationAddress(address: string): Promise<string | null> {
     // Issue #568: Add OpenTelemetry tracing span
-    const span = this.startSpan('resolveFederationAddress', {
-      'federation.address': address,
-    });
+    const span = this.startSpan('resolveFederationAddress');
     try {
       try {
         const cached = this.federationCache.get(address);
@@ -2875,8 +2871,6 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     return this.runWithMiddleware('createStream', [params], async () => {
       // Issue #568: Add OpenTelemetry tracing span
       const span = this.startSpan('createStream', {
-        'stream.recipient': params.recipient,
-        'stream.token': params.token,
         'stream.amount': params.amount.toString(),
         'stream.durationSeconds': params.durationSeconds,
         'stream.cliffSeconds': params.cliffSeconds ?? 0,
@@ -3178,6 +3172,11 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         amount: claimable.toString(),
         txHash,
       });
+
+      // Issue #728: Synchronously invalidate the cached stream entry so that
+      // a subsequent read reflects the post-withdraw state immediately, without
+      // waiting for the cache TTL to expire.
+      this.clearStreamCache(params.streamId);
 
       // Issue #568: End the span before returning
       if (span) {

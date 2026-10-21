@@ -6,6 +6,66 @@ import { nativeToScVal, xdr } from '@stellar/stellar-sdk';
  *
  * ScVal objects produced by nativeToScVal are immutable XDR structures.
  * Caching them eliminates redundant serialization and reduces GC pressure.
+ *
+ * ## Eviction Policy
+ *
+ * `ScValCache` uses a **Least Recently Used (LRU)** eviction strategy backed
+ * by insertion-order iteration of a native `Map`.
+ *
+ * - Every cache **hit** moves the accessed entry to the tail of the map
+ *   (delete-then-re-insert), making it the most recently used.
+ * - Every cache **miss** appends the new entry to the tail.
+ * - When the map reaches `maxSize`, the entry at the **head** (least recently
+ *   used) is evicted before the new entry is inserted.
+ *
+ * This gives O(1) average-case complexity for both reads and writes because
+ * `Map` iteration, deletion, and insertion are all O(1) amortised in V8 / JSC.
+ *
+ * ## Choosing `maxSize`
+ *
+ * The default of `256` is a reasonable middle ground for most applications:
+ *
+ * | Workload | Recommended `maxSize` |
+ * |---|---|
+ * | Single-stream scripts / CLI tools | 32–64 — tiny footprint, full hit-rate for the small key space |
+ * | Typical dApps (tens of streams, ≤ 10 addresses) | 128–256 (default) |
+ * | Multi-tenant services (thousands of distinct addresses/stream IDs) | 512–2048 — larger working set keeps eviction pressure low |
+ * | Memory-constrained environments (React Native, edge workers) | 32–128 — trade hit-rate for RSS |
+ *
+ * Each cached entry stores a `string` key (`"<type>:<value>"`) and an
+ * `xdr.ScVal` object.  A typical `address` entry occupies roughly 200–400 B
+ * of heap; 256 entries therefore adds ≈ 50–100 KB of live memory — negligible
+ * for Node or browser but worth tuning on constrained targets.
+ *
+ * ## Caveats for Applications with Many Distinct Addresses or Values
+ *
+ * - If your application streams payments to a large number of unique recipient
+ *   addresses (e.g. payroll to thousands of employees), the working set may
+ *   exceed `DEFAULT_MAX_SIZE`.  Evicted entries will be re-computed on the next
+ *   access, adding minor serialization overhead but no correctness issues.
+ *   Increase `maxSize` proportionally to the expected number of *hot* keys in
+ *   a single request burst.
+ *
+ * - The `xdrBase64Cache` used by {@link cachedScValBase64} is an **unbounded**
+ *   `Map` intentionally — it caches static string values (event topic filters)
+ *   that are set up once at startup and never change.  If you dynamically
+ *   generate a large number of unique symbol/string values at runtime, prefer
+ *   calling `nativeToScVal` directly rather than routing through
+ *   `cachedScValBase64`.
+ *
+ * - The singleton {@link _scValCache | `_scValCache`} is shared across the
+ *   entire SDK process.  When running multiple `SoroStreamClient` instances
+ *   with different contract IDs, they share the same cache — this is usually
+ *   beneficial (reduced allocation), but it means the effective per-instance
+ *   budget is `maxSize / N` under adversarial key diversity.  Supply a
+ *   per-instance `ScValCache` via internal configuration if isolation is
+ *   required.
+ *
+ * @example Creating a larger cache for a high-throughput service:
+ * ```ts
+ * import { ScValCache } from 'sorostream-sdk/scValCache';
+ * const cache = new ScValCache(1024); // 1 024-entry LRU
+ * ```
  */
 
 const DEFAULT_MAX_SIZE = 256;

@@ -8,7 +8,7 @@ import { cachedScVal, cachedBool } from './scValCache.js';
 // are interpolated into a contract call, so malformed input is rejected
 // with a clear SDK error instead of a raw parsing exception or an opaque
 // on-chain rejection.
-function requireAddress(address: string): string {
+export function requireAddress(address: string): string {
   if (!isValidStellarAddress(address)) {
     throw new InvalidAddressError(address);
   }

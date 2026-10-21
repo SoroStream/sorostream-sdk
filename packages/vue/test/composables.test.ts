@@ -417,3 +417,236 @@ describe('useWithdraw (#422)', () => {
     expect(result.error.value).toBeNull();
   });
 });
+
+// ── useCreateStream ──────────────────────────────────────────────────────────
+
+import { useCreateStream, validateCreateStreamParams } from '../src/useCreateStream.js';
+import type { CreateStreamClientLike } from '../src/useCreateStream.js';
+import type { CreateStreamParams } from '../../../src/types.js';
+
+function validParams(overrides: Partial<CreateStreamParams> = {}): CreateStreamParams {
+  return {
+    recipient: RECIPIENT,
+    token: TOKEN,
+    amount: 1_000_000n,
+    durationSeconds: 3600,
+    autoRenew: false,
+    ...overrides,
+  };
+}
+
+describe('validateCreateStreamParams (vue)', () => {
+  it('accepts a fully valid params object', () => {
+    expect(() => validateCreateStreamParams(validParams())).not.toThrow();
+  });
+
+  it('rejects null/undefined params', () => {
+    expect(() =>
+      validateCreateStreamParams(null as unknown as CreateStreamParams),
+    ).toThrow(/must be a non-null object/);
+  });
+
+  it('rejects a missing recipient', () => {
+    expect(() => validateCreateStreamParams(validParams({ recipient: '' }))).toThrow(
+      /recipient is required/,
+    );
+  });
+
+  it('rejects a missing token', () => {
+    expect(() => validateCreateStreamParams(validParams({ token: '' }))).toThrow(
+      /token is required/,
+    );
+  });
+
+  it('rejects a non-positive amount', () => {
+    expect(() => validateCreateStreamParams(validParams({ amount: 0n }))).toThrow(
+      /amount is required/,
+    );
+  });
+
+  it('rejects a non-finite durationSeconds', () => {
+    expect(() => validateCreateStreamParams(validParams({ durationSeconds: NaN }))).toThrow(
+      /durationSeconds is required/,
+    );
+  });
+
+  it('rejects a missing autoRenew', () => {
+    expect(() =>
+      validateCreateStreamParams(validParams({ autoRenew: undefined as unknown as boolean })),
+    ).toThrow(/autoRenew is required/);
+  });
+});
+
+describe('useCreateStream (#765)', () => {
+  it('returns { create, loading, error, txResult, reset }', () => {
+    const client: CreateStreamClientLike = { createStream: vi.fn() };
+    const { result } = withScope(() => useCreateStream(client));
+
+    expect(result.create).toBeInstanceOf(Function);
+    expect(result.loading.value).toBe(false);
+    expect(result.error.value).toBeNull();
+    expect(result.txResult.value).toBeNull();
+    expect(result.reset).toBeInstanceOf(Function);
+  });
+
+  it('throws when no client is provided', async () => {
+    const { result } = withScope(() => useCreateStream(null));
+    await expect(result.create(validParams())).rejects.toThrow(/no SoroStream client/);
+    expect(result.error.value).toBeInstanceOf(Error);
+  });
+
+  it('rejects invalid params without calling the client', async () => {
+    const createStream = vi.fn();
+    const client: CreateStreamClientLike = { createStream };
+    const { result } = withScope(() => useCreateStream(client));
+
+    await expect(result.create(validParams({ amount: 0n }))).rejects.toThrow(/amount is required/);
+    expect(createStream).not.toHaveBeenCalled();
+    expect(result.loading.value).toBe(false);
+    expect(result.error.value).toBeInstanceOf(Error);
+  });
+
+  it('sets txResult on success and clears loading', async () => {
+    const createStream = vi
+      .fn()
+      .mockResolvedValue({ streamId: '42', txHash: 'tx-abc' });
+    const client: CreateStreamClientLike = { createStream };
+    const { result } = withScope(() => useCreateStream(client));
+
+    const promise = result.create(validParams());
+    // loading is true while in-flight
+    expect(result.loading.value).toBe(true);
+
+    const r = await promise;
+    expect(r).toEqual({ streamId: '42', txHash: 'tx-abc' });
+    expect(result.txResult.value).toEqual({ streamId: '42', txHash: 'tx-abc' });
+    expect(result.loading.value).toBe(false);
+    expect(result.error.value).toBeNull();
+  });
+
+  it('records and rethrows failures', async () => {
+    const client: CreateStreamClientLike = {
+      createStream: vi.fn().mockRejectedValue(new Error('insufficient allowance')),
+    };
+    const { result } = withScope(() => useCreateStream(client));
+
+    await expect(result.create(validParams())).rejects.toThrow('insufficient allowance');
+    expect(result.error.value?.message).toBe('insufficient allowance');
+    expect(result.loading.value).toBe(false);
+    expect(result.txResult.value).toBeNull();
+  });
+
+  it('reset() clears error and txResult', async () => {
+    const client: CreateStreamClientLike = {
+      createStream: vi.fn().mockRejectedValue(new Error('boom')),
+    };
+    const { result } = withScope(() => useCreateStream(client));
+
+    await expect(result.create(validParams())).rejects.toThrow('boom');
+    expect(result.error.value).toBeInstanceOf(Error);
+
+    result.reset();
+    expect(result.error.value).toBeNull();
+    expect(result.txResult.value).toBeNull();
+  });
+
+  it('works against the in-memory mock client', async () => {
+    const mock = new MockSoroStreamClient();
+    const { result } = withScope(() =>
+      useCreateStream(mock as unknown as CreateStreamClientLike),
+    );
+
+    const r = await result.create(validParams());
+    expect((r as { streamId: string }).streamId).toBeTruthy();
+    expect(result.error.value).toBeNull();
+    expect(result.loading.value).toBe(false);
+  });
+});
+
+// ── useClaimable ─────────────────────────────────────────────────────────────
+
+import { useClaimable } from '../src/useClaimable.js';
+import type { ClaimableClientLike } from '../src/useClaimable.js';
+
+describe('useClaimable (#765)', () => {
+  it('returns { claimable, loading, error }', async () => {
+    const client: ClaimableClientLike = {
+      getClaimable: vi.fn().mockResolvedValue(500n),
+    };
+    const { result } = withScope(() => useClaimable(client, '1', 60_000));
+    expect(result.claimable).toBeDefined();
+    expect(result.loading).toBeDefined();
+    expect(result.error).toBeDefined();
+    await flush();
+  });
+
+  it('fetches the claimable amount on mount', async () => {
+    const client: ClaimableClientLike = {
+      getClaimable: vi.fn().mockResolvedValue(1_000n),
+    };
+    const { result } = withScope(() => useClaimable(client, '1', 60_000));
+    await flush();
+
+    expect(client.getClaimable).toHaveBeenCalledWith('1');
+    expect(result.claimable.value).toBe(1_000n);
+    expect(result.loading.value).toBe(false);
+    expect(result.error.value).toBeNull();
+  });
+
+  it('resets to null when client is null', async () => {
+    const { result } = withScope(() => useClaimable(null, '1', 60_000));
+    await flush();
+
+    expect(result.claimable.value).toBeNull();
+    expect(result.loading.value).toBe(false);
+    expect(result.error.value).toBeNull();
+  });
+
+  it('resets to null when streamId is null', async () => {
+    const client: ClaimableClientLike = { getClaimable: vi.fn() };
+    const { result } = withScope(() => useClaimable(client, null, 60_000));
+    await flush();
+
+    expect(result.claimable.value).toBeNull();
+    expect(client.getClaimable).not.toHaveBeenCalled();
+  });
+
+  it('captures fetch errors', async () => {
+    const client: ClaimableClientLike = {
+      getClaimable: vi.fn().mockRejectedValue(new Error('rpc error')),
+    };
+    const { result } = withScope(() => useClaimable(client, '1', 60_000));
+    await flush();
+
+    expect(result.error.value?.message).toBe('rpc error');
+    expect(result.loading.value).toBe(false);
+    expect(result.claimable.value).toBeNull();
+  });
+
+  it('re-fetches when streamId changes', async () => {
+    const client: ClaimableClientLike = {
+      getClaimable: vi.fn().mockResolvedValue(0n),
+    };
+    const id = ref('1');
+    const { result } = withScope(() => useClaimable(client, id, 60_000));
+    await flush();
+    expect(client.getClaimable).toHaveBeenCalledWith('1');
+
+    id.value = '2';
+    await flush();
+    expect(client.getClaimable).toHaveBeenCalledWith('2');
+  });
+
+  it('tears down the poll loop on scope dispose', async () => {
+    const client: ClaimableClientLike = {
+      getClaimable: vi.fn().mockResolvedValue(0n),
+    };
+    const { dispose } = withScope(() => useClaimable(client, '1', 50));
+    await flush();
+    const callsBefore = (client.getClaimable as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    dispose();
+    await new Promise((r) => setTimeout(r, 150));
+    expect((client.getClaimable as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsBefore);
+  });
+});

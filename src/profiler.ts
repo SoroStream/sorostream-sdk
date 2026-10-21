@@ -1,3 +1,111 @@
+/**
+ * Gas / fee profiler for SoroStream contract operations.
+ *
+ * ## Fee Model Background
+ *
+ * Every Soroban transaction on Stellar pays **two distinct fee components**:
+ *
+ * ### 1. Inclusion Fee (`BASE_FEE` / classic fee)
+ *
+ * The inclusion fee is the classic Stellar transaction fee paid to validators
+ * for including the transaction in a ledger.  It is denominated in **stroops**
+ * (1 XLM = 10 000 000 stroops) and calculated as:
+ *
+ * ```
+ * inclusionFee = feePerOperation × numberOfOperations
+ * ```
+ *
+ * In practice, the SDK submits single-operation transactions, so the inclusion
+ * fee equals one `BASE_FEE` (currently 100 stroops = 0.000 01 XLM).  Surge
+ * pricing may raise this during periods of high network congestion.
+ *
+ * ### 2. Resource Fee (`minResourceFee` / Soroban fee)
+ *
+ * The resource fee covers the on-chain *compute* consumed by the smart contract
+ * execution.  It is itself composed of several sub-components (charged in
+ * stroops) that the RPC node computes during simulation:
+ *
+ * | Sub-component | What it covers |
+ * |---|---|
+ * | CPU instructions | Wasm execution time (`cpuInsns`) |
+ * | Memory | Peak working-set bytes allocated by the contract |
+ * | Ledger reads | `readOnly` ledger entries accessed |
+ * | Ledger writes | `readWrite` ledger entries mutated or created |
+ * | Historical storage | Long-term archival / TTL extension of contract state |
+ * | Events / return value | XDR bytes emitted as events or return data |
+ * | Transaction size | Byte-length of the envelope submitted to the network |
+ *
+ * The simulation response exposes the pre-computed total as
+ * `SimulateTransactionSuccessResponse.minResourceFee` (a string of stroops).
+ * The profiler surfaces this value in {@link SimulationProfile.minFee}.
+ *
+ * > **Important:** `minFee` in a {@link SimulationProfile} represents the
+ * > *minimum resource fee* estimated by the RPC node for that specific
+ * > simulation.  It does **not** include the inclusion fee.  The total
+ * > amount the account pays is:
+ * >
+ * > ```
+ * > totalFee = inclusionFee + minResourceFee
+ * > ```
+ * >
+ * > When constructing a real transaction you must add at least `BASE_FEE`
+ * > (100 stroops) on top of `minResourceFee`.
+ *
+ * ### Interpreting Profiler Output — Worked Example
+ *
+ * ```ts
+ * const profiler = new GasProfiler({
+ *   network: 'testnet',
+ *   contractId: 'CA...',
+ *   publicKey: 'GA...',
+ * });
+ *
+ * const profile = await profiler.profileCreateStream({
+ *   sender:          'GA...',
+ *   recipient:       'GB...',
+ *   token:           'GC...',
+ *   amount:          BigInt('1000000000'), // 100 XLM in stroops
+ *   durationSeconds: 86400,               // 1 day
+ *   autoRenew:       false,
+ * });
+ *
+ * // Example output (representative, not guaranteed):
+ * // profile.minFee            → "2847"   (stroops; resource fee only)
+ * // profile.ledgerReads       → 4        (readOnly + readWrite keys)
+ * // profile.ledgerWrites      → 2        (readWrite keys)
+ * // profile.cpuInstructions   → "0"      (set to "0" – see note below)
+ *
+ * // Total fee for a real submission (stroops):
+ * const totalFee = 100 + Number(profile.minFee);
+ * // → 2947 stroops ≈ 0.000 294 7 XLM
+ * ```
+ *
+ * > **Note on `cpuInstructions`:** The SDK v13 simulation response does not
+ * > expose `cost.cpuInsns` through the typed interface.  The field is set to
+ * > `"0"` as a safe sentinel until the underlying SDK types are updated.
+ * > CPU instruction counts can still be obtained directly from the raw
+ * > `SimulateTransactionSuccessResponse` via the `cost` field if needed.
+ *
+ * ### `ProfileReport` Summary Fields
+ *
+ * When using {@link GasProfiler.batchProfile}, the returned
+ * {@link ProfileReport.summary} aggregates across successful profiles:
+ *
+ * | Field | Description |
+ * |---|---|
+ * | `totalMinFee` | Sum of `minFee` (resource fees) across all operations (stroops) |
+ * | `averageMinFee` | `totalMinFee / successCount` (stroops) |
+ * | `totalLedgerReads` | Sum of `readOnly + readWrite` keys accessed |
+ * | `totalLedgerWrites` | Sum of `readWrite` keys mutated |
+ * | `totalCpuInstructions` | Sum of `cpuInstructions`; currently always `0n` (see note above) |
+ *
+ * ### Cross-reference
+ *
+ * The fee breakdown reported here is consistent with the `fee_stats` endpoint
+ * of the Soroban RPC and the [Stellar developer documentation on fees and
+ * metering](https://developers.stellar.org/docs/learn/fundamentals/fees-resource-limits-metering).
+ */
+
 import {
   Contract,
   TransactionBuilder,

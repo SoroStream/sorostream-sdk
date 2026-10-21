@@ -9,6 +9,14 @@ import type { SoroStreamClient } from './SoroStreamClient.js';
  * (e.g. a payroll system) that need to react to stream lifecycle
  * changes without embedding the SDK.
  *
+ * ### Relationship to `contractEvents.ts` (Issue #269, #794)
+ * `contractEvents.ts` defines canonical typed schemas (`StreamCreatedPayload`,
+ * `StreamWithdrawalPayload`, `StreamCancelledPayload`, etc.) representing deserialized
+ * on-chain contract events. While `WebhookForwarder` serializes higher-level SDK
+ * `StreamEvent` objects for webhook transmission, endpoints consuming webhook deliveries
+ * should map and validate against the canonical event schemas from `contractEvents.ts`
+ * to maintain consistent, typed contracts across SDK versions.
+ *
  * @example
  * ```ts
  * const forwarder = new WebhookForwarder(client, {

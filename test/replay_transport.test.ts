@@ -419,3 +419,83 @@ describe('record → toJSON → parse → replay round-trip', () => {
     expect((health as { status: string }).status).toBe('healthy');
   });
 });
+
+// ── Issue #732: fixture exhaustion mid-sequence ───────────────────────────
+
+describe('ReplayTransport.replay – fixture exhaustion mid-sequence (issue #732)', () => {
+  it('successfully replays several calls before exhausting, then throws ReplayFixtureError', async () => {
+    // Provide exactly 3 fixtures for getLatestLedger
+    const fixture = makeFixture([
+      { method: 'getLatestLedger', request: {}, response: { id: 'l1', sequence: 1, protocolVersion: 21 } },
+      { method: 'getLatestLedger', request: {}, response: { id: 'l2', sequence: 2, protocolVersion: 21 } },
+      { method: 'getLatestLedger', request: {}, response: { id: 'l3', sequence: 3, protocolVersion: 21 } },
+    ]);
+
+    const transport = ReplayTransport.replay(fixture);
+
+    // First three calls should succeed
+    const r1 = await transport.getLatestLedger();
+    const r2 = await transport.getLatestLedger();
+    const r3 = await transport.getLatestLedger();
+
+    expect((r1 as { sequence: number }).sequence).toBe(1);
+    expect((r2 as { sequence: number }).sequence).toBe(2);
+    expect((r3 as { sequence: number }).sequence).toBe(3);
+
+    // Fourth call exhausts the fixture and must throw ReplayFixtureError
+    await expect(transport.getLatestLedger()).rejects.toBeInstanceOf(ReplayFixtureError);
+  });
+
+  it('ReplayFixtureError message identifies the exhausted method', async () => {
+    const fixture = makeFixture([
+      { method: 'getTransaction', request: { hash: 'abc' }, response: { status: 'SUCCESS' } },
+      { method: 'getTransaction', request: { hash: 'abc' }, response: { status: 'SUCCESS' } },
+    ]);
+
+    const transport = ReplayTransport.replay(fixture);
+
+    await transport.getTransaction('abc');
+    await transport.getTransaction('abc');
+
+    const error = await transport.getTransaction('abc').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ReplayFixtureError);
+    expect((error as ReplayFixtureError).message).toContain('getTransaction');
+  });
+
+  it('prior successful replayed calls are unaffected by later exhaustion', async () => {
+    const fixture = makeFixture([
+      { method: 'getAccount', request: {}, response: { id: 'G1', sequence: '10' } },
+      { method: 'getAccount', request: {}, response: { id: 'G1', sequence: '11' } },
+    ]);
+
+    const transport = ReplayTransport.replay(fixture);
+
+    // Collect the results of the successful calls
+    const first = await transport.getAccount('G1');
+    const second = await transport.getAccount('G1');
+
+    // Exhaust the fixture
+    await expect(transport.getAccount('G1')).rejects.toBeInstanceOf(ReplayFixtureError);
+
+    // Previously obtained values must be unchanged
+    expect((first as { sequence: string }).sequence).toBe('10');
+    expect((second as { sequence: string }).sequence).toBe('11');
+  });
+
+  it('exhaustion of one method does not affect a different method queue', async () => {
+    const fixture = makeFixture([
+      { method: 'getHealth', request: {}, response: { status: 'healthy' } },
+      { method: 'getAccount', request: {}, response: { id: 'GX', sequence: '5' } },
+    ]);
+
+    const transport = ReplayTransport.replay(fixture);
+
+    // Exhaust getHealth
+    await transport.getHealth();
+    await expect(transport.getHealth()).rejects.toBeInstanceOf(ReplayFixtureError);
+
+    // getAccount queue is independent and must still work
+    const account = await transport.getAccount('GX');
+    expect((account as { id: string }).id).toBe('GX');
+  });
+});
