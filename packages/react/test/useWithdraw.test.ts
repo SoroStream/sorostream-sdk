@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import { effectScope } from 'vue';
 
 import { useWithdraw } from '../src/useWithdraw.js';
+import { useWithdraw as useVueWithdraw } from '../../vue/src/useWithdraw.js';
 import type { WithdrawParams } from '../../../src/types.js';
 import { assertStellarAddress } from '../../../src/utils.js';
 
@@ -122,5 +124,57 @@ describe('useWithdraw', () => {
     expect(result.current.txResult).toBeTruthy();
     expect(result.current.error).toBeNull();
     expect(result.current.loading).toBe(false);
+  });
+});
+
+describe('React and Vue useWithdraw parity (#770)', () => {
+  it('exposes equivalent success outcomes with framework-specific state shapes', async () => {
+    const response = { txHash: 'tx-parity', amount: '500' };
+    const client = makeClient(vi.fn().mockResolvedValue(response));
+    const reactHook = renderHook(() => useWithdraw(client));
+    const vueScope = effectScope();
+
+    try {
+      const vueHook = vueScope.run(() => useVueWithdraw(client));
+      if (!vueHook) throw new Error('Vue effect scope did not return a hook result');
+
+      await act(async () => {
+        await Promise.all([reactHook.result.current.withdraw('42'), vueHook.withdraw('42')]);
+      });
+
+      expect(client.withdraw).toHaveBeenCalledTimes(2);
+      expect(client.withdraw).toHaveBeenNthCalledWith(1, { streamId: '42' });
+      expect(client.withdraw).toHaveBeenNthCalledWith(2, { streamId: '42' });
+      expect(reactHook.result.current.loading).toBe(vueHook.submitting.value);
+      expect(reactHook.result.current.error?.message ?? null).toBe(vueHook.error.value?.message ?? null);
+      expect(reactHook.result.current.txResult).toEqual(response);
+      expect({ txHash: vueHook.txHash.value, amount: vueHook.amount.value }).toEqual(response);
+    } finally {
+      vueScope.stop();
+    }
+  });
+
+  it('exposes equivalent errors and cleared transaction state', async () => {
+    const client = makeClient(vi.fn().mockRejectedValue(new Error('RPC unavailable')));
+    const reactHook = renderHook(() => useWithdraw(client));
+    const vueScope = effectScope();
+
+    try {
+      const vueHook = vueScope.run(() => useVueWithdraw(client));
+      if (!vueHook) throw new Error('Vue effect scope did not return a hook result');
+
+      await act(async () => {
+        await expect(reactHook.result.current.withdraw('42')).rejects.toThrow('RPC unavailable');
+        await expect(vueHook.withdraw('42')).rejects.toThrow('RPC unavailable');
+      });
+
+      expect(reactHook.result.current.loading).toBe(vueHook.submitting.value);
+      expect(reactHook.result.current.error?.message).toBe(vueHook.error.value?.message);
+      expect(reactHook.result.current.txResult).toBeNull();
+      expect(vueHook.txHash.value).toBeNull();
+      expect(vueHook.amount.value).toBeNull();
+    } finally {
+      vueScope.stop();
+    }
   });
 });
