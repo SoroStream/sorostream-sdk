@@ -114,9 +114,13 @@ export type {
   StreamSimulationSnapshot,
   RateUnit,
 } from './utils.js';
-export { templates } from './templates.js';
-export { resolveConditionalParam } from './templates.js';
-export type { ConditionalParam, TemplateTokenContext, TemplateTokenType } from './templates.js';
+export { templates, resolveConditionalParam, conditionalByTokenType } from './templates.js';
+export type {
+  ConditionalParam,
+  ConditionalBranchMap,
+  TemplateTokenContext,
+  TemplateTokenType,
+} from './templates.js';
 export { serializeStream, deserializeStream, buildUnsignedXdr } from './serialization.js';
 export type { SerializedStream } from './serialization.js';
 export { ScValCache, cachedScVal, cachedBool, cachedScValBase64 } from './scValCache.js';
@@ -152,7 +156,12 @@ export type {
 } from './request-queue.js';
 export { RequestDeduplicator, dedupKey } from './requestDeduplicator.js';
 export type { RequestDedupStats, RequestDeduplicatorOptions } from './requestDeduplicator.js';
-export { SoroStreamObservable, shareLatest, observableSymbol } from './observable.js';
+export {
+  SoroStreamObservable,
+  shareLatest,
+  observableSymbol,
+  withBackpressure,
+} from './observable.js';
 export type {
   Observer,
   Subscription as ObservableSubscription,
@@ -161,6 +170,9 @@ export type {
   SubscribeFn,
   Teardown,
   ShareLatestOptions,
+  BackpressureStrategy,
+  BackpressureDropEvent,
+  BackpressureOptions,
 } from './observable.js';
 export type { StreamRetryPolicy, EventPollerOptions } from './events.js';
 export type { BatchingOptions, BatchMetrics, CompressionOptions } from './types.js';

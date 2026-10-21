@@ -264,6 +264,84 @@ export class SoroStreamObservable<T> {
   }
 
   /**
+   * Applies a bounded buffering backpressure strategy (issue #792).
+   *
+   * When emissions exceed `options.maxBufferSize`:
+   * - `'drop-oldest'`: discards the oldest buffered item to accommodate the newest.
+   * - `'drop-newest'`: discards the incoming item when the buffer is full.
+   *
+   * In both cases, if `onDrop` is provided, it is invoked with details of the dropped item(s).
+   */
+  withBackpressure(options: BackpressureOptions<T>): SoroStreamObservable<T> {
+    const { maxBufferSize, strategy, onDrop } = options;
+    if (maxBufferSize <= 0) throw new Error('maxBufferSize must be > 0');
+
+    return new SoroStreamObservable<T>((sink) => {
+      const buffer: T[] = [];
+      let draining = false;
+      let upstreamCompleted = false;
+
+      function scheduleDrain(): void {
+        if (draining) return;
+        draining = true;
+        queueTask(() => {
+          while (buffer.length > 0 && !sink.closed) {
+            const item = buffer.shift()!;
+            sink.next(item);
+          }
+          draining = false;
+          if (upstreamCompleted && buffer.length === 0 && !sink.closed) {
+            sink.complete();
+          }
+        });
+      }
+
+      const sub = this.subscribe({
+        next: (value: T) => {
+          if (sink.closed) return;
+          if (buffer.length >= maxBufferSize) {
+            if (strategy === 'drop-oldest') {
+              const dropped = buffer.shift()!;
+              onDrop?.({
+                strategy: 'drop-oldest',
+                droppedCount: 1,
+                droppedItems: [dropped],
+              });
+              buffer.push(value);
+            } else {
+              onDrop?.({
+                strategy: 'drop-newest',
+                droppedCount: 1,
+                droppedItems: [value],
+              });
+            }
+          } else {
+            buffer.push(value);
+          }
+          scheduleDrain();
+        },
+        error: (err: unknown) => {
+          buffer.length = 0;
+          sink.error(err);
+        },
+        complete: () => {
+          upstreamCompleted = true;
+          if (buffer.length === 0) {
+            sink.complete();
+          } else {
+            scheduleDrain();
+          }
+        },
+      });
+
+      return () => {
+        buffer.length = 0;
+        sub.unsubscribe();
+      };
+    });
+  }
+
+  /**
    * Returns itself, satisfying the Observable interop protocol consumed by
    * RxJS's `from()`, `zen-observable`, and any other spec-compliant library.
    *
@@ -395,3 +473,36 @@ export function shareLatest<T>(
     };
   });
 }
+
+/** Backpressure dropping strategy when a buffer is overwhelmed (issue #792). */
+export type BackpressureStrategy = 'drop-oldest' | 'drop-newest';
+
+/** Notification emitted when buffered events are dropped under backpressure (issue #792). */
+export interface BackpressureDropEvent<T> {
+  /** Strategy used when the drop occurred. */
+  strategy: BackpressureStrategy;
+  /** Number of events dropped in this event. */
+  droppedCount: number;
+  /** The item(s) that were dropped. */
+  droppedItems: T[];
+}
+
+/** Configuration options for backpressure management (issue #792). */
+export interface BackpressureOptions<T> {
+  /** Maximum number of items the buffer can hold before backpressure drops trigger. */
+  maxBufferSize: number;
+  /** Dropping strategy to apply when buffer exceeds `maxBufferSize`. */
+  strategy: BackpressureStrategy;
+  /** Callback fired whenever items are dropped due to buffer overflow. */
+  onDrop?: (event: BackpressureDropEvent<T>) => void;
+}
+
+/**
+ * Standalone pipeable operator for {@link SoroStreamObservable.withBackpressure} (issue #792).
+ */
+export function withBackpressure<T>(
+  options: BackpressureOptions<T>,
+): (source: SoroStreamObservable<T>) => SoroStreamObservable<T> {
+  return (source: SoroStreamObservable<T>) => source.withBackpressure(options);
+}
+

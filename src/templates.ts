@@ -22,21 +22,80 @@ export interface TemplateTokenContext {
 }
 
 /**
- * A template parameter that is either a static value (existing behaviour) or
- * a resolver evaluated at instantiation time with the token context, so
- * different token types can produce different resolved parameters (issue #710).
+ * Map of conditional branches keyed by token type, with an optional default fallback (issue #791).
  */
-export type ConditionalParam<T> = T | ((ctx: TemplateTokenContext) => T);
+export type ConditionalBranchMap<T> = Partial<Record<TemplateTokenType, T>> & {
+  default?: T;
+};
+
+/**
+ * A template parameter that is either a static value (existing behaviour),
+ * a resolver evaluated at instantiation time with the token context, or
+ * a dictionary of branches by token type with a default fallback (issue #710, #791).
+ */
+export type ConditionalParam<T> =
+  | T
+  | ((ctx: TemplateTokenContext) => T)
+  | ConditionalBranchMap<T>;
+
+/**
+ * Helper to construct a conditional parameter branch map with an explicit fallback default (issue #791).
+ */
+export function conditionalByTokenType<T>(
+  branches: Partial<Record<TemplateTokenType, T>>,
+  fallbackDefault?: T,
+): ConditionalBranchMap<T> {
+  return {
+    ...branches,
+    ...(fallbackDefault !== undefined ? { default: fallbackDefault } : {}),
+  };
+}
 
 /**
  * Resolves a {@link ConditionalParam}: static values pass through unchanged,
- * functions are invoked with the instantiation context (issue #710).
+ * functions are invoked with the instantiation context, and branch maps
+ * return the matching branch or fallback default (issue #710, #791).
+ *
+ * If an unrecognized token type has no branch defined and no default is present,
+ * a descriptive error is thrown naming the unhandled token type.
  */
 export function resolveConditionalParam<T>(
   value: ConditionalParam<T>,
   ctx: TemplateTokenContext,
+  fallback?: T,
 ): T {
-  return typeof value === 'function' ? (value as (ctx: TemplateTokenContext) => T)(ctx) : value;
+  if (typeof value === 'function') {
+    const result = (value as (ctx: TemplateTokenContext) => T)(ctx);
+    if (result === undefined && fallback !== undefined) {
+      return fallback;
+    }
+    return result;
+  }
+
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    typeof (value as { byteLength?: unknown }).byteLength !== 'number'
+  ) {
+    const branches = value as ConditionalBranchMap<T>;
+    if (ctx.tokenType in branches && branches[ctx.tokenType] !== undefined) {
+      return branches[ctx.tokenType]!;
+    }
+    if (branches.default !== undefined) {
+      return branches.default;
+    }
+    if (fallback !== undefined) {
+      return fallback;
+    }
+    throw new Error(
+      `Unhandled token type "${ctx.tokenType}" in conditional template parameter. Defined branches: ${Object.keys(
+        branches,
+      ).join(', ')}`,
+    );
+  }
+
+  return value as T;
 }
 
 /**
@@ -99,7 +158,7 @@ export const templates = {
   /**
    * Creates a stream whose initial amount is a token-type-conditional
    * parameter, resolved at instantiation time from the given token type and
-   * decimals (issue #710). Static `amount` values keep working unchanged.
+   * decimals (issue #710, #791). Static `amount` values keep working unchanged.
    *
    * @example
    * ```ts
@@ -107,6 +166,7 @@ export const templates = {
    *   recipient: "G…", token: "GUSDC…", autoRenew: false,
    *   tokenType: "stablecoin", decimals: 6,
    *   amount: (ctx) => 10n ** BigInt(ctx.decimals), // 1 unit minimum
+   *   defaultAmount: 1_000_000n, // Fallback default if token type is unhandled
    * });
    * ```
    */
@@ -115,12 +175,13 @@ export const templates = {
       amount: ConditionalParam<bigint>;
       tokenType: TemplateTokenType;
       decimals?: number;
+      defaultAmount?: bigint;
     },
   ): CreateStreamParams {
-    const { tokenType, decimals = 7, amount, ...rest } = params;
+    const { tokenType, decimals = 7, amount, defaultAmount, ...rest } = params;
     return {
       ...rest,
-      amount: resolveConditionalParam(amount, { tokenType, decimals }),
+      amount: resolveConditionalParam(amount, { tokenType, decimals }, defaultAmount),
     };
   },
 };

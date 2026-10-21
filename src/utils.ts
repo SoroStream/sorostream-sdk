@@ -13,6 +13,7 @@ import type { FetchAdapter, WebSocketFactory } from './adapters.js';
 import { assertMemoTextWithinLimit } from './memo.js';
 import { Memo, TransactionBuilder, Transaction, Networks } from '@stellar/stellar-sdk';
 import type { FeeBumpTransaction } from '@stellar/stellar-sdk';
+import { wrapForFeeBump, type FeeBumpRenewalOptions } from './feeBump.js';
 import type {
   PriceFeedAdapter,
   Stream,

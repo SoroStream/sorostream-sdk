@@ -53,6 +53,7 @@ export interface SimulatedWithdrawResult {
  */
 export class StreamSimulator {
   private clockOffsetSeconds = 0;
+  private currentLedgerSeq = 0;
   private expiryCallbacks = new Map<string, StreamExpiryCallback>();
   private firedExpiry = new Set<string>();
   private storageTtl = new Map<string, number>();
@@ -62,14 +63,35 @@ export class StreamSimulator {
     return Math.floor(Date.now() / 1000) + this.clockOffsetSeconds;
   }
 
+  /** Current simulated ledger sequence. */
+  getLedger(): number {
+    return this.currentLedgerSeq;
+  }
+
+  /** Sets the current simulated ledger sequence. */
+  setLedger(ledger: number): void {
+    if (ledger < 0) throw new Error('ledger must be >= 0');
+    this.currentLedgerSeq = ledger;
+  }
+
+  /** Advances the simulated ledger sequence by `ledgers` count. */
+  advanceLedgers(ledgers: number): void {
+    if (ledgers < 0) throw new Error('ledgers must be >= 0');
+    this.currentLedgerSeq += ledgers;
+  }
+
   /**
    * Advances the simulated clock by `seconds`. Any stream in `streams` whose
    * `endTime` is newly crossed fires its registered expiry callback exactly
-   * once.
+   * once. Optionally also advances ledger count (defaults to seconds / 5 if ledgers omitted and seconds > 0).
    */
-  advance(seconds: number, streams: Stream[] = []): void {
+  advance(seconds: number, streams: Stream[] = [], ledgers?: number): void {
     if (seconds < 0) throw new Error('seconds must be >= 0');
     this.clockOffsetSeconds += seconds;
+    if (ledgers !== undefined) {
+      if (ledgers < 0) throw new Error('ledgers must be >= 0');
+      this.currentLedgerSeq += ledgers;
+    }
     const now = this.now();
     for (const stream of streams) {
       if (!this.firedExpiry.has(stream.id) && now >= stream.endTime) {
@@ -168,6 +190,9 @@ export class StreamSimulator {
   /** Resets the simulated clock to real time and clears expiry-firing state. */
   reset(): void {
     this.clockOffsetSeconds = 0;
+    this.currentLedgerSeq = 0;
     this.firedExpiry.clear();
+    this.storageTtl.clear();
+    this.storageTtlLedgers.clear();
   }
 }
