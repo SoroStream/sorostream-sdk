@@ -3173,6 +3173,11 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         txHash,
       });
 
+      // Issue #728: Synchronously invalidate the cached stream entry so that
+      // a subsequent read reflects the post-withdraw state immediately, without
+      // waiting for the cache TTL to expire.
+      this.clearStreamCache(params.streamId);
+
       // Issue #568: End the span before returning
       if (span) {
         this.telemetry.endSpan(span);
