@@ -13,6 +13,17 @@
  * its `FinalizationRegistry` fallback) always calls `destroy()`, so a
  * destroyed client can be garbage-collected and re-initialisation cycles do
  * not accumulate stale listeners.
+ *
+ * Shutdown flushing: `BroadcastChannel.postMessage` queues a delivery task
+ * rather than transmitting synchronously, so a message posted immediately
+ * before `close()` could be silently dropped for other tabs. To prevent that,
+ * {@link broadcast} tracks each successfully posted message and {@link destroy}
+ * defers the physical teardown (listener removal + `close()`) until every
+ * message posted before the call has been given a delivery turn. Messages
+ * posted *concurrently with* or *after* `destroy()` are dropped: `broadcast`
+ * becomes a no-op the moment `destroy()` is called. A destroyed relay can
+ * additionally be awaited via {@link destroyAsync} when the caller needs a
+ * promise that resolves once the channel is fully torn down.
  */
 
 import type { IEventBus, Unsubscribe } from './eventBus.js';
@@ -70,11 +81,21 @@ export class CrossTabSync {
   private readonly originId: string;
   private readonly onMessage: (event: string, data: unknown) => void;
   private readonly handleMessage: (event: MessageEvent) => void;
+  /**
+   * Number of successfully posted messages that have not yet been given a
+   * delivery turn. {@link destroy} defers teardown until this reaches zero.
+   */
+  private pendingBroadcasts = 0;
+  /** Set by {@link destroy}; `broadcast` becomes a no-op from this point on. */
+  private destroyRequested = false;
+  private destroyed = false;
+  private destroyWaiters: Array<() => void> = [];
 
   constructor(options: CrossTabSyncOptions) {
     this.onMessage = options.onMessage;
     this.originId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     this.handleMessage = (event: MessageEvent) => {
+      if (this.destroyRequested) return;
       const message = event?.data as CrossTabMessage | undefined;
       if (!message || message[PROTOCOL] !== 1) return;
       if (message.origin === this.originId) return;
@@ -88,15 +109,15 @@ export class CrossTabSync {
     channel.addEventListener('message', this.handleMessage);
   }
 
-  /** True while the relay owns an open channel. */
+  /** True while the relay owns an open channel. False once destroy is requested. */
   get active(): boolean {
-    return this.channel !== null;
+    return this.channel !== null && !this.destroyRequested;
   }
 
   /** Forwards an event to other tabs. No-op while inactive or destroyed. */
   broadcast(event: string, data: unknown): void {
     const channel = this.channel;
-    if (!channel) return;
+    if (!channel || this.destroyRequested) return;
     try {
       channel.postMessage({
         [PROTOCOL]: 1,
@@ -107,21 +128,67 @@ export class CrossTabSync {
     } catch {
       // Payloads that are not structured-cloneable (e.g. wallet adapter
       // instances with methods) are skipped rather than crashing the
-      // emitting call site.
+      // emitting call site. Nothing was queued for delivery, so the
+      // pending-broadcast count is not incremented.
+      return;
     }
+    // `postMessage` only *queues* a delivery task; track it so `destroy` can
+    // wait until the message has had a chance to reach other tabs.
+    this.pendingBroadcasts++;
+    const timer = setTimeout(() => {
+      this.pendingBroadcasts--;
+      this.maybeTeardown();
+    }, 0);
+    const unref = (timer as unknown as { unref?: () => void }).unref;
+    unref?.call(timer);
   }
 
   /**
    * Removes the `message` listener and closes the channel. Safe to call
    * multiple times. After this, `broadcast` is a no-op and no further
    * messages are delivered.
+   *
+   * Messages already posted via {@link broadcast} are flushed before the
+   * channel is torn down: if any are still pending delivery, the listener
+   * removal and `close()` are deferred to a subsequent macrotask so other
+   * tabs still receive them. Messages posted concurrently with or after
+   * `destroy()` are dropped (`broadcast` is disabled immediately).
+   * Use {@link destroyAsync} to await the physical teardown.
    */
   destroy(): void {
+    this.destroyRequested = true;
+    this.maybeTeardown();
+  }
+
+  /**
+   * Like {@link destroy}, but returns a promise that resolves once pending
+   * broadcasts have been flushed and the channel is fully torn down.
+   */
+  destroyAsync(): Promise<void> {
+    this.destroy();
+    if (this.destroyed) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.destroyWaiters.push(resolve);
+    });
+  }
+
+  /** Runs the physical teardown once destroy was requested and nothing is pending. */
+  private maybeTeardown(): void {
+    if (this.destroyed || !this.destroyRequested || this.pendingBroadcasts > 0) return;
+    this.teardown();
+  }
+
+  private teardown(): void {
     const channel = this.channel;
-    if (!channel) return;
+    this.destroyed = true;
     this.channel = null;
-    channel.removeEventListener('message', this.handleMessage);
-    channel.close();
+    if (channel) {
+      channel.removeEventListener('message', this.handleMessage);
+      channel.close();
+    }
+    const waiters = this.destroyWaiters;
+    this.destroyWaiters = [];
+    for (const resolve of waiters) resolve();
   }
 }
 

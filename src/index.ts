@@ -33,7 +33,11 @@ export type {
 export { MockSoroStreamClient, SoroStreamSandbox } from './mock.js';
 
 export { StreamSimulator } from './simulator.js';
-export type { StreamExpiryCallback } from './simulator.js';
+export type {
+  StreamExpiryCallback,
+  SimulatedWithdrawResult,
+  SimulatedWithdrawFailureReason,
+} from './simulator.js';
 
 export { WebhookForwarder, WebhookEmitter } from './webhook.js';
 export type { WebhookEmitterConfig, WebhookEmitterPayload } from './webhook.js';
