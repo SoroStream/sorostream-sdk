@@ -173,6 +173,40 @@ describe('stream create — cmdStreamCreate', () => {
     expect(parsed.txHash).toBe('tx-abc');
   });
 
+  it('never logs the resolved secret while executing a write command', async () => {
+    const secret = SENDER_KP.secret();
+    const transport = makeTransport();
+    const sendSpy = vi
+      .spyOn(transport, 'sendTransaction')
+      .mockResolvedValue({ hash: 'tx-secret-check', successful: true });
+    const diagnosticSpies = [
+      vi.spyOn(console, 'debug').mockImplementation(() => {}),
+      vi.spyOn(console, 'info').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+    ];
+
+    await cmdStreamCreate(
+      baseOptions({
+        secret,
+        json: true,
+        recipient: RECIPIENT,
+        token: TOKEN,
+        amount: '100.50',
+        duration: 3600,
+        autoRenew: false,
+        transport,
+      }),
+    );
+
+    const capturedOutput = JSON.stringify([
+      ...consoleSpy.mock.calls,
+      ...diagnosticSpies.flatMap((spy) => spy.mock.calls),
+    ]);
+    expect(sendSpy).toHaveBeenCalled();
+    expect(capturedOutput).not.toContain(secret);
+  });
+
   it('prompts interactively when --json is absent', async () => {
     const rl = await import('node:readline');
     rl.__setAnswers([RECIPIENT, TOKEN, '50', '7200']);
