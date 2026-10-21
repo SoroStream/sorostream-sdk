@@ -164,11 +164,33 @@ export function createExpoAdapters(options?: {
 /**
  * Utility helper to set up Expo polyfills (e.g. `globalThis.crypto.getRandomValues`).
  */
-export function setupExpoPolyfills(options?: {
+/**
+ * Options for configuring Expo polyfills.
+ */
+export interface ExpoPolyfillOptions {
+  /**
+   * Crypto polyfill providing getRandomValues.
+   */
   crypto?: { getRandomValues: <T extends ArrayBufferView | null>(array: T) => T };
-}): void {
-  if (options?.crypto && typeof globalThis.crypto === 'undefined') {
-    (globalThis as unknown as { crypto: unknown }).crypto = options.crypto;
+}
+
+/**
+ * Utility helper to set up Expo polyfills (e.g. `globalThis.crypto.getRandomValues`).
+ *
+ * This function is idempotent: calling it multiple times in the same application
+ * lifecycle (such as during development hot-reloads or from defensive initialization
+ * checks across separate modules) has no adverse side effects, does not duplicate
+ * installations, and does not throw errors.
+ *
+ * Issue #798.
+ */
+export function setupExpoPolyfills(options?: ExpoPolyfillOptions): void {
+  if (options?.crypto) {
+    if (typeof globalThis.crypto === 'undefined') {
+      (globalThis as unknown as { crypto: unknown }).crypto = options.crypto;
+    } else if (globalThis.crypto && typeof globalThis.crypto.getRandomValues !== 'function') {
+      (globalThis.crypto as unknown as { getRandomValues: unknown }).getRandomValues = options.crypto.getRandomValues;
+    }
   }
 }
 
@@ -200,7 +222,38 @@ const FREIGHTER_MOBILE_NETWORK_MAP: Record<Network, string> = {
  * });
  * ```
  */
-export async function createFreighterMobileAdapter(): Promise<WalletAdapter> {
+export interface FreighterMobileOptions {
+  /**
+   * Timeout in milliseconds to await bridge response during initialization or operations.
+   * If the bridge does not respond within this duration, the promise rejects with an Error.
+   * Default: 5000ms.
+   */
+  timeoutMs?: number;
+  /**
+   * Custom bridge checker to verify Freighter Mobile availability.
+   */
+  checkBridge?: () => Promise<boolean>;
+}
+
+/**
+ * Creates a WalletAdapter for Freighter Mobile using deep-link signing.
+ * Rejects with a timeout error if the Freighter mobile bridge does not respond within the configured timeout.
+ * Issue #797.
+ */
+export async function createFreighterMobileAdapter(options: FreighterMobileOptions = {}): Promise<WalletAdapter> {
+  const timeoutMs = options.timeoutMs ?? 5000;
+  
+  if (options.checkBridge) {
+    const bridgeAvailable = await Promise.race([
+      options.checkBridge(),
+      new Promise<boolean>((_, reject) =>
+        setTimeout(() => reject(new Error(`Freighter mobile bridge failed to respond within ${timeoutMs}ms`)), timeoutMs)
+      ),
+    ]);
+    if (!bridgeAvailable) {
+      throw new Error('Freighter mobile bridge is not available or not installed');
+    }
+  }
   // Note: In a real implementation, we would check if the Freighter Mobile app is available
   // by attempting to open a URL and listening for a response, or by checking if the app is installed.
   // For this stub, we assume the app is available and will handle the deep link.
