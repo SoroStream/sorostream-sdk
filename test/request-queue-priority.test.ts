@@ -124,4 +124,63 @@ describe('PriorityRequestQueue — per-request priority (issue #566)', () => {
     expect(stats.write.queued).toBe(1);
     expect(stats.read.inFlight).toBe(1);
   });
+
+  it('Issue #784: dequeues high-priority write before low-priority read when queued at capacity in the same tick', async () => {
+    const queue = new PriorityRequestQueue({
+      maxConcurrent: 1,
+      priorityLanes: ['write', 'read'],
+    });
+
+    const executionOrder: string[] = [];
+    const delayedCalls: Array<{ lane: string; queueDepth: number; estimatedWaitMs: number }> = [];
+    queue.onDelayed = (payload) => delayedCalls.push(payload);
+
+    let releaseBlocker!: () => void;
+    const blockerPromise = new Promise<void>((r) => {
+      releaseBlocker = r;
+    });
+
+    // Fill capacity to 100%
+    const blockerTask = queue.enqueue('read', async () => {
+      executionOrder.push('blocker:start');
+      await blockerPromise;
+      executionOrder.push('blocker:end');
+      return 'blocker';
+    });
+
+    // Enqueue in same tick: low read first, high write second
+    const readTask = queue.enqueue(
+      'read',
+      async () => {
+        executionOrder.push('read:executed');
+        return 'read';
+      },
+      { priority: 'low' },
+    );
+
+    const writeTask = queue.enqueue(
+      'write',
+      async () => {
+        executionOrder.push('write:executed');
+        return 'write';
+      },
+      { priority: 'high' },
+    );
+
+    // Verify rateLimitDelayed event fired for the queued requests
+    const readDelay = delayedCalls.find((d) => d.lane === 'read');
+    expect(readDelay).toBeDefined();
+    expect(readDelay?.lane).toBe('read');
+    expect(typeof readDelay?.estimatedWaitMs).toBe('number');
+    expect(typeof readDelay?.queueDepth).toBe('number');
+
+    releaseBlocker();
+    await Promise.all([blockerTask, writeTask, readTask]);
+
+    const writeIdx = executionOrder.indexOf('write:executed');
+    const readIdx = executionOrder.indexOf('read:executed');
+    expect(writeIdx).toBeGreaterThan(-1);
+    expect(readIdx).toBeGreaterThan(-1);
+    expect(writeIdx).toBeLessThan(readIdx);
+  });
 });

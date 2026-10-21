@@ -636,3 +636,25 @@ export class FeeBumpExpiredError extends SoroStreamError {
     this.expiredAt = expiredAt;
   }
 }
+
+/**
+ * Thrown by {@link parseContractEvent} when an event carries an unrecognized
+ * event type discriminant in topic[0] (issue #782).
+ */
+export class UnrecognizedContractEventError extends SoroStreamError {
+  /** The unrecognized event type discriminant string, or null if missing/undecodable. */
+  readonly rawType: string | null;
+
+  constructor(rawType: string | null, message?: string) {
+    super(
+      message ??
+        `Unrecognized contract event type discriminant: ${
+          rawType !== null ? JSON.stringify(rawType) : 'missing or non-string topic[0]'
+        }`,
+    );
+    this.name = 'UnrecognizedContractEventError';
+    this.rawType = rawType;
+  }
+}
+
+export { UnrecognizedContractEventError as UnknownContractEventError };

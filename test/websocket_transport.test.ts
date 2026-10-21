@@ -96,4 +96,62 @@ describe('WebSocketTransportAdapter (#331)', () => {
     expect(http.getEvents).toHaveBeenCalled();
     poller.destroy();
   });
+
+  it('Issue #785: resets attempt counter after successful reconnect so subsequent disconnect counts from zero', () => {
+    vi.useFakeTimers();
+    const http = makeHttp();
+    const maxAttempts = 3;
+    const transport = new WebSocketTransportAdapter({
+      wsUrl: 'wss://rpc.example',
+      http,
+      reconnect: { maxAttempts, baseDelayMs: 100, maxDelayMs: 1000 },
+      webSocketFactory: () => new FakeSocket() as unknown as WebSocket,
+    });
+    const poller = new EventPoller(transport, CONTRACT);
+    poller.subscribe('k', { filter: () => true, callback: () => {} });
+
+    // Initial connection succeeds
+    expect(FakeSocket.instances).toHaveLength(1);
+    FakeSocket.instances[0]!.onopen!();
+    expect(http.getEvents).not.toHaveBeenCalled();
+
+    // Disconnect initial connection
+    FakeSocket.instances[0]!.onclose!();
+
+    // Reconnect attempt 1 fails
+    vi.advanceTimersByTime(100);
+    expect(FakeSocket.instances).toHaveLength(2);
+    FakeSocket.instances[1]!.onclose!();
+
+    // Reconnect attempt 2 SUCCEEDS
+    vi.advanceTimersByTime(200);
+    expect(FakeSocket.instances).toHaveLength(3);
+    FakeSocket.instances[2]!.onopen!();
+    expect(http.getEvents).not.toHaveBeenCalled();
+
+    // Subsequent disconnect starts a new cycle; attempt counter must start from 0
+    FakeSocket.instances[2]!.onclose!();
+
+    // Attempt 1 of new cycle
+    vi.advanceTimersByTime(100);
+    expect(FakeSocket.instances).toHaveLength(4);
+    FakeSocket.instances[3]!.onclose!();
+    expect(http.getEvents).not.toHaveBeenCalled();
+
+    // Attempt 2 of new cycle
+    vi.advanceTimersByTime(200);
+    expect(FakeSocket.instances).toHaveLength(5);
+    FakeSocket.instances[4]!.onclose!();
+    expect(http.getEvents).not.toHaveBeenCalled();
+
+    // Attempt 3 of new cycle
+    vi.advanceTimersByTime(400);
+    expect(FakeSocket.instances).toHaveLength(6);
+    expect(http.getEvents).not.toHaveBeenCalled();
+
+    // Attempt 3 fails: maxAttempts (3) reached in this cycle -> fallback to HTTP polling
+    FakeSocket.instances[5]!.onclose!();
+    expect(http.getEvents).toHaveBeenCalled();
+    poller.destroy();
+  });
 });

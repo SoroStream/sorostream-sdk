@@ -15,6 +15,9 @@
 import { scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { rpc } from '@stellar/stellar-sdk';
 import { safeBigInt, safeIdString } from './utils.js';
+import { UnrecognizedContractEventError } from './errors.js';
+
+export { UnrecognizedContractEventError, UnknownContractEventError } from './errors.js';
 
 // ── Payload interfaces ────────────────────────────────────────────────────────
 
@@ -258,10 +261,23 @@ export type ContractEventPayload =
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-function safeNative(val: xdr.ScVal | undefined): unknown {
+function toScVal(val: unknown): xdr.ScVal | undefined {
   if (!val) return undefined;
+  if (typeof val === 'string') {
+    try {
+      return xdr.ScVal.fromXDR(val, 'base64');
+    } catch {
+      return undefined;
+    }
+  }
+  return val as xdr.ScVal;
+}
+
+function safeNative(val: unknown): unknown {
+  const scVal = toScVal(val);
+  if (!scVal) return undefined;
   try {
-    return scValToNative(val);
+    return scValToNative(scVal);
   } catch {
     return undefined;
   }
@@ -291,7 +307,8 @@ function toString(v: unknown): string {
 
 function dataRecord(raw: rpc.Api.EventResponse): Record<string, unknown> {
   try {
-    return raw.value ? (scValToNative(raw.value) as Record<string, unknown>) : {};
+    const val = toScVal(raw.value);
+    return val ? (scValToNative(val) as Record<string, unknown>) : {};
   } catch {
     return {};
   }
@@ -305,30 +322,12 @@ function dataRecord(raw: rpc.Api.EventResponse): Record<string, unknown> {
  * The event type is read from the first topic element. Known SoroStream event
  * types are mapped to their specific payload interface (e.g. `StreamCreated` →
  * {@link StreamCreatedPayload}). When the event type is unrecognised or cannot
- * be parsed, an {@link UnknownEventPayload} is returned **instead of throwing**,
- * so callers can handle forward-compatibility gracefully.
+ * be parsed, an {@link UnrecognizedContractEventError} is thrown (issue #782).
  *
  * @param raw - A raw event object as returned by `rpc.Server.getEvents()`.
- * @returns A fully typed payload, or an {@link UnknownEventPayload} for
- *   unrecognised event types.
- *
- * @example
- * ```ts
- * import { parseContractEvent } from "@sorostream/sdk";
- *
- * const events = await server.getEvents({ ... });
- * for (const raw of events.events) {
- *   const payload = parseContractEvent(raw);
- *
- *   if (payload.type === "StreamCreated") {
- *     console.log("New stream from", payload.sender, "to", payload.recipient);
- *   } else if (payload.type === "StreamWithdrawn") {
- *     console.log("Withdrawal:", payload.amount, "stroops");
- *   } else if (payload.type === "UnknownEvent") {
- *     console.warn("Unrecognised event type:", payload.rawType);
- *   }
- * }
- * ```
+ * @returns A fully typed payload.
+ * @throws {UnrecognizedContractEventError} If the event carries an unrecognized
+ *   event type discriminant in topic[0].
  */
 export function parseContractEvent(raw: rpc.Api.EventResponse): ContractEventPayload {
   const timestamp = new Date(raw.ledgerClosedAt).getTime();
@@ -337,7 +336,7 @@ export function parseContractEvent(raw: rpc.Api.EventResponse): ContractEventPay
   // Extract event type from topic[0]
   let rawType: string | null = null;
   try {
-    const topicVal = raw.topic[0] ? scValToNative(raw.topic[0]) : null;
+    const topicVal = safeNative(raw.topic?.[0]);
     rawType = topicVal !== null && topicVal !== undefined ? String(topicVal) : null;
   } catch {
     rawType = null;
@@ -346,7 +345,7 @@ export function parseContractEvent(raw: rpc.Api.EventResponse): ContractEventPay
   // Extract stream ID from topic[1]
   let streamId = '0';
   try {
-    const idVal = raw.topic[1] ? scValToNative(raw.topic[1]) : null;
+    const idVal = safeNative(raw.topic?.[1]);
     streamId = idVal !== null && idVal !== undefined ? safeIdString(idVal) : '0';
   } catch {
     streamId = '0';
@@ -442,12 +441,7 @@ export function parseContractEvent(raw: rpc.Api.EventResponse): ContractEventPay
     }
 
     default: {
-      return {
-        type: 'UnknownEvent',
-        rawType,
-        rawData: data,
-        ...meta,
-      } satisfies UnknownEventPayload;
+      throw new UnrecognizedContractEventError(rawType);
     }
   }
 }

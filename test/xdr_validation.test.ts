@@ -89,3 +89,70 @@ describe('Issue #546: XdrValidationError is exported from the package root', () 
     expect(err.code).toBe('INVALID_XDR');
   });
 });
+
+describe('Issue #781: assertEnvelopeUnmutated detects operation reordering in multi-operation transactions', () => {
+  it('throws XdrValidationError when operations of the same type are reordered', () => {
+    const keypair = Keypair.random();
+    const account = new Account(keypair.publicKey(), '123');
+    const encoder = createContractEncoder(new Contract(CONTRACT_ID), 'v1');
+
+    const op1 = encoder.pauseStream('1', keypair.publicKey());
+    const op2 = encoder.pauseStream('2', keypair.publicKey());
+
+    const original = new TransactionBuilder(account, { fee: '200', networkPassphrase: NETWORK })
+      .addOperation(op1)
+      .addOperation(op2)
+      .setTimeout(30)
+      .build();
+
+    const reorderedAccount = new Account(keypair.publicKey(), '123');
+    const reordered = new TransactionBuilder(reorderedAccount, {
+      fee: '200',
+      networkPassphrase: NETWORK,
+    })
+      .addOperation(op2)
+      .addOperation(op1)
+      .setTimeout(30)
+      .build();
+
+    let caught: unknown;
+    try {
+      assertEnvelopeUnmutated(original, reordered.toXDR(), NETWORK);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(XdrValidationError);
+    expect(caught).toBeInstanceOf(SoroStreamError);
+    expect((caught as XdrValidationError).code).toBe('ENVELOPE_MUTATED');
+  });
+
+  it('throws XdrValidationError when operations of different types are reordered', () => {
+    const keypair = Keypair.random();
+    const account = new Account(keypair.publicKey(), '123');
+    const encoder = createContractEncoder(new Contract(CONTRACT_ID), 'v1');
+
+    const op1 = encoder.pauseStream('1', keypair.publicKey());
+    const op2 = encoder.resumeStream('2', keypair.publicKey());
+
+    const original = new TransactionBuilder(account, { fee: '200', networkPassphrase: NETWORK })
+      .addOperation(op1)
+      .addOperation(op2)
+      .setTimeout(30)
+      .build();
+
+    const reorderedAccount = new Account(keypair.publicKey(), '123');
+    const reordered = new TransactionBuilder(reorderedAccount, {
+      fee: '200',
+      networkPassphrase: NETWORK,
+    })
+      .addOperation(op2)
+      .addOperation(op1)
+      .setTimeout(30)
+      .build();
+
+    expect(() => assertEnvelopeUnmutated(original, reordered.toXDR(), NETWORK)).toThrow(
+      XdrValidationError,
+    );
+  });
+});
