@@ -4,7 +4,12 @@
  */
 import { describe, it, expect } from 'vitest';
 import { buildSchema, graphql, GraphQLScalarType } from 'graphql';
-import { StreamTypeDefs, bigIntScalarConfig, toStreamResolverResult } from '../src/graphql.js';
+import {
+  StreamTypeDefs,
+  bigIntScalarConfig,
+  toStreamDelegationResolverResult,
+  toStreamResolverResult,
+} from '../src/graphql.js';
 import type { Stream } from '../src/types.js';
 
 const sampleStream: Stream = {
@@ -72,6 +77,22 @@ describe('toStreamResolverResult', () => {
     expect(result.id).toBe('1');
     expect(result.deposit).toBe(1_000_000_000n);
     expect((result as Partial<Stream>).toJSON).toBeUndefined();
+  });
+});
+
+describe('toStreamDelegationResolverResult', () => {
+  it('returns the active delegate and ordered delegation history', () => {
+    expect(toStreamDelegationResolverResult('GDELEGATE', ['GDELEGATE_OLD', 'GDELEGATE'])).toEqual({
+      currentDelegate: 'GDELEGATE',
+      delegationHistory: ['GDELEGATE_OLD', 'GDELEGATE'],
+    });
+  });
+
+  it('represents a stream without an active delegate', () => {
+    expect(toStreamDelegationResolverResult(undefined)).toEqual({
+      currentDelegate: null,
+      delegationHistory: [],
+    });
   });
 });
 
