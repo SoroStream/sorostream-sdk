@@ -17,7 +17,7 @@ beforeEach(() => {
 
 import { SoroStreamClient } from '../src/SoroStreamClient.js';
 import { InMemoryEventBus } from '../src/eventBus.js';
-import { CrossTabSync, CrossTabEventBus } from '../src/crossTabSync.js';
+import { CrossTabSync, CrossTabEventBus, compareTabMessages } from '../src/crossTabSync.js';
 
 const VALID_CONTRACT = 'CAVTXNC2WCHINDNP4VBLSOQA2667VE3RPQZNGD5TFI4U2QSHTVAC667T';
 
@@ -379,5 +379,78 @@ describe('SoroStreamClient cross-tab sync', () => {
 
     client.destroy();
     expect(second.closed).toBe(true);
+  });
+});
+
+// ── Issue #683: deterministic ordering for concurrent cross-tab enqueues ──────
+
+describe('compareTabMessages (issue #683)', () => {
+  it('orders by timestamp first', () => {
+    const a = { ts: 1000, seq: 5, origin: 'z-tab' };
+    const b = { ts: 2000, seq: 0, origin: 'a-tab' };
+    expect(compareTabMessages(a, b)).toBeLessThan(0);
+    expect(compareTabMessages(b, a)).toBeGreaterThan(0);
+  });
+
+  it('uses seq as tie-break when timestamps collide', () => {
+    const a = { ts: 1000, seq: 1, origin: 'z-tab' };
+    const b = { ts: 1000, seq: 2, origin: 'a-tab' };
+    expect(compareTabMessages(a, b)).toBeLessThan(0);
+    expect(compareTabMessages(b, a)).toBeGreaterThan(0);
+  });
+
+  it('uses origin as final tie-break when ts and seq collide', () => {
+    const a = { ts: 1000, seq: 0, origin: 'a-tab' };
+    const b = { ts: 1000, seq: 0, origin: 'z-tab' };
+    expect(compareTabMessages(a, b)).toBeLessThan(0);
+    expect(compareTabMessages(b, a)).toBeGreaterThan(0);
+  });
+
+  it('returns 0 for identical keys', () => {
+    const a = { ts: 1000, seq: 0, origin: 'same-tab' };
+    expect(compareTabMessages(a, a)).toBe(0);
+  });
+
+  it('sorts a simulated concurrent-enqueue scenario deterministically', () => {
+    // Two tabs enqueue at the same millisecond — tab-B has lower seq (0) and
+    // lexicographically smaller origin, so it should always sort first.
+    const tabA = { ts: 5000, seq: 1, origin: 'tab-b-relay' };
+    const tabB = { ts: 5000, seq: 0, origin: 'tab-a-relay' };
+    const messages = [tabA, tabB];
+
+    const sorted = [...messages].sort(compareTabMessages);
+    expect(sorted[0]).toBe(tabB);
+    expect(sorted[1]).toBe(tabA);
+
+    // Running the sort again must produce the same order (stable).
+    const sorted2 = [...messages].sort(compareTabMessages);
+    expect(sorted2[0]).toBe(tabB);
+    expect(sorted2[1]).toBe(tabA);
+  });
+
+  it('broadcast stamps outgoing messages with ts and seq', () => {
+    const messages: unknown[] = [];
+    const relay = new CrossTabSync({
+      channelName: 'test-channel',
+      enabled: true,
+      onMessage: vi.fn(),
+      broadcastChannelFactory: (name) => {
+        const ch = new FakeBroadcastChannel(name);
+        // Intercept postMessage to capture the raw payload
+        const orig = ch.postMessage.bind(ch);
+        ch.postMessage = (data: unknown) => { messages.push(data); orig(data); };
+        return ch as unknown as BroadcastChannel;
+      },
+    });
+
+    relay.broadcast('offlineQueue:enqueue', { op: 'createStream' });
+    relay.broadcast('offlineQueue:enqueue', { op: 'withdraw' });
+    relay.destroy();
+
+    expect(messages).toHaveLength(2);
+    const [m0, m1] = messages as Array<{ ts: number; seq: number }>;
+    expect(typeof m0.ts).toBe('number');
+    expect(typeof m0.seq).toBe('number');
+    expect(m1.seq).toBe(m0.seq + 1);
   });
 });

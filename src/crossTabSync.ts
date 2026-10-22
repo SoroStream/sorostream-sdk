@@ -37,6 +37,18 @@ interface CrossTabMessage {
   origin: string;
   event: string;
   data: unknown;
+  /**
+   * Wall-clock timestamp (ms) of the enqueue moment. Used as the primary sort
+   * key when draining the offline queue across tabs.
+   */
+  ts: number;
+  /**
+   * Monotonically increasing counter scoped to this relay instance. Acts as a
+   * tie-break when two tabs enqueue at the same millisecond: the message with
+   * the lower `seq` value (from the lexicographically smaller `origin`) wins,
+   * providing a fully deterministic drain order.
+   */
+  seq: number;
 }
 
 export interface CrossTabSyncOptions {
@@ -76,6 +88,26 @@ function defaultBroadcastChannelFactory(name: string): BroadcastChannel | null {
  * channel (or anything it captured) and can be garbage-collected along with
  * the client that owns it.
  */
+/**
+ * Compares two {@link CrossTabMessage} values by their enqueue order.
+ *
+ * Primary key: `ts` (wall-clock milliseconds).
+ * Tie-break 1: `seq` (monotonic per-relay counter — lower wins).
+ * Tie-break 2: `origin` (lexicographic — deterministic across any pair of tabs).
+ *
+ * The result is negative when `a` should be drained before `b`, positive when
+ * `b` should come first, and zero only when both messages are from the same
+ * relay with the same sequence number (impossible in practice).
+ */
+export function compareTabMessages(
+  a: Pick<CrossTabMessage, 'ts' | 'seq' | 'origin'>,
+  b: Pick<CrossTabMessage, 'ts' | 'seq' | 'origin'>,
+): number {
+  if (a.ts !== b.ts) return a.ts - b.ts;
+  if (a.seq !== b.seq) return a.seq - b.seq;
+  return a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0;
+}
+
 export class CrossTabSync {
   private channel: BroadcastChannel | null = null;
   private readonly originId: string;
@@ -90,6 +122,11 @@ export class CrossTabSync {
   private destroyRequested = false;
   private destroyed = false;
   private destroyWaiters: Array<() => void> = [];
+  /**
+   * Monotonically increasing counter used as the `seq` tie-break field on
+   * every outgoing message. Scoped to this relay instance.
+   */
+  private seq = 0;
 
   constructor(options: CrossTabSyncOptions) {
     this.onMessage = options.onMessage;
@@ -124,6 +161,8 @@ export class CrossTabSync {
         origin: this.originId,
         event,
         data,
+        ts: Date.now(),
+        seq: this.seq++,
       } satisfies CrossTabMessage);
     } catch {
       // Payloads that are not structured-cloneable (e.g. wallet adapter
