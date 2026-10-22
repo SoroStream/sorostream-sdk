@@ -162,6 +162,26 @@ describe('waitForLedger – timeoutMs boundary (#730)', () => {
     });
   });
 
+  it('rejects immediately when aborted during a pending ledger request', async () => {
+    const controller = new AbortController();
+    let resolveRequest!: (value: { sequence: number }) => void;
+    const server = {
+      getLatestLedger: vi.fn(
+        () => new Promise<{ sequence: number }>((resolve) => (resolveRequest = resolve)),
+      ),
+    };
+    const promise = waitForLedger(server, 99, { signal: controller.signal });
+    const rejection = expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+
+    controller.abort();
+    await rejection;
+    expect(server.getLatestLedger).toHaveBeenCalledTimes(1);
+
+    resolveRequest({ sequence: 0 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(server.getLatestLedger).toHaveBeenCalledTimes(1);
+  });
+
   // ── Scenario 4 – Ledger seen before first poll ────────────────────────────
 
   it('resolves immediately when the ledger is already at or above the target', async () => {
