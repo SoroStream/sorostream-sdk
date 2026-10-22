@@ -12,11 +12,14 @@ import {
   getTokenDecimals,
   convertToTokenUnits,
   formatTokenAmount,
+  _clearNegativeLookupCache,
+  _getNegativeCacheEntry,
 } from '../src/decimalAware.js';
 import type { TokenMetadataProvider } from '../src/decimalAware.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  _clearNegativeLookupCache();
 });
 
 // ── toStroopsForToken ─────────────────────────────────────────────────────
@@ -174,5 +177,68 @@ describe('formatTokenAmount', () => {
     await formatTokenAmount(2_000_000n, TOKEN, provider);
     // Each call hits the provider — caching is the provider's responsibility
     expect(provider.getTokenMetadata).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── Issue #684: negative lookup caching ───────────────────────────────────────
+
+describe('getTokenDecimals negative-lookup cache (issue #684)', () => {
+  const NON_SAC_TOKEN = 'CNONSAC000000000000000000000000000000000000000000000000001';
+  const rpcError = new Error('contract not found');
+
+  it('only calls the provider once for a failing token within TTL', async () => {
+    const provider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
+
+    await expect(getTokenDecimals(NON_SAC_TOKEN, provider, 60_000)).rejects.toBe(rpcError);
+    await expect(getTokenDecimals(NON_SAC_TOKEN, provider, 60_000)).rejects.toBe(rpcError);
+    await expect(getTokenDecimals(NON_SAC_TOKEN, provider, 60_000)).rejects.toBe(rpcError);
+
+    // Provider was only called once; the next two were served from the cache.
+    expect(provider.getTokenMetadata).toHaveBeenCalledOnce();
+  });
+
+  it('retries the RPC after the TTL expires', async () => {
+    const provider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
+
+    // Use a 0ms TTL so the entry expires immediately
+    await expect(getTokenDecimals(NON_SAC_TOKEN, provider, 0)).rejects.toBe(rpcError);
+
+    // Advance time slightly to ensure expiry
+    await new Promise((r) => setTimeout(r, 1));
+
+    await expect(getTokenDecimals(NON_SAC_TOKEN, provider, 0)).rejects.toBe(rpcError);
+
+    // Both calls hit the provider because the cache entry expired
+    expect(provider.getTokenMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache successful lookups in the negative cache', async () => {
+    const TOKEN_OK = 'CAVTXNC2WCHINDNP4VBLSOQA2667VE3RPQZNGD5TFI4U2QSHTVAC667T';
+    const provider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockResolvedValue({ name: 'USDC', symbol: 'USDC', decimals: 7 }),
+    };
+
+    await getTokenDecimals(TOKEN_OK, provider);
+    expect(_getNegativeCacheEntry(TOKEN_OK)).toBeUndefined();
+  });
+
+  it('negative cache is scoped per token address', async () => {
+    const TOKEN_A = 'CTOKENA0000000000000000000000000000000000000000000000000001';
+    const TOKEN_B = 'CTOKENB0000000000000000000000000000000000000000000000000001';
+    const providerA: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
+    const providerB: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockResolvedValue({ name: 'TKB', symbol: 'TKB', decimals: 6 }),
+    };
+
+    await expect(getTokenDecimals(TOKEN_A, providerA, 60_000)).rejects.toBeDefined();
+    // TOKEN_B has a valid lookup — should not be affected by TOKEN_A's cache entry
+    expect(await getTokenDecimals(TOKEN_B, providerB)).toBe(6);
+    expect(providerB.getTokenMetadata).toHaveBeenCalledOnce();
   });
 });
