@@ -104,6 +104,40 @@ export class ScValCache {
     this.cache.clear();
   }
 
+  /**
+   * Invalidate cache entries scoped to a single value (issue #679).
+   *
+   * When `type` is supplied only the `"<type>:<value>"` entry is removed
+   * (e.g. `invalidate(addr, 'address')` after an account state change such
+   * as a sequence-number bump or trustline change). When `type` is omitted,
+   * every entry for the value across all types is removed.
+   *
+   * Unrelated entries are left intact. Returns the number of entries removed.
+   */
+  invalidate(value: unknown, type?: ScValType): number {
+    if (type !== undefined) {
+      return this.cache.delete(`${type}:${String(value)}`) ? 1 : 0;
+    }
+    const suffix = `:${String(value)}`;
+    let removed = 0;
+    for (const key of [...this.cache.keys()]) {
+      if (key.endsWith(suffix)) {
+        this.cache.delete(key);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * Invalidate the cached `address` ScVal for a single address.
+   * Convenience wrapper around {@link invalidate} for account state changes.
+   * Returns the number of entries removed (0 or 1).
+   */
+  invalidateAddress(address: string): number {
+    return this.invalidate(address, 'address');
+  }
+
   get size(): number {
     return this.cache.size;
   }
