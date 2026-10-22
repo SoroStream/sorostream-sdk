@@ -59,6 +59,47 @@ export const DEFAULT_QUEUE_OPTIONS: OfflineQueueOptions = {
 };
 
 /**
+ * Serializable snapshot of a {@link QueuedOperation} (issue #681).
+ * The `execute` closure cannot survive a page reload, so it is excluded;
+ * callers supply an `OfflineQueueExecuteResolver` to rebuild it on rehydrate.
+ */
+export interface PersistedQueuedOperation {
+  id: string;
+  operation: string;
+  queuedAt: number;
+  priority: number;
+  sequence: number;
+}
+
+/** Rebuilds the `execute` closure for a queue entry restored from storage. */
+export type OfflineQueueExecuteResolver = (
+  persisted: PersistedQueuedOperation,
+) => (() => Promise<unknown>) | undefined;
+
+/**
+ * Optional storage adapter used to snapshot the queue so queued operations
+ * survive a page reload (issue #681). Implementations may wrap
+ * `localStorage`, IndexedDB, or any other store. All methods may be sync or
+ * async. Persistence failures are swallowed so the in-memory queue keeps
+ * working when storage is unavailable.
+ */
+export interface OfflineQueuePersistence {
+  load(): (PersistedQueuedOperation[] | null | undefined) | Promise<PersistedQueuedOperation[] | null | undefined>;
+  save(ops: PersistedQueuedOperation[]): void | Promise<void>;
+}
+
+/** Placeholder `execute` for entries restored without a resolver. */
+function missingExecuteHandler(persisted: PersistedQueuedOperation): () => Promise<unknown> {
+  return () =>
+    Promise.reject(
+      new Error(
+        `Offline queue operation "${persisted.operation}" (id: ${persisted.id}) was restored ` +
+          `from persistence without an execute resolver and cannot be replayed.`,
+      ),
+    );
+}
+
+/**
  * In-memory offline write queue for the SoroStream SDK.
  * Buffers failed write operations and replays them when RPC connectivity is restored.
  */
@@ -70,11 +111,78 @@ export class OfflineWriteQueue {
   private healthCheckFn: (() => Promise<boolean>) | null = null;
   /** Monotonic counter incremented on every enqueue; see {@link QueuedOperation.sequence}. */
   private nextSequence = 0;
+  /**
+   * Resolves once queue state has been rehydrated from the persistence
+   * adapter (if any). Awaits this before draining after a reload.
+   */
+  readonly ready: Promise<void>;
 
   constructor(
     private options: OfflineQueueOptions,
     private eventBus: IEventBus,
-  ) {}
+    persistence?: OfflineQueuePersistence,
+    private executeResolver?: OfflineQueueExecuteResolver,
+  ) {
+    this.persistence = persistence ?? null;
+    this.ready = this.rehydrate();
+  }
+
+  private readonly persistence: OfflineQueuePersistence | null;
+
+  /**
+   * Rehydrate the queue from storage when a persistence adapter is supplied
+   * (issue #681). Without an adapter the queue keeps the previous
+   * in-memory-only behavior.
+   */
+  private async rehydrate(): Promise<void> {
+    if (!this.persistence) return;
+    let stored: PersistedQueuedOperation[] | null | undefined;
+    try {
+      stored = await this.persistence.load();
+    } catch {
+      return;
+    }
+    if (!stored || stored.length === 0) return;
+    const seen = new Set<string>();
+    for (const persisted of stored) {
+      if (!persisted || typeof persisted.operation !== 'string' || seen.has(persisted.id)) continue;
+      seen.add(persisted.id);
+      const sequence =
+        typeof persisted.sequence === 'number' ? persisted.sequence : this.nextSequence++;
+      this.insertSorted({
+        id: String(persisted.id ?? `queue-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`),
+        operation: persisted.operation,
+        execute: this.executeResolver?.(persisted) ?? missingExecuteHandler(persisted),
+        queuedAt: typeof persisted.queuedAt === 'number' ? persisted.queuedAt : Date.now(),
+        priority: typeof persisted.priority === 'number' ? persisted.priority : 0,
+        sequence,
+      });
+    }
+    if (this.queue.length > 0) {
+      this.nextSequence = Math.max(...this.queue.map((op) => op.sequence)) + 1;
+    }
+  }
+
+  /**
+   * Snapshot the current queue to storage. Failures are swallowed so a
+   * broken store can never break queueing itself.
+   */
+  private persist(): void {
+    if (!this.persistence) return;
+    const snapshot: PersistedQueuedOperation[] = this.queue.map((op) => ({
+      id: op.id,
+      operation: op.operation,
+      queuedAt: op.queuedAt,
+      priority: op.priority,
+      sequence: op.sequence,
+    }));
+    try {
+      const result = this.persistence.save(snapshot);
+      if (result instanceof Promise) result.catch(() => {});
+    } catch {
+      // Storage unavailable — queue keeps working in memory.
+    }
+  }
 
   /**
    * Set the health check function used to detect reconnection.
@@ -159,6 +267,7 @@ export class OfflineWriteQueue {
     };
 
     this.insertSorted(queuedOp);
+    this.persist();
     return true;
   }
 
@@ -212,6 +321,9 @@ export class OfflineWriteQueue {
 
     this.isDraining = false;
 
+    // Persist any operations left in the queue (e.g. re-queued on failure).
+    this.persist();
+
     const event: QueueDrainedEvent = {
       results,
       totalOperations: results.length,
@@ -242,5 +354,6 @@ export class OfflineWriteQueue {
    */
   clear(): void {
     this.queue = [];
+    this.persist();
   }
 }
