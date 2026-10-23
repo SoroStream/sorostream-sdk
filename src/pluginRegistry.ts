@@ -53,7 +53,7 @@ export class PluginRegistry implements IPluginRegistry {
 
     let removed = false;
     for (const [plugin, entry] of this.entries) {
-      if ((entry.name ?? plugin.name) === pluginOrName) {
+      if (entry.name === pluginOrName) {
         this.entries.delete(plugin);
         removed = true;
       }
