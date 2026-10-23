@@ -11,7 +11,6 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 - Add token-type-conditional template parameters via `ConditionalParam`/`resolveConditionalParam` and the new `templates.minAmountStream`, resolving decimals-aware parameters at instantiation time so one template can produce different values for different token types (#710)
 
 ### Fixed
-- Fix `StreamMonitor` emitting repeated low-balance alerts within the configured debounce window (#712)
 - Fix `nativeToStream` referencing an undefined `stream` variable in dead code left over from a merge, which made every stream read throw `ReferenceError` (#611)
 - Fix `createStream` validating the token contract (an RPC round-trip) before cheap offline checks like `durationSeconds`, so malformed input unnecessarily waited on a network call before failing (#542)
 - Fix `createStream`'s token-contract validation running before the recipient/sender account-existence checks, so a failed account lookup during that validation could surface as a raw, unwrapped error instead of `AccountNotFoundError` (#542)
@@ -57,6 +56,7 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 ### Fixed
 - Fix the WalletConnect v2 adapter attempting to sign with an expired or deleted session: it now tracks the session's expiry and `session_delete`/`session_expire` events, reports `isConnected() === false` for stale sessions, re-runs `signClient.connect()` on the next sign to prompt the user to reconnect, and throws the new `WalletConnectSessionExpiredError` when the relay rejects a stale topic (#453)
 - Fix `SoroStreamClient` keeping the Node.js event loop alive after being dereferenced without calling `destroy()`: all internally-owned `setInterval`/`setTimeout` handles (event polling, connection-pool idle sweep, fee-bump monitors, offline-queue health checks, `watchClaimable`/`watchTotalClaimable` polling) are now `unref()`'d, and a `FinalizationRegistry` stops them if the instance is garbage-collected without an explicit `destroy()` call (#412)
+- Fix `StreamMonitor` emitting repeated low-balance alerts within the configured debounce window (#712)
 - Fix `createStream` silently accepting a `startTime` earlier than the current ledger timestamp: it now throws a new `StartTimeInPastError` with a `console.warn` explaining the mismatch, instead of submitting a transaction the contract will reject (#411)
 - Fix the wallet adapter not detecting a Freighter lock/unlock mid-session: wallet adapters can now expose an optional `onConnectionChange(callback)` method, which `createFreighterAdapter` implements via `WatchWalletChanges` address tracking, and `getPublicKey`/`signTransaction` now re-run the Freighter connection handshake automatically after a lock/unlock cycle instead of failing with a stale wallet-not-connected error (#410)
 - Fix `toStroops` truncating (instead of rounding) amounts with more than `decimals` fractional digits, which caused small but consistent precision loss; it now rounds half-up (#409)
