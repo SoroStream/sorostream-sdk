@@ -51,6 +51,11 @@
       "import": "./dist/batch.mjs",
       "require": "./dist/batch.js"
     },
+    "./graphql": {
+      "types": "./dist/graphql.d.ts",
+      "import": "./dist/graphql.mjs",
+      "require": "./dist/graphql.js"
+    },
     "./schemas/*": "./schemas/*"
   },
   "contracts": {
@@ -58,7 +63,7 @@
     "maxCompatibleVersion": "1.99.99"
   },
   "scripts": {
-    "build": "tsup src/index.ts src/wallets.ts src/mock.ts src/testing.ts src/simulator.ts src/core.ts src/batch.ts --format cjs,esm --dts --clean && npm run build:browser && npm run validate-exports",
+    "build": "tsup src/index.ts src/wallets.ts src/mock.ts src/testing.ts src/simulator.ts src/core.ts src/batch.ts src/graphql.ts --format cjs,esm --dts --clean && npm run build:browser && npm run validate-exports",
     "build:browser": "tsup --config tsup.browser.config.ts",
     "postbuild": "npm run generate-integrity",
     "generate-integrity": "node scripts/generate-integrity-manifest.js",

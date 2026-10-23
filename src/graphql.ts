@@ -57,6 +57,12 @@ export const StreamTypeDefs = `
     autoRenew: Boolean!
     pausedAt: Int
     lockUntil: Int
+    delegation: StreamDelegation
+  }
+
+  type StreamDelegation {
+    currentDelegate: String
+    delegationHistory: [String!]!
   }
 `;
 
@@ -75,6 +81,29 @@ export type StreamGraphQLResult = Omit<Stream, 'toJSON'>;
 export function toStreamResolverResult(stream: Stream): StreamGraphQLResult {
   const { toJSON: _toJSON, ...rest } = stream;
   return rest;
+}
+
+/**
+ * The GraphQL resolver shape for a stream's recipient delegation state.
+ * An absent delegate is represented by `null`; history is always an array.
+ */
+export interface StreamDelegationGraphQLResult {
+  currentDelegate: string | null;
+  delegationHistory: string[];
+}
+
+/**
+ * Builds a GraphQL-ready delegation result without coupling callers to a
+ * particular GraphQL server or mutating the supplied delegation history.
+ */
+export function toStreamDelegationResolverResult(
+  currentDelegate: string | null | undefined,
+  delegationHistory: readonly string[] = [],
+): StreamDelegationGraphQLResult {
+  return {
+    currentDelegate: currentDelegate ?? null,
+    delegationHistory: [...delegationHistory],
+  };
 }
 
 /**
