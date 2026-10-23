@@ -46,8 +46,19 @@ export class PluginRegistry implements IPluginRegistry {
     return this.topologicalSort();
   }
 
-  unregister(plugin: SoroStreamPlugin): boolean {
-    return this.entries.delete(plugin);
+  unregister(pluginOrName: SoroStreamPlugin | string): boolean {
+    if (typeof pluginOrName !== 'string') {
+      return this.entries.delete(pluginOrName);
+    }
+
+    let removed = false;
+    for (const [plugin, entry] of this.entries) {
+      if (entry.name === pluginOrName) {
+        this.entries.delete(plugin);
+        removed = true;
+      }
+    }
+    return removed;
   }
 
   /**
