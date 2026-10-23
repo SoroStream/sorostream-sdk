@@ -11,7 +11,6 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 - Add token-type-conditional template parameters via `ConditionalParam`/`resolveConditionalParam` and the new `templates.minAmountStream`, resolving decimals-aware parameters at instantiation time so one template can produce different values for different token types (#710)
 
 ### Fixed
-- Fix `FederationPlugin` serving stale account IDs after a fresh federation lookup detects an address rotation (#706)
 - Fix `nativeToStream` referencing an undefined `stream` variable in dead code left over from a merge, which made every stream read throw `ReferenceError` (#611)
 - Fix `createStream` validating the token contract (an RPC round-trip) before cheap offline checks like `durationSeconds`, so malformed input unnecessarily waited on a network call before failing (#542)
 - Fix `createStream`'s token-contract validation running before the recipient/sender account-existence checks, so a failed account lookup during that validation could surface as a raw, unwrapped error instead of `AccountNotFoundError` (#542)
@@ -64,6 +63,7 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 - **#230** `getStreamsBySender` and `getStreamsByRecipient` now cache results using a `${network}:${address}` key, preventing stale testnet data from being served after a `setNetwork("mainnet")` call. The sender/recipient caches are flushed alongside the stream cache in `setNetwork`. A mid-flight guard (matching the one on `getStream`) prevents a network switch that occurs between RPC dispatch and cache write from poisoning the new network's slot.
 - Fix syntax errors in `errors.ts` and `SoroStreamClient.ts` left over from a prior merge (an unterminated class body ahead of a JSDoc block in each file) that made the package fail to type-check and, in `SoroStreamClient.ts`, fail to parse at all.
 - Fix `getClaimable`: the TTL cache and in-flight request map were declared and read but never populated, and the RPC result was referenced before being assigned, so every call threw `ReferenceError: result is not defined`. The cache/dedup path now behaves as documented.
+- Fix `FederationPlugin` serving stale account IDs after a fresh federation lookup detects an address rotation (#706)
 - Deduplicate `types.ts` (fully duplicated top-level declarations) and `utils.ts` (tripled top-level declarations) left over from prior merges. These caused `tsc --noEmit` to fail and made 20 of 24 test files fail to even load under esbuild (`"X" has already been declared`).
 
 ### Changed
