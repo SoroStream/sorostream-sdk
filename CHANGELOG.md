@@ -64,6 +64,7 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 - **#230** `getStreamsBySender` and `getStreamsByRecipient` now cache results using a `${network}:${address}` key, preventing stale testnet data from being served after a `setNetwork("mainnet")` call. The sender/recipient caches are flushed alongside the stream cache in `setNetwork`. A mid-flight guard (matching the one on `getStream`) prevents a network switch that occurs between RPC dispatch and cache write from poisoning the new network's slot.
 - Fix syntax errors in `errors.ts` and `SoroStreamClient.ts` left over from a prior merge (an unterminated class body ahead of a JSDoc block in each file) that made the package fail to type-check and, in `SoroStreamClient.ts`, fail to parse at all.
 - Fix `getClaimable`: the TTL cache and in-flight request map were declared and read but never populated, and the RPC result was referenced before being assigned, so every call threw `ReferenceError: result is not defined`. The cache/dedup path now behaves as documented.
+- Fix `FederationPlugin` serving stale account IDs after a fresh federation lookup detects an address rotation (#706)
 - Deduplicate `types.ts` (fully duplicated top-level declarations) and `utils.ts` (tripled top-level declarations) left over from prior merges. These caused `tsc --noEmit` to fail and made 20 of 24 test files fail to even load under esbuild (`"X" has already been declared`).
 
 ### Changed
