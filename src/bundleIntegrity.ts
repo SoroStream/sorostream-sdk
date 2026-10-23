@@ -47,6 +47,9 @@ export interface IntegrityManifest {
   files: IntegrityEntry[];
 }
 
+/** Resolves a manifest-relative file to its HTTP response. */
+export type ManifestResourceResolver = (file: string) => Promise<Response>;
+
 // ── Core helpers ─────────────────────────────────────────────────────────────
 
 /**
@@ -153,8 +156,8 @@ export function verifyFileIntegrity(filePath: string, expectedSha256: string): b
  * recorded hash.
  *
  * @param manifest - The manifest to verify against.
- * @param distDir  - Base directory where the dist files live. Each
- *                   `manifest.files[*].file` path is resolved relative to this.
+ * @param distDir  - Base directory for local verification, or a resolver that
+ *                   fetches each manifest-relative file from a remote source.
  * @returns An object with:
  *   - `valid` — `true` if all files matched their recorded hashes.
  *   - `failures` — Relative paths of any files that failed verification.
@@ -165,17 +168,56 @@ export function verifyFileIntegrity(filePath: string, expectedSha256: string): b
  * if (!valid) {
  *   console.error('Integrity failures:', failures);
  * }
+ *
+ * const remoteResult = await verifyManifest(manifest, (file) =>
+ *   fetch(new URL(file, 'https://cdn.example.com/sdk/')),
+ * );
  * ```
  */
 export function verifyManifest(
   manifest: IntegrityManifest,
   distDir: string,
-): { valid: boolean; failures: string[] } {
+): { valid: boolean; failures: string[] };
+export function verifyManifest(
+  manifest: IntegrityManifest,
+  resolveResource: ManifestResourceResolver,
+): Promise<{ valid: boolean; failures: string[] }>;
+export function verifyManifest(
+  manifest: IntegrityManifest,
+  distDirOrResolver: string | ManifestResourceResolver,
+): { valid: boolean; failures: string[] } | Promise<{ valid: boolean; failures: string[] }> {
+  if (typeof distDirOrResolver === 'function') {
+    return verifyManifestFromResolver(manifest, distDirOrResolver);
+  }
+
   const failures: string[] = [];
 
   for (const entry of manifest.files) {
-    const full = join(distDir, entry.file);
+    const full = join(distDirOrResolver, entry.file);
     if (!verifyFileIntegrity(full, entry.sha256)) {
+      failures.push(entry.file);
+    }
+  }
+
+  return { valid: failures.length === 0, failures };
+}
+
+async function verifyManifestFromResolver(
+  manifest: IntegrityManifest,
+  resolveResource: ManifestResourceResolver,
+): Promise<{ valid: boolean; failures: string[] }> {
+  const failures: string[] = [];
+
+  for (const entry of manifest.files) {
+    try {
+      const response = await resolveResource(entry.file);
+      if (
+        !response.ok ||
+        computeSha256(Buffer.from(await response.arrayBuffer())) !== entry.sha256.toLowerCase()
+      ) {
+        failures.push(entry.file);
+      }
+    } catch {
       failures.push(entry.file);
     }
   }
