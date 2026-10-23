@@ -36,7 +36,11 @@ import type { ConnectionPoolOptions, PoolEvent } from './connectionPool.js';
 import { getDefaultStorageAdapter, getDefaultFetchAdapter } from './adapters.js';
 import type { StorageAdapter, SoroStreamAdapters, FetchAdapter } from './adapters.js';
 import { SoroStreamVersionError } from './errors.js';
-import type { TransactionHistoryOptions, TransactionHistoryPage } from './horizon.js';
+import {
+  assertValidHorizonUrl,
+  type TransactionHistoryOptions,
+  type TransactionHistoryPage,
+} from './horizon.js';
 import { getTransactionHistory, getAddressActivity } from './horizon.js';
 import { Telemetry } from './telemetry.js';
 import {
@@ -313,6 +317,8 @@ export interface SoroStreamClientOptions {
   walletAdapter?: WalletAdapter;
   /** Optional custom RPC URL (overrides default). */
   rpcUrl?: string;
+  /** Per-network Horizon base URL overrides for history and activity queries. */
+  horizonUrls?: Partial<Record<Network, string>>;
   /**
    * Optional custom transport for all Soroban RPC calls. Defaults to a
    * thin wrapper around `@stellar/stellar-sdk`'s `rpc.Server` pointed at
@@ -695,6 +701,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
   private server: RpcTransportAdapter;
   /** The user-supplied transport, if any — kept across `setNetwork` calls instead of being rebuilt. */
   private readonly customTransport: RpcTransportAdapter | null;
+  private readonly horizonUrls: Partial<Record<Network, string>> = {};
   private readonly breaker: CircuitBreaker | null;
   private contract: Contract;
   private network: Network;
@@ -910,6 +917,12 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
         'SoroStreamClient: could not determine the network. Pass `network` explicitly, ' +
           'or an `rpcUrl` containing "testnet", "mainnet", or "horizon.stellar.org".',
       );
+    }
+    for (const network of ['mainnet', 'testnet', 'futurenet'] as const) {
+      const horizonUrl = options.horizonUrls?.[network];
+      if (horizonUrl !== undefined) {
+        this.horizonUrls[network] = assertValidHorizonUrl(horizonUrl);
+      }
     }
     // Issue #213: fail fast with a clear error on an incompatible
     // @stellar/stellar-sdk peer version, instead of cryptic errors at call time.
@@ -6581,6 +6594,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     return getTransactionHistory(streamId, this.network, {
       ...options,
       contractId: this.contract.contractId(),
+      horizonUrl: options?.horizonUrl ?? this.horizonUrls[this.network],
     });
   }
 
@@ -6606,6 +6620,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
     return getAddressActivity(address, this.network, {
       ...options,
       contractId: this.contract.contractId(),
+      horizonUrl: options?.horizonUrl ?? this.horizonUrls[this.network],
     });
   }
 

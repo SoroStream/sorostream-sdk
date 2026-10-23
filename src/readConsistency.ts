@@ -22,6 +22,41 @@ export interface WaitForLedgerOptions {
   signal?: AbortSignal;
 }
 
+function abortError(): DOMException {
+  return new DOMException('waitForLedger aborted', 'AbortError');
+}
+
+function getLatestLedger(
+  server: LedgerProvider,
+  signal?: AbortSignal,
+): Promise<rpc.Api.GetLatestLedgerResponse> {
+  if (!signal) return server.getLatestLedger();
+  if (signal.aborted) return Promise.reject(abortError());
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(abortError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    server.getLatestLedger().then(
+      (ledger) => {
+        cleanup();
+        resolve(ledger);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
 /**
  * Waits until the given Soroban RPC server reports a ledger whose sequence
  * number is **at or above** `targetSequence`.
@@ -61,10 +96,11 @@ export async function waitForLedger(
 
   while (true) {
     if (signal?.aborted) {
-      throw new DOMException('waitForLedger aborted', 'AbortError');
+      throw abortError();
     }
 
-    const latest = await server.getLatestLedger();
+    const latest = await getLatestLedger(server, signal);
+    if (signal?.aborted) throw abortError();
     if (latest.sequence >= targetSequence) {
       return;
     }
@@ -78,15 +114,21 @@ export async function waitForLedger(
     }
 
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, Math.min(pollIntervalMs, remaining));
-      signal?.addEventListener(
-        'abort',
-        () => {
-          clearTimeout(timer);
-          reject(new DOMException('waitForLedger aborted', 'AbortError'));
-        },
-        { once: true },
-      );
+      let timer: ReturnType<typeof setTimeout>;
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        cleanup();
+        reject(abortError());
+      };
+      timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, Math.min(pollIntervalMs, remaining));
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) onAbort();
     });
   }
 }

@@ -54,6 +54,12 @@ export interface RequestDeduplicatorOptions {
    * Default: `Infinity` (always join).
    */
   maxAgeMs?: number;
+  /**
+   * Converts a call's key to the internal string key used for deduplication.
+   * This lets callers derive stable keys from object or array arguments.
+   * Without a function, keys must remain strings.
+   */
+  keyFn?: (key: unknown) => string;
 }
 
 /** Per-call options for {@link RequestDeduplicator.dedupe}. */
@@ -91,6 +97,7 @@ export class RequestDeduplicator {
   private readonly maxAgeMs: number;
   private readonly enabled: boolean;
   private readonly onDeduplicated: ((key: string) => void) | undefined;
+  private readonly keyFn: ((key: unknown) => string) | undefined;
   private requests = 0;
   private started = 0;
   private deduplicated = 0;
@@ -100,6 +107,7 @@ export class RequestDeduplicator {
     this.enabled = options.enabled !== false;
     this.onDeduplicated = options.onDeduplicated;
     this.maxAgeMs = options.maxAgeMs ?? Infinity;
+    this.keyFn = options.keyFn;
   }
 
   /**
@@ -113,20 +121,21 @@ export class RequestDeduplicator {
    * @param options - Staleness controls (issue #622).
    * @returns The shared promise for this key.
    */
-  dedupe<T>(key: string, factory: () => Promise<T>, options: DedupeCallOptions = {}): Promise<T> {
+  dedupe<T>(key: unknown, factory: () => Promise<T>, options: DedupeCallOptions = {}): Promise<T> {
     this.requests++;
+    const normalizedKey = this.normalizeKey(key);
 
     if (!this.enabled) {
       this.started++;
       return this.invoke(factory);
     }
 
-    const existing = this.inFlight.get(key);
+    const existing = this.inFlight.get(normalizedKey);
     const maxAge = options.maxAgeMs ?? this.maxAgeMs;
-    const age = Date.now() - (this.startedAt.get(key) ?? Date.now());
+    const age = Date.now() - (this.startedAt.get(normalizedKey) ?? Date.now());
     if (existing && !options.fresh && age <= maxAge) {
       if (existing.creationTick) {
-        return this.join(key, existing) as Promise<T>;
+        return this.join(normalizedKey, existing) as Promise<T>;
       }
       // Settle cleanup runs as a microtask after this caller's turn, so
       // defer the join decision by one microtask: any pending removal
@@ -134,16 +143,16 @@ export class RequestDeduplicator {
       // has already settled (issue #714). If the entry survived, join it;
       // otherwise start fresh work.
       return Promise.resolve().then(() => {
-        const current = this.inFlight.get(key);
+        const current = this.inFlight.get(normalizedKey);
         if (current) {
-          const currentAge = Date.now() - (this.startedAt.get(key) ?? Date.now());
-          if (currentAge <= maxAge) return this.join(key, current) as Promise<T>;
+          const currentAge = Date.now() - (this.startedAt.get(normalizedKey) ?? Date.now());
+          if (currentAge <= maxAge) return this.join(normalizedKey, current) as Promise<T>;
         }
-        return this.start(key, factory);
+        return this.start(normalizedKey, factory);
       });
     }
 
-    return this.start(key, factory);
+    return this.start(normalizedKey, factory);
   }
 
   /** Registers `factory`'s shared promise under `key` and wires settle cleanup. */
@@ -185,8 +194,16 @@ export class RequestDeduplicator {
   }
 
   /** Returns `true` when a request for `key` is currently in flight. */
-  has(key: string): boolean {
-    return this.inFlight.has(key);
+  has(key: unknown): boolean {
+    return this.inFlight.has(this.normalizeKey(key));
+  }
+
+  private normalizeKey(key: unknown): string {
+    if (this.keyFn) return this.keyFn(key);
+    if (typeof key !== 'string') {
+      throw new TypeError('RequestDeduplicator keys must be strings unless keyFn is provided');
+    }
+    return key;
   }
 
   /** Number of requests currently in flight. */

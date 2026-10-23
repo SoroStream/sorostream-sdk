@@ -68,6 +68,19 @@ export interface FeeRetryMiddlewareOptions {
    * @param bumpedFee - The fee (in stroops) that will be used for this attempt.
    */
   onRetry?: (attempt: number, bumpedFee: number) => void;
+
+  /**
+   * Optional callback invoked when the middleware finishes handling a call —
+   * either because it succeeded (after zero or more retries) or because retries
+   * were exhausted / the fee cap was hit.
+   *
+   * Provides the total number of retry attempts consumed, enabling callers to
+   * surface retry telemetry without catching and inspecting errors.
+   *
+   * @param attempts - Total number of retry attempts made (0 = succeeded on first try).
+   * @param succeeded - `true` if the call ultimately succeeded, `false` if retries were exhausted.
+   */
+  onComplete?: (attempts: number, succeeded: boolean) => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -181,6 +194,7 @@ export function createFeeRetryMiddleware(
   const bumpFactor = options.bumpFactor ?? DEFAULT_BUMP_FACTOR;
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const onRetry = options.onRetry;
+  const onComplete = options.onComplete;
 
   /**
    * Per-call state stored on the MiddlewareContext args array (index -1 hidden
@@ -216,6 +230,14 @@ export function createFeeRetryMiddleware(
       state.currentFee = 0;
     },
 
+    after(ctx: MiddlewareContext, _result: unknown): void {
+      // Call succeeded — report attempt count to the caller.
+      if (onComplete) {
+        const state = callState.get(ctx.args as object);
+        onComplete(state?.attempts ?? 0, true);
+      }
+    },
+
     async onError(ctx: MiddlewareContext, error: unknown): Promise<void> {
       if (!isFeeError(error)) {
         // Not a fee error — let it propagate unchanged
@@ -225,7 +247,8 @@ export function createFeeRetryMiddleware(
       const state = getState(ctx);
 
       if (state.attempts >= maxAttempts) {
-        // Exhausted retries — re-throw the last fee error
+        // Exhausted retries — report and re-throw
+        onComplete?.(state.attempts, false);
         throw error;
       }
 
@@ -241,7 +264,8 @@ export function createFeeRetryMiddleware(
       const bumpedFee = Math.ceil(state.currentFee * bumpFactor);
 
       if (bumpedFee > maxFeeStroops) {
-        // Fee would exceed the cap — stop retrying
+        // Fee would exceed the cap — report and stop retrying
+        onComplete?.(state.attempts, false);
         throw error;
       }
 

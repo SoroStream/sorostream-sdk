@@ -204,3 +204,96 @@ describe('createFeeRetryMiddleware (issue #404)', () => {
     expect(fee).toBe(300); // 200 * 1.5
   });
 });
+
+// ── Issue #685: attempt count reporting ───────────────────────────────────────
+
+describe('createFeeRetryMiddleware attempt count (issue #685)', () => {
+  it('onComplete reports 0 attempts when call succeeds on first try', () => {
+    const onComplete = vi.fn();
+    const plugin = createFeeRetryMiddleware({ onComplete });
+    const ctx = makeCtx();
+    plugin.before!(ctx);
+
+    // Simulate a clean success — call `after` directly
+    plugin.after!(ctx, { txHash: '0xok' });
+
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledWith(0, true);
+  });
+
+  it('onComplete reports correct attempt count after success-after-retry', async () => {
+    const onComplete = vi.fn();
+    const plugin = createFeeRetryMiddleware({
+      maxFeeStroops: 50_000,
+      bumpFactor: 2,
+      maxAttempts: 3,
+      onComplete,
+    });
+    const ctx = makeCtx();
+    plugin.before!(ctx);
+
+    const feeErr = Object.assign(new Error('tx_insufficient_fee'), {
+      result_code: 'tx_insufficient_fee',
+      minFee: 100,
+    });
+
+    // Two fee errors consumed as retries
+    for (let i = 0; i < 2; i++) {
+      try { await plugin.onError!(ctx, feeErr); } catch { /* FeeRetryError expected */ }
+    }
+
+    // Call ultimately "succeeds" — fire after hook
+    plugin.after!(ctx, { txHash: '0xfinal' });
+
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledWith(2, true);
+  });
+
+  it('onComplete reports attempt count when retries are exhausted', async () => {
+    const onComplete = vi.fn();
+    const plugin = createFeeRetryMiddleware({
+      maxFeeStroops: 50_000,
+      bumpFactor: 1.5,
+      maxAttempts: 2,
+      onComplete,
+    });
+    const ctx = makeCtx();
+    plugin.before!(ctx);
+
+    const feeErr = makeFeeError('tx_insufficient_fee');
+
+    // Consume both allowed retries
+    for (let i = 0; i < 2; i++) {
+      try { await plugin.onError!(ctx, feeErr); } catch { /* expected */ }
+    }
+
+    // Third call — maxAttempts exhausted, onComplete fires with succeeded=false
+    try { await plugin.onError!(ctx, feeErr); } catch { /* expected */ }
+
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledWith(2, false);
+  });
+
+  it('onComplete reports false when bumped fee exceeds cap', async () => {
+    const onComplete = vi.fn();
+    const plugin = createFeeRetryMiddleware({
+      maxFeeStroops: 150,
+      bumpFactor: 2,
+      maxAttempts: 10,
+      onComplete,
+    });
+    const ctx = makeCtx();
+    plugin.before!(ctx);
+
+    const feeErr = Object.assign(new Error('tx_insufficient_fee'), {
+      result_code: 'tx_insufficient_fee',
+      minFee: 100,
+    });
+
+    // 100 * 2 = 200 > 150 — cap hit immediately
+    try { await plugin.onError!(ctx, feeErr); } catch { /* expected */ }
+
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledWith(0, false);
+  });
+});

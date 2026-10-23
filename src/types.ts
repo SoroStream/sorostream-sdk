@@ -1643,6 +1643,8 @@ export interface SoroStreamClientConfig {
   contractId: string;
   /** Optional custom RPC URL (overrides the default for `network`). */
   rpcUrl?: string;
+  /** Per-network Horizon base URL overrides for history and activity queries. */
+  horizonUrls?: Partial<Record<Network, string>>;
   /** Optional response caching configuration for read-only RPC calls (issue #528). */
   cacheOptions?: CacheConfigOptions;
   /** Optional circuit-breaker configuration for RPC calls. */
@@ -1758,7 +1760,7 @@ export interface IPluginRegistry {
     constraints?: { name?: string; before?: string; after?: string },
   ): void;
   list(): SoroStreamPlugin[];
-  unregister(plugin: SoroStreamPlugin): boolean;
+  unregister(pluginOrName: SoroStreamPlugin | string): boolean;
   /**
    * Runs the `before` hook of all registered plugins in topological order.
    * @param operation - Name of the operation being invoked.

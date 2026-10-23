@@ -28,26 +28,33 @@ export class SandboxUnexpectedCallError extends Error {
  * Map of operation names to scenario handlers used by {@link SoroStreamSandbox}.
  * Each handler mirrors the real client method's signature.
  *
- * Issue #332.
+ * A scenario value can be either:
+ * - A single handler function (existing behaviour), or
+ * - An array of handler functions consumed one per call (sequence mode).
+ *   Once the array is exhausted, the sandbox falls back to `defaultBehavior`.
+ *
+ * Issue #332, extended by #696.
  */
+export type ScenarioHandler<T extends (...args: never[]) => Promise<unknown>> = T | T[];
+
 export type ScenarioMap = {
-  createStream?: (params: CreateStreamParams) => Promise<{ streamId: string; txHash: string }>;
-  getStream?: (streamId: string) => Promise<Stream>;
-  withdraw?: (params: WithdrawParams) => Promise<{ txHash: string; amount: string }>;
-  cancelStream?: (params: CancelStreamParams) => Promise<{ txHash: string }>;
-  getClaimable?: (streamId: string) => Promise<bigint>;
-  getMultipleStreamBalances?: (streamIds: string[]) => Promise<StreamBalance[]>;
-  estimateFee?: (params: unknown) => Promise<bigint>;
-  getStreamsBySender?: (sender: string) => Promise<Stream[]>;
-  getStreamsByRecipient?: (recipient: string) => Promise<Stream[]>;
-  topUp?: (params: {
+  createStream?: ScenarioHandler<(params: CreateStreamParams) => Promise<{ streamId: string; txHash: string }>>;
+  getStream?: ScenarioHandler<(streamId: string) => Promise<Stream>>;
+  withdraw?: ScenarioHandler<(params: WithdrawParams) => Promise<{ txHash: string; amount: string }>>;
+  cancelStream?: ScenarioHandler<(params: CancelStreamParams) => Promise<{ txHash: string }>>;
+  getClaimable?: ScenarioHandler<(streamId: string) => Promise<bigint>>;
+  getMultipleStreamBalances?: ScenarioHandler<(streamIds: string[]) => Promise<StreamBalance[]>>;
+  estimateFee?: ScenarioHandler<(params: unknown) => Promise<bigint>>;
+  getStreamsBySender?: ScenarioHandler<(sender: string) => Promise<Stream[]>>;
+  getStreamsByRecipient?: ScenarioHandler<(recipient: string) => Promise<Stream[]>>;
+  topUp?: ScenarioHandler<(params: {
     streamId: string;
     amount: bigint;
-  }) => Promise<{ txHash: string; newEndTime: Date }>;
-  batchWithdraw?: (
+  }) => Promise<{ txHash: string; newEndTime: Date }>>;
+  batchWithdraw?: ScenarioHandler<(
     streamIds: string[],
-  ) => Promise<{ successes: string[]; failures: { id: string; error: Error }[] }>;
-  batchCancel?: (streamIds: string[]) => Promise<{ txHash: string; streamIds: string[] }[]>;
+  ) => Promise<{ successes: string[]; failures: { id: string; error: Error }[] }>>;
+  batchCancel?: ScenarioHandler<(streamIds: string[]) => Promise<{ txHash: string; streamIds: string[] }[]>>;
 };
 
 /**
@@ -105,6 +112,12 @@ export class SoroStreamSandbox {
 
   private readonly eventHandlers = new Map<string, Set<Function>>();
 
+  /**
+   * Per-method call counters used to advance through sequence scenarios
+   * (arrays of handlers). Keyed by scenario name.
+   */
+  private readonly sequenceIndex = new Map<string, number>();
+
   constructor(scenarios: ScenarioMap = {}, options?: SandboxOptions) {
     this.scenarios = scenarios;
     this.defaultBehavior = options?.defaultBehavior ?? 'error';
@@ -115,6 +128,25 @@ export class SoroStreamSandbox {
 
   private unexpected(method: string): never {
     throw new SandboxUnexpectedCallError(method);
+  }
+
+  /**
+   * Resolves the next callable handler for `key`.
+   *
+   * - If the scenario is a single function, it is returned on every call.
+   * - If it is an array, each call consumes the next entry. Once exhausted,
+   *   `undefined` is returned so the caller can fall through to `defaultBehavior`.
+   */
+  private nextHandler<T extends (...args: never[]) => Promise<unknown>>(
+    key: keyof ScenarioMap,
+  ): T | undefined {
+    const scenario = this.scenarios[key] as ScenarioHandler<T> | undefined;
+    if (!scenario) return undefined;
+    if (!Array.isArray(scenario)) return scenario as T;
+    const idx = this.sequenceIndex.get(key as string) ?? 0;
+    const handler = scenario[idx] as T | undefined;
+    this.sequenceIndex.set(key as string, idx + 1);
+    return handler;
   }
 
   private emitEvent(type: StreamEventType, data: Record<string, unknown>): void {
@@ -159,12 +191,10 @@ export class SoroStreamSandbox {
 
   // ── Main SDK operations ────────────────────────────────────────────────────
 
-  /**
-   * Creates a stream using the registered `createStream` scenario.
-   */
   async createStream(params: CreateStreamParams): Promise<{ streamId: string; txHash: string }> {
-    if (this.scenarios.createStream) {
-      const result = await this.scenarios.createStream(params);
+    const handler = this.nextHandler<(p: CreateStreamParams) => Promise<{ streamId: string; txHash: string }>>('createStream');
+    if (handler) {
+      const result = await handler(params);
       this.emitEvent('StreamCreated', { streamId: result.streamId, txHash: result.txHash });
       return result;
     }
@@ -174,25 +204,17 @@ export class SoroStreamSandbox {
     this.unexpected('createStream');
   }
 
-  /**
-   * Retrieves a stream using the registered `getStream` scenario.
-   */
   async getStream(streamId: string): Promise<Stream> {
-    if (this.scenarios.getStream) {
-      return this.scenarios.getStream(streamId);
-    }
-    if (this.defaultBehavior === 'empty') {
-      return null as unknown as Stream;
-    }
+    const handler = this.nextHandler<(id: string) => Promise<Stream>>('getStream');
+    if (handler) return handler(streamId);
+    if (this.defaultBehavior === 'empty') return null as unknown as Stream;
     this.unexpected('getStream');
   }
 
-  /**
-   * Withdraws from a stream using the registered `withdraw` scenario.
-   */
   async withdraw(params: WithdrawParams): Promise<{ txHash: string; amount: string }> {
-    if (this.scenarios.withdraw) {
-      const result = await this.scenarios.withdraw(params);
+    const handler = this.nextHandler<(p: WithdrawParams) => Promise<{ txHash: string; amount: string }>>('withdraw');
+    if (handler) {
+      const result = await handler(params);
       this.emitEvent('StreamWithdrawn', {
         streamId: params.streamId,
         txHash: result.txHash,
@@ -200,134 +222,76 @@ export class SoroStreamSandbox {
       });
       return result;
     }
-    if (this.defaultBehavior === 'empty') {
-      return { txHash: '', amount: '0' };
-    }
+    if (this.defaultBehavior === 'empty') return { txHash: '', amount: '0' };
     this.unexpected('withdraw');
   }
 
-  /**
-   * Cancels a stream using the registered `cancelStream` scenario.
-   */
   async cancelStream(params: CancelStreamParams): Promise<{ txHash: string }> {
-    if (this.scenarios.cancelStream) {
-      const result = await this.scenarios.cancelStream(params);
+    const handler = this.nextHandler<(p: CancelStreamParams) => Promise<{ txHash: string }>>('cancelStream');
+    if (handler) {
+      const result = await handler(params);
       this.emitEvent('StreamCancelled', { streamId: params.streamId, txHash: result.txHash });
       return result;
     }
-    if (this.defaultBehavior === 'empty') {
-      return { txHash: '' };
-    }
+    if (this.defaultBehavior === 'empty') return { txHash: '' };
     this.unexpected('cancelStream');
   }
 
-  /**
-   * Returns the claimable amount for a stream using the registered `getClaimable` scenario.
-   */
   async getClaimable(streamId: string): Promise<bigint> {
-    if (this.scenarios.getClaimable) {
-      return this.scenarios.getClaimable(streamId);
-    }
-    if (this.defaultBehavior === 'empty') {
-      return 0n;
-    }
+    const handler = this.nextHandler<(id: string) => Promise<bigint>>('getClaimable');
+    if (handler) return handler(streamId);
+    if (this.defaultBehavior === 'empty') return 0n;
     this.unexpected('getClaimable');
   }
 
-  /**
-   * Returns claimable balances for multiple streams using the registered
-   * `getMultipleStreamBalances` scenario.
-   */
   async getMultipleStreamBalances(streamIds: string[]): Promise<StreamBalance[]> {
-    if (this.scenarios.getMultipleStreamBalances) {
-      return this.scenarios.getMultipleStreamBalances(streamIds);
-    }
-    if (this.defaultBehavior === 'empty') {
-      return [];
-    }
+    const handler = this.nextHandler<(ids: string[]) => Promise<StreamBalance[]>>('getMultipleStreamBalances');
+    if (handler) return handler(streamIds);
+    if (this.defaultBehavior === 'empty') return [];
     this.unexpected('getMultipleStreamBalances');
   }
 
-  /**
-   * Estimates the fee for an operation using the registered `estimateFee` scenario.
-   */
   async estimateFee(params: unknown): Promise<bigint> {
-    if (this.scenarios.estimateFee) {
-      return this.scenarios.estimateFee(params);
-    }
-    if (this.defaultBehavior === 'empty') {
-      return 0n;
-    }
+    const handler = this.nextHandler<(p: unknown) => Promise<bigint>>('estimateFee');
+    if (handler) return handler(params);
+    if (this.defaultBehavior === 'empty') return 0n;
     this.unexpected('estimateFee');
   }
 
-  /**
-   * Returns streams by sender using the registered `getStreamsBySender` scenario.
-   */
   async getStreamsBySender(sender: string): Promise<Stream[]> {
-    if (this.scenarios.getStreamsBySender) {
-      return this.scenarios.getStreamsBySender(sender);
-    }
-    if (this.defaultBehavior === 'empty') {
-      return [];
-    }
+    const handler = this.nextHandler<(s: string) => Promise<Stream[]>>('getStreamsBySender');
+    if (handler) return handler(sender);
+    if (this.defaultBehavior === 'empty') return [];
     this.unexpected('getStreamsBySender');
   }
 
-  /**
-   * Returns streams by recipient using the registered `getStreamsByRecipient` scenario.
-   */
   async getStreamsByRecipient(recipient: string): Promise<Stream[]> {
-    if (this.scenarios.getStreamsByRecipient) {
-      return this.scenarios.getStreamsByRecipient(recipient);
-    }
-    if (this.defaultBehavior === 'empty') {
-      return [];
-    }
+    const handler = this.nextHandler<(r: string) => Promise<Stream[]>>('getStreamsByRecipient');
+    if (handler) return handler(recipient);
+    if (this.defaultBehavior === 'empty') return [];
     this.unexpected('getStreamsByRecipient');
   }
 
-  /**
-   * Tops up a stream using the registered `topUp` scenario.
-   */
-  async topUp(params: {
-    streamId: string;
-    amount: bigint;
-  }): Promise<{ txHash: string; newEndTime: Date }> {
-    if (this.scenarios.topUp) {
-      return this.scenarios.topUp(params);
-    }
-    if (this.defaultBehavior === 'empty') {
-      return { txHash: '', newEndTime: new Date() };
-    }
+  async topUp(params: { streamId: string; amount: bigint }): Promise<{ txHash: string; newEndTime: Date }> {
+    const handler = this.nextHandler<(p: { streamId: string; amount: bigint }) => Promise<{ txHash: string; newEndTime: Date }>>('topUp');
+    if (handler) return handler(params);
+    if (this.defaultBehavior === 'empty') return { txHash: '', newEndTime: new Date() };
     this.unexpected('topUp');
   }
 
-  /**
-   * Batch-withdraws from multiple streams using the registered `batchWithdraw` scenario.
-   */
   async batchWithdraw(
     streamIds: string[],
   ): Promise<{ successes: string[]; failures: { id: string; error: Error }[] }> {
-    if (this.scenarios.batchWithdraw) {
-      return this.scenarios.batchWithdraw(streamIds);
-    }
-    if (this.defaultBehavior === 'empty') {
-      return { successes: [], failures: [] };
-    }
+    const handler = this.nextHandler<(ids: string[]) => Promise<{ successes: string[]; failures: { id: string; error: Error }[] }>>('batchWithdraw');
+    if (handler) return handler(streamIds);
+    if (this.defaultBehavior === 'empty') return { successes: [], failures: [] };
     this.unexpected('batchWithdraw');
   }
 
-  /**
-   * Batch-cancels multiple streams using the registered `batchCancel` scenario.
-   */
   async batchCancel(streamIds: string[]): Promise<{ txHash: string; streamIds: string[] }[]> {
-    if (this.scenarios.batchCancel) {
-      return this.scenarios.batchCancel(streamIds);
-    }
-    if (this.defaultBehavior === 'empty') {
-      return [];
-    }
+    const handler = this.nextHandler<(ids: string[]) => Promise<{ txHash: string; streamIds: string[] }[]>>('batchCancel');
+    if (handler) return handler(streamIds);
+    if (this.defaultBehavior === 'empty') return [];
     this.unexpected('batchCancel');
   }
 }

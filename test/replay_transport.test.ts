@@ -10,6 +10,9 @@
  * - The transport satisfies the `RpcTransportAdapter` interface.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ReplayTransport,
   ReplayFixtureError,
@@ -131,6 +134,36 @@ describe('ReplayTransport.record – capture mode', () => {
     await transport.getHealth();
     const parsed = JSON.parse(transport.toJSON()) as FixtureFile;
     expect(parsed.label).toBe('my-test');
+  });
+
+  it('applies the redaction hook before saving fixtures', async () => {
+    const base = makeBaseTransport();
+    (base.getAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'GABC',
+      signatures: ['signed-envelope'],
+    });
+    const transport = ReplayTransport.record(base, undefined, {
+      redactEntry: (entry) => ({
+        ...entry,
+        response: { ...(entry.response as object), signatures: [] },
+      }),
+    });
+    const directory = await mkdtemp(join(tmpdir(), 'sorostream-replay-'));
+    const path = join(directory, 'fixture.json');
+
+    try {
+      await transport.getAccount('GABC');
+      await transport.save(path);
+
+      const fixture = JSON.parse(await readFile(path, 'utf8')) as FixtureFile;
+      expect(fixture.entries[0]!.response).toEqual({ id: 'GABC', signatures: [] });
+      expect(transport.getEntries()[0]!.response).toEqual({
+        id: 'GABC',
+        signatures: ['signed-envelope'],
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('getEntries returns a copy (mutation-safe)', async () => {

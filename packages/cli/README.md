@@ -25,6 +25,13 @@ All subcommands support the following options:
 - `-n, --network <network>`: Stellar network (`mainnet`, `testnet`, `futurenet`, default: `testnet`)
 - `-r, --rpc <urls...>`: RPC URL(s) for failover support
 
+## Secret handling
+
+The CLI does not include the resolved secret key in stdout, stderr, or diagnostic logs. The CLI
+currently has no verbose or debug output modes. Passing the key with `--secret` may expose it in
+process listings; use the `SOROSTREAM_SECRET` environment variable to avoid placing it in command
+arguments.
+
 ## Commands
 
 ### `stream create`

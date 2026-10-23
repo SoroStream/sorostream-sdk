@@ -200,6 +200,12 @@ class ReplayQueue {
 export interface RecordTransportOptions {
   /** Human-readable label written into the fixture file. */
   label?: string;
+  /**
+   * Transforms each entry before it is serialized by `toJSON()` or `save()`.
+   * No redaction is applied by default; callers recording sensitive data
+   * should provide a hook to remove it before persisting fixtures.
+   */
+  redactEntry?: (entry: FixtureEntry) => FixtureEntry;
 }
 
 /** Extended transport returned by `ReplayTransport.record`. */
@@ -294,7 +300,9 @@ export const ReplayTransport = {
         const fixture: FixtureFile = {
           label: options.label,
           recordedAt: new Date().toISOString(),
-          entries,
+          entries: entries.map((entry) =>
+            options.redactEntry ? options.redactEntry(serialise(entry) as FixtureEntry) : entry,
+          ),
         };
         return JSON.stringify(fixture, null, 2);
       },

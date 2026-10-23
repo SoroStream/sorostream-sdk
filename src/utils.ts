@@ -132,8 +132,13 @@ export function safeIdString(value: unknown): string {
  * Also handles scientific notation strings like "1e-3", "1.5e7", "2.5E-4".
  * @param amount - Amount as a decimal string (may be in scientific notation).
  * @param decimals - Number of decimal places the token uses (default 7 for SAC).
+ * @param rounding - How to handle excess fractional digits (default: 'half-up').
  */
-export function toStroops(amount: string, decimals: number = 7): bigint {
+export function toStroops(
+  amount: string,
+  decimals: number = 7,
+  rounding: 'half-up' | 'truncate' = 'half-up',
+): bigint {
   const trimmed = amount.trim();
 
   // Issue #451: expand scientific notation (e.g. "1e-3" → "0.001", "1.5e7" → "15000000")
@@ -153,7 +158,7 @@ export function toStroops(amount: string, decimals: number = 7): bigint {
     // Issue #409: round half-up instead of silently truncating extra fractional digits.
     const keep = decimal.slice(0, decimals);
     value = BigInt(whole || '0') * factor + BigInt(keep || '0');
-    if (decimal.charCodeAt(decimals) >= 53 /* '5' */) {
+    if (rounding === 'half-up' && decimal.charCodeAt(decimals) >= 53 /* '5' */) {
       value += 1n;
     }
   }

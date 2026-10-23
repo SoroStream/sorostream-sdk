@@ -128,6 +128,51 @@ describe('#203 getTokenMetadata', () => {
     expect(simulateSpy).toHaveBeenCalledTimes(3); // not 6
   });
 
+  it('does not cache metadata when an RPC request fails outright (#775)', async () => {
+    const client = makeClient();
+    const simulateSpy = vi
+      .spyOn(client as any, 'simulateOp')
+      .mockResolvedValueOnce(viewResult('USD Coin'))
+      .mockResolvedValueOnce(viewResult('USDC'))
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce(viewResult('USD Coin'))
+      .mockResolvedValueOnce(viewResult('USDC'))
+      .mockResolvedValueOnce(viewResult(7));
+
+    await expect(client.getTokenMetadata(USDC_TOKEN)).rejects.toThrow('network unavailable');
+    expect(simulateSpy).toHaveBeenCalledTimes(3);
+
+    const metadata = await client.getTokenMetadata(USDC_TOKEN);
+    expect(metadata).toEqual({ name: 'USD Coin', symbol: 'USDC', decimals: 7 });
+    expect(simulateSpy).toHaveBeenCalledTimes(6);
+
+    await client.getTokenMetadata(USDC_TOKEN);
+    expect(simulateSpy).toHaveBeenCalledTimes(6);
+  });
+
+  // Issue #684 covers negative caching for unresolved token decimals. This
+  // resolved-but-unavailable result contrasts with the rejected RPC above.
+  it('caches fallback metadata when the decimals RPC completes without a result (#684, #775)', async () => {
+    const client = makeClient();
+    const unresolvedDecimals = {
+      id: 'sim',
+      error: 'Contract does not expose decimals',
+    } as unknown as Parameters<typeof rpc.Api.isSimulationSuccess>[0];
+    const simulateSpy = vi
+      .spyOn(client as any, 'simulateOp')
+      .mockResolvedValueOnce(viewResult('Legacy Token'))
+      .mockResolvedValueOnce(viewResult('LEGACY'))
+      .mockResolvedValueOnce(unresolvedDecimals);
+
+    const metadata = await client.getTokenMetadata(USDC_TOKEN);
+
+    expect(metadata).toEqual({ name: 'Legacy Token', symbol: 'LEGACY', decimals: 7 });
+    expect(simulateSpy).toHaveBeenCalledTimes(3);
+
+    await client.getTokenMetadata(USDC_TOKEN);
+    expect(simulateSpy).toHaveBeenCalledTimes(3);
+  });
+
   it('TTL expiry: re-fetches on next access after the cache entry expires', async () => {
     vi.useFakeTimers();
     const client = makeClient(1_000); // 1s TTL
