@@ -414,4 +414,32 @@ describe('Issue #792: Observable backpressure drop notifications', () => {
     expect(onDrop).not.toHaveBeenCalled();
     expect(received).toEqual([100, 200, 300]);
   });
+
+  it('bounds queued emissions while an async consumer is still processing', async () => {
+    let emit: ((value: number) => void) | null = null;
+    let releaseFirst!: () => void;
+    const firstConsumer = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const received: number[] = [];
+    const source = new SoroStreamObservable<number>((sink) => {
+      emit = (value) => sink.next(value);
+    });
+    const subscription = source
+      .withBackpressure({ maxBufferSize: 1, strategy: 'drop-oldest' })
+      .subscribe(async (value) => {
+        received.push(value);
+        if (value === 1) await firstConsumer;
+      });
+
+    emit!(1);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    emit!(2);
+    emit!(3);
+    releaseFirst();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(received).toEqual([1, 3]);
+    subscription.unsubscribe();
+  });
 });

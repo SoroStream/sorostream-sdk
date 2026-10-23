@@ -37,14 +37,14 @@ export interface Subscription extends Unsubscribable {
 
 /** Consumer of the values produced by an observable. */
 export interface Observer<T> {
-  next?: (value: T) => void;
+  next?: (value: T) => void | PromiseLike<void>;
   error?: (error: unknown) => void;
   complete?: () => void;
 }
 
 /** Observer as seen by a producer: every callback is guaranteed to exist. */
 export interface SubscriberSink<T> {
-  next: (value: T) => void;
+  next: (value: T) => void | Promise<void>;
   error: (error: unknown) => void;
   complete: () => void;
   /** `true` once the sink has been closed and further emissions are ignored. */
@@ -83,6 +83,10 @@ function toTeardownFn(teardown: Teardown): () => void {
  * function again (cold semantics), matching `new Observable()` in RxJS. Use
  * {@link shareLatest} for a hot, reference-counted variant that shares one
  * producer between subscribers and replays the most recent value.
+ *
+ * By default, values are delivered synchronously and async observer callbacks
+ * are not awaited. Use {@link withBackpressure} to bound queued emissions and
+ * await each callback, choosing how overflow is handled.
  */
 export class SoroStreamObservable<T> {
   constructor(private readonly producer: SubscribeFn<T>) {}
@@ -94,7 +98,7 @@ export class SoroStreamObservable<T> {
    * `(next, error, complete)` callbacks.
    */
   subscribe(
-    observerOrNext?: Observer<T> | ((value: T) => void) | null,
+    observerOrNext?: Observer<T> | ((value: T) => void | PromiseLike<void>) | null,
     error?: ((error: unknown) => void) | null,
     complete?: (() => void) | null,
   ): Subscription {
@@ -127,10 +131,21 @@ export class SoroStreamObservable<T> {
       get closed() {
         return closed;
       },
-      next: (value: T) => {
+      next: (value: T): void | Promise<void> => {
         if (closed) return;
         try {
-          observer.next?.(value);
+          const result = observer.next?.(value);
+          if (result && typeof result.then === 'function') {
+            return Promise.resolve(result).then(
+              () => {},
+              (err: unknown) => {
+                if (closed) return;
+                closed = true;
+                runTeardown();
+                reportUncaught(observer, err);
+              },
+            );
+          }
         } catch (err) {
           // A throwing consumer terminates only its own subscription.
           closed = true;
@@ -281,19 +296,24 @@ export class SoroStreamObservable<T> {
       let draining = false;
       let upstreamCompleted = false;
 
-      function scheduleDrain(): void {
-        if (draining) return;
-        draining = true;
-        queueTask(() => {
+      async function drain(): Promise<void> {
+        try {
           while (buffer.length > 0 && !sink.closed) {
             const item = buffer.shift()!;
-            sink.next(item);
+            await sink.next(item);
           }
+        } finally {
           draining = false;
           if (upstreamCompleted && buffer.length === 0 && !sink.closed) {
             sink.complete();
           }
-        });
+        }
+      }
+
+      function scheduleDrain(): void {
+        if (draining) return;
+        draining = true;
+        queueTask(() => void drain());
       }
 
       const sub = this.subscribe({
