@@ -199,4 +199,20 @@ describe('Issue #348: SoroStreamSandbox offline test environment', () => {
       'Unexpected call to unconfigured sandbox operation: "unconfiguredOp"',
     );
   });
+
+  it('uses the last registered scenario for every argument pattern (#773)', async () => {
+    const sandbox = new SoroStreamSandbox(SENDER);
+    const firstScenario = vi.fn((argument: string) => `first:${argument}`);
+    const lastScenario = vi.fn((argument: string) => `last:${argument}`);
+
+    sandbox.configureScenario('customOp', firstScenario);
+    sandbox.configureScenario('customOp', lastScenario);
+
+    await expect((sandbox as any).customOp('first-pattern')).resolves.toBe('last:first-pattern');
+    await expect((sandbox as any).customOp('second-pattern')).resolves.toBe('last:second-pattern');
+
+    expect(firstScenario).not.toHaveBeenCalled();
+    expect(lastScenario).toHaveBeenNthCalledWith(1, 'first-pattern');
+    expect(lastScenario).toHaveBeenNthCalledWith(2, 'second-pattern');
+  });
 });
