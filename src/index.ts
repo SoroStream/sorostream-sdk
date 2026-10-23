@@ -427,3 +427,33 @@ export {
   verifyManifest,
 } from './bundleIntegrity.js';
 export type { IntegrityEntry, IntegrityManifest } from './bundleIntegrity.js';
+
+// ── Issue #758: Gas/fee profiler ─────────────────────────────────────────────
+export { GasProfiler } from './profiler.js';
+export type {
+  SimulationProfile,
+  ProfileReport,
+  ProfilerConfig,
+} from './profiler.js';
+
+// ── Issue #759: General-purpose concurrency limiter ─────────────────────────
+// RateLimiter is a lightweight utility for throttling arbitrary async tasks.
+// It is distinct from WriteRateLimiter (token-bucket for write operations)
+// and PriorityRequestQueue (multi-lane priority queue for RPC calls).
+// See docs/rate-limiting.md for the full comparison.
+export { RateLimiter } from './rate-limiter.js';
+
+// ── Issue #760: Replay transport for deterministic testing ──────────────────
+export {
+  ReplayTransport,
+  ReplayFixtureError,
+  ReplayFixtureParseError,
+} from './replayTransport.js';
+export type {
+  FixtureEntry,
+  FixtureFile,
+  RecordTransportOptions,
+  RecordingRpcTransport,
+  ReplayingRpcTransport,
+  ReplayOptions,
+} from './replayTransport.js';

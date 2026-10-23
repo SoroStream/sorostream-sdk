@@ -138,4 +138,138 @@ describe('createFederationPlugin (issue #401)', () => {
     await plugin.before!(ctx3);
     expect(onResolved).not.toHaveBeenCalled();
   });
+
+  // ── Issue #737: Cache invalidation when account_id changes ──────────────
+
+  it('updates the cache when a second lookup for the same address returns a different account_id (issue #737)', async () => {
+    const FIRST_ADDRESS = 'GABC2DEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
+    const SECOND_ADDRESS = 'GBBB2DEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
+
+    const fetchMock = vi.fn();
+    // First lookup: toml + federation query → FIRST_ADDRESS
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => `FEDERATION_SERVER="https://federation.example.com"`,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ account_id: FIRST_ADDRESS }),
+      });
+
+    const cacheTtlMs = 60_000; // 1 minute
+    const plugin = createFederationPlugin({
+      fetch: fetchMock as any,
+      cacheTtlMs,
+      throwOnResolutionFailure: true,
+    });
+
+    // First lookup: resolves to FIRST_ADDRESS
+    const params1 = { recipient: 'alice*example.com', token: 'G...', amount: 1000n };
+    const ctx1 = makeCtx('createStream', [params1]);
+    await plugin.before!(ctx1);
+    expect(params1.recipient).toBe(FIRST_ADDRESS);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // toml + federation query
+
+    // Second lookup within TTL: should serve from cache, no new fetch
+    const params2 = { recipient: 'alice*example.com', token: 'G...', amount: 500n };
+    const ctx2 = makeCtx('createStream', [params2]);
+    await plugin.before!(ctx2);
+    expect(params2.recipient).toBe(FIRST_ADDRESS); // cached value
+    expect(fetchMock).toHaveBeenCalledTimes(2); // still 2, no new fetch
+
+    // Advance time beyond cache TTL so the cached entry expires
+    await vi.advanceTimersByTimeAsync(cacheTtlMs + 1);
+
+    // Set up mock for the second round of fetches (after cache expiry) → SECOND_ADDRESS
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => `FEDERATION_SERVER="https://federation.example.com"`,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ account_id: SECOND_ADDRESS }),
+      });
+
+    // Third lookup: cache expired, should fetch again and get SECOND_ADDRESS
+    const params3 = { recipient: 'alice*example.com', token: 'G...', amount: 2000n };
+    const ctx3 = makeCtx('createStream', [params3]);
+    await plugin.before!(ctx3);
+    expect(params3.recipient).toBe(SECOND_ADDRESS); // new value, not stale cache
+    expect(fetchMock).toHaveBeenCalledTimes(4); // 2 more calls (toml + federation query)
+
+    // Fourth lookup within the new TTL: should serve the UPDATED cache value
+    const params4 = { recipient: 'alice*example.com', token: 'G...', amount: 3000n };
+    const ctx4 = makeCtx('createStream', [params4]);
+    await plugin.before!(ctx4);
+    expect(params4.recipient).toBe(SECOND_ADDRESS); // updated cache, not stale FIRST_ADDRESS
+    expect(fetchMock).toHaveBeenCalledTimes(4); // no new fetch — cache was updated
+  });
+
+  it('cache entry is updated (not bypassed) after a changed lookup result (issue #737)', async () => {
+    const FIRST_ADDRESS = 'GABC2DEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
+    const SECOND_ADDRESS = 'GBBB2DEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
+
+    const fetchMock = vi.fn();
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => `FEDERATION_SERVER="https://federation.example.com"`,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ account_id: FIRST_ADDRESS }),
+      });
+
+    const cacheTtlMs = 60_000;
+    const sharedCache = new Map<string, { stellarAddress: string | null; expiresAt: number }>();
+    const plugin = createFederationPlugin({
+      fetch: fetchMock as any,
+      cacheTtlMs,
+      cache: sharedCache as any,
+      throwOnResolutionFailure: true,
+    });
+
+    // First lookup resolves to FIRST_ADDRESS
+    const params1 = { recipient: 'alice*example.com', token: 'G...', amount: 1000n };
+    await plugin.before!(makeCtx('createStream', [params1]));
+    expect(params1.recipient).toBe(FIRST_ADDRESS);
+
+    // Verify the cache entry stores the first address
+    const cachedBefore = sharedCache.get('alice*example.com');
+    expect(cachedBefore).toBeDefined();
+    expect(cachedBefore!.stellarAddress).toBe(FIRST_ADDRESS);
+
+    // Expire the cache and do a second lookup that returns SECOND_ADDRESS
+    await vi.advanceTimersByTimeAsync(cacheTtlMs + 1);
+
+    // Set up mock for the second round of fetches → SECOND_ADDRESS
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => `FEDERATION_SERVER="https://federation.example.com"`,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ account_id: SECOND_ADDRESS }),
+      });
+
+    const params2 = { recipient: 'alice*example.com', token: 'G...', amount: 2000n };
+    await plugin.before!(makeCtx('createStream', [params2]));
+    expect(params2.recipient).toBe(SECOND_ADDRESS);
+
+    // Verify the cache entry was updated to the new address (not bypassed)
+    const cachedAfter = sharedCache.get('alice*example.com');
+    expect(cachedAfter).toBeDefined();
+    expect(cachedAfter!.stellarAddress).toBe(SECOND_ADDRESS);
+    expect(cachedAfter!.stellarAddress).not.toBe(FIRST_ADDRESS);
+
+    // A third lookup (within new TTL) must use the updated cache — no fetch
+    const fetchCountBefore = fetchMock.mock.calls.length;
+    const params3 = { recipient: 'alice*example.com', token: 'G...', amount: 3000n };
+    await plugin.before!(makeCtx('createStream', [params3]));
+    expect(params3.recipient).toBe(SECOND_ADDRESS);
+    expect(fetchMock.mock.calls.length).toBe(fetchCountBefore); // no new fetch
+  });
 });
