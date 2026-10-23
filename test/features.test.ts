@@ -70,6 +70,19 @@ describe('PluginRegistry (issue #338)', () => {
     expect(registry.unregister(a)).toBe(false);
   });
 
+  it('unregisters a named plugin and removes it from later dispatches', async () => {
+    const before = vi.fn();
+    const plugin: SoroStreamPlugin = { before };
+    registry.register(plugin, { name: 'runtime-plugin' });
+
+    expect(registry.unregister('runtime-plugin')).toBe(true);
+    expect(registry.list()).toEqual([]);
+
+    await registry.runBefore('createStream', { method: 'createStream', args: [] });
+    expect(before).not.toHaveBeenCalled();
+    expect(registry.unregister('runtime-plugin')).toBe(false);
+  });
+
   it('handles multiple plugins with complex ordering', () => {
     const auth: SoroStreamPlugin = {};
     const log: SoroStreamPlugin = {};

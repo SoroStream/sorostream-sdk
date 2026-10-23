@@ -1758,7 +1758,7 @@ export interface IPluginRegistry {
     constraints?: { name?: string; before?: string; after?: string },
   ): void;
   list(): SoroStreamPlugin[];
-  unregister(plugin: SoroStreamPlugin): boolean;
+  unregister(pluginOrName: SoroStreamPlugin | string): boolean;
   /**
    * Runs the `before` hook of all registered plugins in topological order.
    * @param operation - Name of the operation being invoked.
