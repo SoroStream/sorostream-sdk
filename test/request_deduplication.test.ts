@@ -66,6 +66,25 @@ function makeClient(options: Record<string, unknown> = {}): SoroStreamClient {
 // ── RequestDeduplicator unit tests ───────────────────────────────────────────
 
 describe('RequestDeduplicator (#426)', () => {
+  it('deduplicates structurally equal object keys with a custom key function', async () => {
+    const dedup = new RequestDeduplicator({ keyFn: (key) => dedupKey(key as object) });
+    let calls = 0;
+    const factory = async (): Promise<number> => {
+      calls++;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return 42;
+    };
+
+    const results = await Promise.all([
+      dedup.dedupe({ stream: '42', network: 'testnet' }, factory),
+      dedup.dedupe({ network: 'testnet', stream: '42' }, factory),
+    ]);
+
+    expect(calls).toBe(1);
+    expect(results).toEqual([42, 42]);
+    expect(dedup.stats().deduplicated).toBe(1);
+  });
+
   it('collapses concurrent calls for the same key into one request', async () => {
     const dedup = new RequestDeduplicator();
     let calls = 0;
