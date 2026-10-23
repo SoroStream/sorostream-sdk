@@ -105,6 +105,11 @@ export interface StreamMonitorConfig {
    */
   lowBalanceThreshold?: bigint;
   /**
+   * Minimum time between repeated `streamLowBalance` alerts for one stream.
+   * Defaults to 0 (no debounce).
+   */
+  lowBalanceDebounceMs?: number;
+  /**
    * Called when the monitor encounters an unrecoverable RPC error for a
    * single stream. The monitor will continue running for other streams.
    * This is an alternative to subscribing to `"monitorError"` events.
@@ -144,6 +149,7 @@ export class StreamMonitor {
   private readonly pollIntervalMs: number;
   private readonly expiryWarningMs: number;
   private readonly lowBalanceThreshold: bigint | undefined;
+  private readonly lowBalanceDebounceMs: number;
   private readonly fetchers: StreamMonitorFetchers;
 
   /** Last known status per stream, for change detection. */
@@ -152,6 +158,8 @@ export class StreamMonitor {
   private readonly expiringSoonFired = new Set<string>();
   /** Tracks which streams have already fired `streamExpired`. */
   private readonly expiredFired = new Set<string>();
+  /** Last low-balance alert timestamp per stream. */
+  private readonly lastLowBalanceAlertAt = new Map<string, number>();
 
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
@@ -171,6 +179,7 @@ export class StreamMonitor {
     this.pollIntervalMs = config.pollIntervalMs ?? 15_000;
     this.expiryWarningMs = config.expiryWarningMs ?? 60 * 60 * 1_000;
     this.lowBalanceThreshold = config.lowBalanceThreshold;
+    this.lowBalanceDebounceMs = config.lowBalanceDebounceMs ?? 0;
 
     if (config.onError) {
       this.on('monitorError', config.onError);
@@ -227,6 +236,7 @@ export class StreamMonitor {
       this.lastStatus.delete(id);
       this.expiringSoonFired.delete(id);
       this.expiredFired.delete(id);
+      this.lastLowBalanceAlertAt.delete(id);
     }
   }
 
@@ -328,11 +338,22 @@ export class StreamMonitor {
         return;
       }
       if (claimable < this.lowBalanceThreshold) {
-        this.emit('streamLowBalance', {
-          streamId,
-          claimable,
-          threshold: this.lowBalanceThreshold,
-        });
+        const now = Date.now();
+        const lastAlertAt = this.lastLowBalanceAlertAt.get(streamId);
+        if (
+          this.lowBalanceDebounceMs === 0 ||
+          lastAlertAt === undefined ||
+          now - lastAlertAt >= this.lowBalanceDebounceMs
+        ) {
+          this.lastLowBalanceAlertAt.set(streamId, now);
+          this.emit('streamLowBalance', {
+            streamId,
+            claimable,
+            threshold: this.lowBalanceThreshold,
+          });
+        }
+      } else {
+        this.lastLowBalanceAlertAt.delete(streamId);
       }
     }
   }
