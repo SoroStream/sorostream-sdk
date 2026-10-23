@@ -7,6 +7,10 @@ export type ConnectionPriority = 'high' | 'normal' | 'low';
 
 const PRIORITY_RANK: Record<ConnectionPriority, number> = { high: 0, normal: 1, low: 2 };
 
+/**
+ * `pool:drain` means all active subscriptions have been released. It does not
+ * close connections or indicate a priority-ordered shutdown sequence.
+ */
 export type PoolEventType = 'pool:full' | 'pool:reconnect' | 'pool:drain';
 
 export interface PoolEvent {
