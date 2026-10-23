@@ -59,6 +59,32 @@ export interface TransactionHistoryOptions {
   cursor?: string;
   /** Optional contract ID filter for stream-related operations. */
   contractId?: string;
+  /** Override the Horizon base URL for this request. */
+  horizonUrl?: string;
+}
+
+/** Validates and normalizes an HTTP(S) Horizon base URL. */
+export function assertValidHorizonUrl(horizonUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(horizonUrl);
+  } catch {
+    throw new TypeError(`Invalid Horizon URL: "${horizonUrl}".`);
+  }
+
+  if (
+    (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new TypeError(
+      `Invalid Horizon URL: "${horizonUrl}". Use an HTTP(S) URL without credentials, query, or fragment.`,
+    );
+  }
+
+  return url.href.replace(/\/+$/, '');
 }
 
 /**
@@ -87,7 +113,10 @@ export async function getTransactionHistory(
   options: TransactionHistoryOptions = {},
 ): Promise<TransactionHistoryPage> {
   const { limit = 10, cursor, contractId } = options;
-  const horizonUrl = HORIZON_URLS[network];
+  const horizonUrl =
+    options.horizonUrl === undefined
+      ? HORIZON_URLS[network]
+      : assertValidHorizonUrl(options.horizonUrl);
 
   // Issue #458: sanitise the caller-supplied contract ID before it is
   // interpolated into the Horizon request URL, so a malformed value fails
@@ -180,7 +209,10 @@ export async function getAddressActivity(
   options: TransactionHistoryOptions = {},
 ): Promise<TransactionHistoryPage> {
   const { limit = 10, cursor, contractId } = options;
-  const horizonUrl = HORIZON_URLS[network];
+  const horizonUrl =
+    options.horizonUrl === undefined
+      ? HORIZON_URLS[network]
+      : assertValidHorizonUrl(options.horizonUrl);
 
   // Issue #458: sanitise caller-supplied addresses before they are
   // interpolated into the Horizon request URL.
