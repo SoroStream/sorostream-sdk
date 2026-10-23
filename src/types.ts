@@ -1643,6 +1643,8 @@ export interface SoroStreamClientConfig {
   contractId: string;
   /** Optional custom RPC URL (overrides the default for `network`). */
   rpcUrl?: string;
+  /** Per-network Horizon base URL overrides for history and activity queries. */
+  horizonUrls?: Partial<Record<Network, string>>;
   /** Optional response caching configuration for read-only RPC calls (issue #528). */
   cacheOptions?: CacheConfigOptions;
   /** Optional circuit-breaker configuration for RPC calls. */
