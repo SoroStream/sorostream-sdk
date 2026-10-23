@@ -226,6 +226,8 @@ export interface PersistedAddressBookOptions {
   storage?: StorageAdapter;
   /** Storage key used to persist the address book. Defaults to `"sorostream_address_book"`. */
   storageKey?: string;
+  /** Debounce window for writes in milliseconds. Defaults to `50`. */
+  debounceMs?: number;
 }
 
 /**
@@ -234,18 +236,23 @@ export interface PersistedAddressBookOptions {
  * In browsers the default adapter is `localStorage`; on Node or React Native
  * supply a custom adapter via `options.storage`.
  *
- * All mutating operations (`set`, `delete`, `clear`, `import`) are synchronously
- * flushed to storage so the on-disk state is always consistent with the
- * in-memory map.
+ * Mutations are persisted after a short debounce window. Call {@link flush}
+ * when persistence must complete immediately.
  */
 export class PersistedAddressBook implements AddressBook {
   private readonly _map = new Map<string, AddressBookEntry>();
   private readonly storage: StorageAdapter | null;
   private readonly storageKey: string;
+  private readonly debounceMs: number;
+  private flushTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: PersistedAddressBookOptions = {}) {
     this.storageKey = options.storageKey ?? DEFAULT_STORAGE_KEY;
     this.storage = options.storage ?? getDefaultStorage();
+    this.debounceMs = options.debounceMs ?? 50;
+    if (!Number.isFinite(this.debounceMs) || this.debounceMs < 0) {
+      throw new RangeError('PersistedAddressBook debounceMs must be a non-negative finite number.');
+    }
     this._load();
   }
 
@@ -270,17 +277,35 @@ export class PersistedAddressBook implements AddressBook {
     this.storage.setItem(this.storageKey, JSON.stringify([...this._map.values()]));
   }
 
+  private _scheduleFlush(): void {
+    if (!this.storage) return;
+    if (this.flushTimer !== undefined) clearTimeout(this.flushTimer);
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = undefined;
+      this._flush();
+    }, this.debounceMs);
+  }
+
+  /** Immediately persists pending changes and cancels any scheduled write. */
+  flush(): void {
+    if (this.flushTimer !== undefined) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = undefined;
+    }
+    this._flush();
+  }
+
   // ── AddressBook implementation ───────────────────────────────────────────
 
   set(alias: string, address: string, notes?: string): void {
     validateAddress(alias, address);
     this._map.set(alias, { alias, address, notes });
-    this._flush();
+    this._scheduleFlush();
   }
 
   delete(alias: string): boolean {
     const existed = this._map.delete(alias);
-    if (existed) this._flush();
+    if (existed) this._scheduleFlush();
     return existed;
   }
 
@@ -309,7 +334,7 @@ export class PersistedAddressBook implements AddressBook {
 
   clear(): void {
     this._map.clear();
-    this._flush();
+    this._scheduleFlush();
   }
 
   import(data: AddressBookEntry[] | Record<string, string>): void {
@@ -317,7 +342,7 @@ export class PersistedAddressBook implements AddressBook {
       validateAddress(alias, address);
       this._map.set(alias, { alias, address, notes });
     }
-    this._flush();
+    this._scheduleFlush();
   }
 
   export(): Record<string, string> {
