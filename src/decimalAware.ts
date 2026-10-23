@@ -44,7 +44,7 @@ export interface TokenMetadataProvider {
  * ```
  */
 export function toStroopsForToken(amount: string, decimals: number): bigint {
-  return toStroops(amount, decimals);
+  return toStroops(amount, decimals, 'truncate');
 }
 
 /**

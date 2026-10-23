@@ -35,6 +35,10 @@ describe('toStroopsForToken', () => {
     expect(toStroopsForToken('50.50', 6)).toBe(50_500_000n);
   });
 
+  it('truncates excess fractional digits for tokens with fewer than 7 decimals', () => {
+    expect(toStroopsForToken('1.23456789', 6)).toBe(1_234_567n);
+  });
+
   it('converts a 2-decimal token', () => {
     expect(toStroopsForToken('1.00', 2)).toBe(100n);
     expect(toStroopsForToken('99.99', 2)).toBe(9999n);
