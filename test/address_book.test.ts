@@ -183,6 +183,7 @@ describe('PersistedAddressBook', () => {
     const storage = makeStorage();
     const book = new PersistedAddressBook({ storage });
     book.set('alice', ALICE);
+    book.flush();
 
     // The storage key must contain the entry
     const raw = storage.getItem('sorostream_address_book');
@@ -209,6 +210,7 @@ describe('PersistedAddressBook', () => {
     const storage = makeStorage();
     const book1 = new PersistedAddressBook({ storage });
     book1.set('alice', ALICE);
+    book1.flush();
 
     // Simulate a page reload / process restart
     const book2 = new PersistedAddressBook({ storage });
@@ -219,7 +221,9 @@ describe('PersistedAddressBook', () => {
     const storage = makeStorage();
     const book = new PersistedAddressBook({ storage });
     book.set('alice', ALICE);
+    book.flush();
     book.delete('alice');
+    book.flush();
 
     const book2 = new PersistedAddressBook({ storage });
     expect(book2.has('alice')).toBe(false);
@@ -231,6 +235,7 @@ describe('PersistedAddressBook', () => {
     book.set('alice', ALICE);
     book.set('bob', BOB);
     book.clear();
+    book.flush();
 
     const book2 = new PersistedAddressBook({ storage });
     expect(book2.size).toBe(0);
@@ -240,6 +245,7 @@ describe('PersistedAddressBook', () => {
     const storage = makeStorage();
     const book = new PersistedAddressBook({ storage, storageKey: 'custom_key' });
     book.set('carol', CAROL);
+    book.flush();
 
     expect(storage.getItem('custom_key')).not.toBeNull();
     expect(storage.getItem('sorostream_address_book')).toBeNull();
@@ -275,6 +281,7 @@ describe('PersistedAddressBook', () => {
     const storage = makeStorage();
     const book = new PersistedAddressBook({ storage });
     book.import({ alice: ALICE, bob: BOB });
+    book.flush();
 
     const book2 = new PersistedAddressBook({ storage });
     expect(book2.size).toBe(2);
@@ -285,6 +292,44 @@ describe('PersistedAddressBook', () => {
     const book = new PersistedAddressBook({ storage });
     book.set('alice', ALICE);
     expect(book.export()).toEqual({ alice: ALICE });
+  });
+
+  it('debounces rapid mutations into one storage write', () => {
+    const storage = makeStorage();
+    const setItem = vi.spyOn(storage, 'setItem');
+    const book = new PersistedAddressBook({ storage, debounceMs: 100 });
+
+    vi.useFakeTimers();
+    try {
+      book.set('alice', ALICE);
+      book.set('bob', BOB);
+      book.set('carol', CAROL);
+
+      expect(setItem).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(100);
+      expect(setItem).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flush persists pending mutations immediately', () => {
+    const storage = makeStorage();
+    const setItem = vi.spyOn(storage, 'setItem');
+    const book = new PersistedAddressBook({ storage, debounceMs: 100 });
+
+    vi.useFakeTimers();
+    try {
+      book.set('alice', ALICE);
+      book.flush();
+
+      expect(setItem).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(storage.getItem('sorostream_address_book')!)).toHaveLength(1);
+      vi.advanceTimersByTime(100);
+      expect(setItem).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
