@@ -138,4 +138,36 @@ describe('createFederationPlugin (issue #401)', () => {
     await plugin.before!(ctx3);
     expect(onResolved).not.toHaveBeenCalled();
   });
+
+  it('refreshes a cached address when the federation server returns a rotated account ID', async () => {
+    const rotatedAddress = 'GBCD2DEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => `FEDERATION_SERVER="https://federation.example.com"`,
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ account_id: MOCK_STELLAR_ADDRESS }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => `FEDERATION_SERVER="https://federation.example.com"`,
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ account_id: rotatedAddress }) });
+    const plugin = createFederationPlugin({ fetch: fetchMock as any });
+    const ctx = makeCtx('createStream', [
+      { recipient: 'alice*example.com', token: 'G...', amount: 1000n },
+    ]);
+
+    await plugin.before!(ctx);
+    expect((ctx.args[0] as { recipient: string }).recipient).toBe(MOCK_STELLAR_ADDRESS);
+
+    await plugin.resolveFresh('alice*example.com');
+    const refreshedCtx = makeCtx('createStream', [
+      { recipient: 'alice*example.com', token: 'G...', amount: 1000n },
+    ]);
+    await plugin.before!(refreshedCtx);
+
+    expect((refreshedCtx.args[0] as { recipient: string }).recipient).toBe(rotatedAddress);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
 });

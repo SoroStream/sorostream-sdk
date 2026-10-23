@@ -11,6 +11,7 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 - Add token-type-conditional template parameters via `ConditionalParam`/`resolveConditionalParam` and the new `templates.minAmountStream`, resolving decimals-aware parameters at instantiation time so one template can produce different values for different token types (#710)
 
 ### Fixed
+- Fix `FederationPlugin` serving stale account IDs after a fresh federation lookup detects an address rotation (#706)
 - Fix `nativeToStream` referencing an undefined `stream` variable in dead code left over from a merge, which made every stream read throw `ReferenceError` (#611)
 - Fix `createStream` validating the token contract (an RPC round-trip) before cheap offline checks like `durationSeconds`, so malformed input unnecessarily waited on a network call before failing (#542)
 - Fix `createStream`'s token-contract validation running before the recipient/sender account-existence checks, so a failed account lookup during that validation could surface as a raw, unwrapped error instead of `AccountNotFoundError` (#542)

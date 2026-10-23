@@ -95,6 +95,8 @@ export interface FederationCacheEntry {
 export interface FederationPlugin extends SoroStreamPlugin {
   /** Clears all cached lookups (positive and negative). */
   clearCache(): void;
+  /** Resolves an address against the federation server, bypassing and updating the cache. */
+  resolveFresh(federationAddress: string): Promise<string | null>;
 }
 
 // ── Factory ────────────────────────────────────────────────────────────
@@ -181,9 +183,13 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): F
     return p;
   }
 
-  async function resolveUncached(federationAddress: string): Promise<string | null> {
-    const cached = getCached(federationAddress);
-    if (cached !== undefined) {
+  async function resolveUncached(
+    federationAddress: string,
+    forceFresh = false,
+  ): Promise<string | null> {
+    const previousEntry = forceFresh ? cache.get(federationAddress) : undefined;
+    const cached = forceFresh ? undefined : getCached(federationAddress);
+    if (!forceFresh && cached !== undefined) {
       // cached could be null (negative) or a string (positive)
       if (cached !== null) {
         onResolved?.(federationAddress, cached, true);
@@ -193,6 +199,9 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): F
 
     try {
       const stellarAddress = await resolveFederationAddress(federationAddress, fetchImpl);
+      if (previousEntry && previousEntry.stellarAddress !== stellarAddress) {
+        cache.delete(federationAddress);
+      }
       setCached(federationAddress, stellarAddress);
       onResolved?.(federationAddress, stellarAddress, false);
       return stellarAddress;
@@ -216,6 +225,16 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): F
   const plugin: FederationPlugin = {
     clearCache(): void {
       cache.clear();
+    },
+
+    resolveFresh(federationAddress: string): Promise<string | null> {
+      const pending = inflight.get(federationAddress);
+      if (pending) return pending;
+      const request = resolveUncached(federationAddress, true).finally(() =>
+        inflight.delete(federationAddress),
+      );
+      inflight.set(federationAddress, request);
+      return request;
     },
 
     /**
