@@ -175,3 +175,12 @@ export type {
 } from './types.js';
 
 export { VERSION, SDK_VERSION } from './version.js';
+
+export {
+  toStroopsForToken,
+  fromStroopsForToken,
+  getTokenDecimals,
+  convertToTokenUnits,
+  formatTokenAmount,
+} from './decimalAware.js';
+export type { TokenMetadataProvider } from './decimalAware.js';

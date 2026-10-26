@@ -246,3 +246,25 @@ describe('getTokenDecimals negative-lookup cache (issue #684)', () => {
     expect(providerB.getTokenMetadata).toHaveBeenCalledOnce();
   });
 });
+
+// ── Issue #756: public entry point reachability ───────────────────────────────
+
+describe('decimalAware public entry point exports (issue #756)', () => {
+  it('re-exports decimal-aware utilities from the root entry point (src/index.ts)', async () => {
+    const rootModule = await import('../src/index.js');
+    expect(rootModule.toStroopsForToken).toBe(toStroopsForToken);
+    expect(rootModule.fromStroopsForToken).toBe(fromStroopsForToken);
+    expect(rootModule.getTokenDecimals).toBe(getTokenDecimals);
+    expect(rootModule.convertToTokenUnits).toBe(convertToTokenUnits);
+    expect(rootModule.formatTokenAmount).toBe(formatTokenAmount);
+  });
+
+  it('re-exports decimal-aware utilities from the core entry point (src/core.ts)', async () => {
+    const coreModule = await import('../src/core.js');
+    expect(coreModule.toStroopsForToken).toBe(toStroopsForToken);
+    expect(coreModule.fromStroopsForToken).toBe(fromStroopsForToken);
+    expect(coreModule.getTokenDecimals).toBe(getTokenDecimals);
+    expect(coreModule.convertToTokenUnits).toBe(convertToTokenUnits);
+    expect(coreModule.formatTokenAmount).toBe(formatTokenAmount);
+  });
+});

@@ -457,3 +457,16 @@ export type {
   ReplayingRpcTransport,
   ReplayOptions,
 } from './replayTransport.js';
+
+// ── Issue #756: Decimal-aware stroop conversion utilities ───────────────────
+export {
+  toStroopsForToken,
+  fromStroopsForToken,
+  getTokenDecimals,
+  convertToTokenUnits,
+  formatTokenAmount,
+  _cacheNegativeLookup,
+  _getNegativeCacheEntry,
+  _clearNegativeLookupCache,
+} from './decimalAware.js';
+export type { TokenMetadataProvider } from './decimalAware.js';
