@@ -3,18 +3,48 @@ import { createKeypairAdapter } from './wallet.js';
 import * as readline from 'node:readline';
 import { printOutput, type OutputFormat } from './output.js';
 
+export const SECRET_FLAG_DEPRECATION_WARNING =
+  'Warning: Passing a Stellar secret key via -s/--secret is deprecated because CLI arguments are exposed in shell history and process listings (ps / /proc/<pid>/cmdline). Use the SOROSTREAM_SECRET environment variable or the interactive masked prompt instead.';
+
 export interface GlobalOptions {
   network: 'mainnet' | 'testnet' | 'futurenet';
   contractId: string;
   rpc: string[];
-  secret: string;
+  secret?: string;
+  /** True when --secret was explicitly supplied as a command-line flag. */
+  secretFromCliFlag?: boolean;
   transport?: any;
   /** Output format for command results (default: json). */
   output?: OutputFormat;
 }
 
-function createClient(options: GlobalOptions): SoroStreamClient {
-  const adapter = createKeypairAdapter(options.secret);
+export async function resolveSecret(opts: {
+  secret?: string;
+  secretFromCliFlag?: boolean;
+}): Promise<string> {
+  if (opts.secretFromCliFlag && opts.secret) {
+    console.warn(SECRET_FLAG_DEPRECATION_WARNING);
+  }
+  if (opts.secret && opts.secret.trim().length > 0) {
+    return opts.secret.trim();
+  }
+  const envSecret = process.env.SOROSTREAM_SECRET?.trim();
+  if (envSecret) {
+    return envSecret;
+  }
+  const prompted = await promptMasked('Stellar secret key: ');
+  if (!prompted) {
+    throw new Error(
+      'Missing Stellar secret key: set the SOROSTREAM_SECRET environment variable or enter it at the interactive prompt.',
+    );
+  }
+  return prompted;
+}
+
+async function createClient(options: GlobalOptions): Promise<SoroStreamClient> {
+  const secret = await resolveSecret(options);
+  options.secret = secret;
+  const adapter = createKeypairAdapter(secret);
   return new SoroStreamClient({
     network: options.network,
     contractId: options.contractId,
@@ -95,8 +125,39 @@ function prompt(question: string): Promise<string> {
   });
 }
 
+export function promptMasked(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: Boolean(process.stdin.isTTY),
+  }) as readline.Interface & { _writeToOutput?: (s: string) => void; stdoutMuted?: boolean };
+
+  rl._writeToOutput = function _writeToOutput(stringToWrite: string) {
+    if (rl.stdoutMuted) {
+      if (stringToWrite.includes('\n') || stringToWrite.includes('\r')) {
+        process.stdout.write('\n');
+      } else {
+        process.stdout.write('*');
+      }
+    } else {
+      process.stdout.write(stringToWrite);
+    }
+  };
+
+  return new Promise<string>((resolve, reject) => {
+    rl.stdoutMuted = false;
+    rl.question(question, (answer: string) => {
+      rl.stdoutMuted = false;
+      rl.close();
+      resolve(answer.trim());
+    });
+    rl.stdoutMuted = true;
+    rl.on('error', reject);
+  });
+}
+
 export async function cmdStreamCreate(opts: StreamCreateOptions): Promise<void> {
-  const client = createClient(opts);
+  const client = await createClient(opts);
 
   const params = await resolveCreateParams(opts);
 
@@ -127,7 +188,7 @@ export async function cmdCreate(
     autoRenew: boolean;
   },
 ): Promise<void> {
-  const client = createClient(opts);
+  const client = await createClient(opts);
 
   const result = await client.createStream({
     recipient: assertStellarAddress(opts.recipient),
@@ -141,19 +202,19 @@ export async function cmdCreate(
 }
 
 export async function cmdGet(opts: GlobalOptions, streamId: string): Promise<void> {
-  const client = createClient(opts);
+  const client = await createClient(opts);
   const stream = await client.getStream(streamId);
   printOutput(stream, opts.output);
 }
 
 export async function cmdWithdraw(opts: GlobalOptions, streamId: string): Promise<void> {
-  const client = createClient(opts);
+  const client = await createClient(opts);
   const result = await client.withdraw({ streamId });
   printOutput(result, opts.output);
 }
 
 export async function cmdCancel(opts: GlobalOptions, streamId: string): Promise<void> {
-  const client = createClient(opts);
+  const client = await createClient(opts);
   const result = await client.cancelStream({ streamId });
   printOutput(result, opts.output);
 }
@@ -162,7 +223,7 @@ export async function cmdTopUp(
   opts: GlobalOptions & { amount: string },
   streamId: string,
 ): Promise<void> {
-  const client = createClient(opts);
+  const client = await createClient(opts);
   const result = await client.topUp({
     streamId,
     amount: toStroops(opts.amount),
@@ -171,13 +232,13 @@ export async function cmdTopUp(
 }
 
 export async function cmdClaimable(opts: GlobalOptions, streamId: string): Promise<void> {
-  const client = createClient(opts);
+  const client = await createClient(opts);
   const claimable = await client.getClaimable(streamId);
   printOutput({ claimable: claimable.toString(), usdc: formatUSDC(claimable) }, opts.output);
 }
 
 export async function cmdForecast(opts: GlobalOptions, streamId: string): Promise<void> {
-  const client = createClient(opts);
+  const client = await createClient(opts);
   const forecast = await client.getRenewalForecast(streamId);
   if (!forecast) {
     printOutput(
@@ -206,7 +267,7 @@ export async function cmdList(
     cursor?: string;
   },
 ): Promise<void> {
-  const client = createClient(opts);
+  const client = await createClient(opts);
   let result: any = [];
 
   if (opts.sender) {
@@ -222,7 +283,7 @@ export async function cmdList(
       { activeOnly: opts.status === 'active' },
     );
   } else {
-    const keypairAdapter = createKeypairAdapter(opts.secret);
+    const keypairAdapter = createKeypairAdapter(opts.secret!);
     const publicKey = await keypairAdapter.getPublicKey();
     result = await client.getStreamsBySender(publicKey, {
       limit: opts.limit,

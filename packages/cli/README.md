@@ -21,16 +21,13 @@ npx @sorostream/cli --help
 All subcommands support the following options:
 
 - `-c, --contract-id <address>` (required): StreamContract address
-- `-s, --secret <key>` (required): Stellar secret key (or set `SOROSTREAM_SECRET` env variable)
 - `-n, --network <network>`: Stellar network (`mainnet`, `testnet`, `futurenet`, default: `testnet`)
 - `-r, --rpc <urls...>`: RPC URL(s) for failover support
+- `-s, --secret <key>` (**deprecated**): Stellar secret key — set the `SOROSTREAM_SECRET` environment variable or use the interactive masked prompt instead
 
 ## Secret handling
 
-The CLI does not include the resolved secret key in stdout, stderr, or diagnostic logs. The CLI
-currently has no verbose or debug output modes. Passing the key with `--secret` may expose it in
-process listings; use the `SOROSTREAM_SECRET` environment variable to avoid placing it in command
-arguments.
+Set the `SOROSTREAM_SECRET` environment variable or let the CLI prompt interactively (masked input) when running commands. Passing the key via `-s`/`--secret` is deprecated because command-line arguments are visible in shell history and process listings (`ps` / `/proc/<pid>/cmdline`). The CLI does not include the resolved secret key in stdout, stderr, or diagnostic logs.
 
 ## Commands
 
@@ -38,9 +35,8 @@ arguments.
 Create a new payment stream.
 
 ```bash
-sorostream stream create \
+SOROSTREAM_SECRET=S... sorostream stream create \
   --contract-id C... \
-  --secret S... \
   --recipient G... \
   --token C... \
   --amount 100 \
@@ -52,49 +48,49 @@ sorostream stream create \
 List payment streams filtered by sender, recipient, or status.
 
 ```bash
-sorostream list --contract-id C... --secret S... --sender G...
+SOROSTREAM_SECRET=S... sorostream list --contract-id C... --sender G...
 ```
 
 ### `get <streamId>`
 Get details for a specific payment stream.
 
 ```bash
-sorostream get <streamId> --contract-id C... --secret S...
+SOROSTREAM_SECRET=S... sorostream get <streamId> --contract-id C...
 ```
 
 ### `withdraw <streamId>`
 Withdraw claimable tokens from a stream.
 
 ```bash
-sorostream withdraw <streamId> --contract-id C... --secret S...
+SOROSTREAM_SECRET=S... sorostream withdraw <streamId> --contract-id C...
 ```
 
 ### `cancel <streamId>`
 Cancel an active payment stream.
 
 ```bash
-sorostream cancel <streamId> --contract-id C... --secret S...
+SOROSTREAM_SECRET=S... sorostream cancel <streamId> --contract-id C...
 ```
 
 ### `top-up <streamId>`
 Add additional tokens to an existing stream.
 
 ```bash
-sorostream top-up <streamId> --contract-id C... --secret S... --amount 50
+SOROSTREAM_SECRET=S... sorostream top-up <streamId> --contract-id C... --amount 50
 ```
 
 ### `claimable <streamId>`
 Query current claimable balance for a stream.
 
 ```bash
-sorostream claimable <streamId> --contract-id C... --secret S...
+SOROSTREAM_SECRET=S... sorostream claimable <streamId> --contract-id C...
 ```
 
 ### `forecast <streamId>`
 Get the renewal forecast for an auto-renewing stream.
 
 ```bash
-sorostream forecast <streamId> --contract-id C... --secret S...
+SOROSTREAM_SECRET=S... sorostream forecast <streamId> --contract-id C...
 ```
 
 ### `analyze <entrypoint>`
