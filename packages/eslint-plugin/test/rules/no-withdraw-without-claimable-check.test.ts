@@ -1,13 +1,14 @@
-import { describe, it } from 'vitest';
-import { RuleTester } from 'eslint';
+import { describe, it, expect } from 'vitest';
+import { Linter, RuleTester } from 'eslint';
 import rule from '../../src/rules/no-withdraw-without-claimable-check.js';
+import plugin, { rules } from '../../src/index.js';
 
 const ruleTester = new RuleTester({
   languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
 });
 
 describe('no-withdraw-without-claimable-check', () => {
-  it('passes RuleTester valid/invalid cases', () => {
+  it('passes RuleTester valid/invalid cases and auto-fixes unguarded withdraw calls', () => {
     ruleTester.run('no-withdraw-without-claimable-check', rule, {
       valid: [
         `async function run(client, id) {
@@ -22,10 +23,6 @@ describe('no-withdraw-without-claimable-check', () => {
           await client.getClaimable(id);
           return client.withdraw(id);
         };`,
-        // withdraw with no claimable check anywhere is fine at module scope
-        // as long as this specific rule only cares about *some* call to
-        // getClaimable existing in the same scope — an unrelated method call
-        // must not trip it.
         `async function run(client, id) {
           await client.getClaimable(id);
           await client.cancelStream(id);
@@ -37,6 +34,10 @@ describe('no-withdraw-without-claimable-check', () => {
             await client.withdraw(id);
           }`,
           errors: [{ messageId: 'missingCheck' }],
+          output: `async function run(client, id) {
+            await client.getClaimable(id);
+            await client.withdraw(id);
+          }`,
         },
         {
           code: `async function run(client, id) {
@@ -44,11 +45,13 @@ describe('no-withdraw-without-claimable-check', () => {
             await client.withdraw(id);
           }`,
           errors: [{ messageId: 'missingCheck' }],
+          output: `async function run(client, id) {
+            await client.cancelStream(id);
+            await client.getClaimable(id);
+            await client.withdraw(id);
+          }`,
         },
         {
-          // getClaimable is only checked inside a *different* function scope
-          // (a callback), so the withdraw call at the outer scope is still
-          // unguarded.
           code: `async function run(client, id) {
             async function check() {
               await client.getClaimable(id);
@@ -56,8 +59,38 @@ describe('no-withdraw-without-claimable-check', () => {
             await client.withdraw(id);
           }`,
           errors: [{ messageId: 'missingCheck' }],
+          output: `async function run(client, id) {
+            async function check() {
+              await client.getClaimable(id);
+            }
+            await client.getClaimable(id);
+            await client.withdraw(id);
+          }`,
         },
       ],
     });
+  });
+
+  it('produces only a single warning for a single unguarded withdraw under recommended config (issue #763)', () => {
+    expect(rules).not.toHaveProperty('require-claimable-before-withdraw');
+    expect(plugin.configs?.recommended).toBeDefined();
+
+    const linter = new Linter({ configType: 'flat' });
+    const flatRecommended = plugin.configs!['flat/recommended'] as Linter.Config;
+    const messages = linter.verify(
+      `async function run(client, id) {
+        await client.withdraw(id);
+      }`,
+      [
+        {
+          languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
+          ...flatRecommended,
+        },
+      ],
+    );
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].ruleId).toBe('@sorostream/no-withdraw-without-claimable-check');
+    expect(messages[0].severity).toBe(1);
   });
 });

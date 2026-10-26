@@ -15,6 +15,8 @@ function isMethodCall(node: Rule.Node, methodName: string): boolean {
  * the same function scope. Calling `withdraw` blind risks a wasteful
  * zero-amount transaction — checking `getClaimable` first lets the caller
  * skip the call entirely when nothing is claimable.
+ *
+ * @fixable The fixer inserts a `getClaimable` call before the `withdraw` call.
  */
 const rule: Rule.RuleModule = {
   meta: {
@@ -30,6 +32,7 @@ const rule: Rule.RuleModule = {
       missingCheck:
         'Call `getClaimable` before `withdraw` to avoid a wasteful zero-amount transaction.',
     },
+    fixable: 'code',
   },
   create(context) {
     // One entry per enclosing function scope (module scope counts as the
@@ -58,7 +61,29 @@ const rule: Rule.RuleModule = {
         if (isMethodCall(node, 'withdraw')) {
           const checked = scopeStack[scopeStack.length - 1];
           if (!checked) {
-            context.report({ node, messageId: 'missingCheck' });
+            context.report({
+              node,
+              messageId: 'missingCheck',
+              fix(fixer) {
+                const sourceCode = context.getSourceCode();
+                const args = node.arguments.map((arg) => sourceCode.getText(arg)).join(', ');
+                const getClaimableCall = `await client.getClaimable(${args});`;
+
+                let parentStmt = node.parent;
+                while (parentStmt && parentStmt.type !== 'ExpressionStatement') {
+                  parentStmt = parentStmt.parent;
+                }
+
+                if (parentStmt) {
+                  const stmtStart = parentStmt.range![0];
+                  const lineStart = sourceCode.text.lastIndexOf('\n', stmtStart - 1) + 1;
+                  const indentation = sourceCode.text.slice(lineStart, stmtStart);
+                  return fixer.insertTextBefore(parentStmt, `${getClaimableCall}\n${indentation}`);
+                } else {
+                  return fixer.insertTextBefore(node, `${getClaimableCall} `);
+                }
+              },
+            });
           }
         }
       },
