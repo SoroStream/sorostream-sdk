@@ -23,10 +23,7 @@ import { waitForLedger } from '../src/readConsistency.js';
  * is made.  This lets us simulate a ledger that "arrives" at a precise
  * virtual timestamp without any real I/O.
  */
-function makeMockServer(
-  schedule: Array<{ atMs: number; sequence: number }>,
-  baseMs = 0,
-) {
+function makeMockServer(schedule: Array<{ atMs: number; sequence: number }>, baseMs = 0) {
   return {
     getLatestLedger: vi.fn().mockImplementation(async () => {
       const now = Date.now() - baseMs;
@@ -74,10 +71,7 @@ describe('waitForLedger – timeoutMs boundary (#730)', () => {
     const targetSequence = 10;
     const startMs = Date.now(); // captured before advancing fake clock
 
-    const server = makeMockServer(
-      [{ atMs: timeoutMs, sequence: targetSequence }],
-      startMs,
-    );
+    const server = makeMockServer([{ atMs: timeoutMs, sequence: targetSequence }], startMs);
 
     const promise = waitForLedger(server, targetSequence, {
       timeoutMs,
@@ -226,8 +220,53 @@ describe('waitForLedger – timeoutMs boundary (#730)', () => {
 
     await vi.advanceTimersByTimeAsync(timeoutMs + 1);
 
-    await expect(promise).rejects.toThrow(
-      /waitForLedger: timed out after 100ms/,
-    );
+    await expect(promise).rejects.toThrow(/waitForLedger: timed out after 100ms/);
+  });
+
+  // ── Scenario 6 – Jittered polling (#722) ──────────────────────────────────
+
+  it('applies bounded jitter so consecutive poll intervals vary within expected bounds (#722)', async () => {
+    const pollIntervalMs = 500;
+    const jitterRatio = 0.2;
+    const minIntervalMs = pollIntervalMs * (1 - jitterRatio); // 400 ms
+    const maxIntervalMs = pollIntervalMs * (1 + jitterRatio); // 600 ms
+
+    const pollTimestamps: number[] = [];
+    let callCount = 0;
+
+    const server = {
+      getLatestLedger: vi.fn().mockImplementation(async () => {
+        pollTimestamps.push(Date.now());
+        callCount += 1;
+        return { sequence: callCount >= 5 ? 10 : 1 };
+      }),
+    };
+
+    // Deterministic sequence of random values in [0, 1) to verify varied intervals within bounds
+    const samples = [0.0, 1.0, 0.25, 0.75];
+    let sampleIdx = 0;
+
+    const promise = waitForLedger(server, 10, {
+      timeoutMs: 10_000,
+      pollIntervalMs,
+      jitterRatio,
+      random: () => samples[sampleIdx++ % samples.length]!,
+    });
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect(promise).resolves.toBeUndefined();
+
+    expect(pollTimestamps.length).toBe(5);
+    const intervals: number[] = [];
+    for (let i = 1; i < pollTimestamps.length; i++) {
+      const delta = pollTimestamps[i]! - pollTimestamps[i - 1]!;
+      intervals.push(delta);
+      expect(delta).toBeGreaterThanOrEqual(minIntervalMs);
+      expect(delta).toBeLessThanOrEqual(maxIntervalMs);
+    }
+
+    // Consecutive poll intervals must vary rather than firing at a fixed 500ms step
+    expect(new Set(intervals).size).toBeGreaterThan(1);
+    expect(intervals).toEqual([400, 600, 450, 550]);
   });
 });

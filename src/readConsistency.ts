@@ -2,6 +2,12 @@ import { rpc } from '@stellar/stellar-sdk';
 
 type LedgerProvider = { getLatestLedger(): Promise<rpc.Api.GetLatestLedgerResponse> };
 
+/** Default relative jitter bound (±20% of `pollIntervalMs`). */
+const DEFAULT_JITTER_RATIO = 0.2;
+
+/** Maximum allowed relative jitter ratio (50% of `pollIntervalMs`). */
+const MAX_JITTER_RATIO = 0.5;
+
 /**
  * Options for {@link waitForLedger}.
  */
@@ -17,6 +23,19 @@ export interface WaitForLedgerOptions {
    */
   pollIntervalMs?: number;
   /**
+   * Relative jitter bound applied to `pollIntervalMs` (`0` to `0.5`).
+   * Each poll delay is sampled uniformly from
+   * `[pollIntervalMs * (1 - jitterRatio), pollIntervalMs * (1 + jitterRatio)]`
+   * and capped at the remaining time before `timeoutMs`.
+   * Defaults to `0.2` (±20%).
+   */
+  jitterRatio?: number;
+  /**
+   * Optional random number generator returning values in `[0, 1)`.
+   * Defaults to `Math.random`.
+   */
+  random?: () => number;
+  /**
    * Optional `AbortSignal` that cancels the wait early.
    */
   signal?: AbortSignal;
@@ -24,6 +43,20 @@ export interface WaitForLedgerOptions {
 
 function abortError(): DOMException {
   return new DOMException('waitForLedger aborted', 'AbortError');
+}
+
+function computeJitteredDelayMs(
+  pollIntervalMs: number,
+  jitterRatio: number,
+  random: () => number,
+): number {
+  if (pollIntervalMs <= 0 || jitterRatio <= 0) {
+    return Math.max(0, pollIntervalMs);
+  }
+  const boundedRatio = Math.min(Math.max(jitterRatio, 0), MAX_JITTER_RATIO);
+  const sample = Math.min(Math.max(random(), 0), 1);
+  const offset = (sample * 2 - 1) * (pollIntervalMs * boundedRatio);
+  return Math.max(1, Math.round(pollIntervalMs + offset));
 }
 
 function getLatestLedger(
@@ -90,6 +123,8 @@ export async function waitForLedger(
 ): Promise<void> {
   const timeoutMs = options.timeoutMs ?? 10_000;
   const pollIntervalMs = options.pollIntervalMs ?? 500;
+  const jitterRatio = options.jitterRatio ?? DEFAULT_JITTER_RATIO;
+  const random = options.random ?? Math.random;
   const signal = options.signal;
 
   const deadline = Date.now() + timeoutMs;
@@ -113,6 +148,9 @@ export async function waitForLedger(
       );
     }
 
+    const jitteredIntervalMs = computeJitteredDelayMs(pollIntervalMs, jitterRatio, random);
+    const delayMs = Math.min(jitteredIntervalMs, remaining);
+
     await new Promise<void>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout>;
       const cleanup = () => {
@@ -126,7 +164,7 @@ export async function waitForLedger(
       timer = setTimeout(() => {
         signal?.removeEventListener('abort', onAbort);
         resolve();
-      }, Math.min(pollIntervalMs, remaining));
+      }, delayMs);
       signal?.addEventListener('abort', onAbort, { once: true });
       if (signal?.aborted) onAbort();
     });
