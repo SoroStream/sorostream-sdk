@@ -239,7 +239,11 @@ describe('createFeeRetryMiddleware attempt count (issue #685)', () => {
 
     // Two fee errors consumed as retries
     for (let i = 0; i < 2; i++) {
-      try { await plugin.onError!(ctx, feeErr); } catch { /* FeeRetryError expected */ }
+      try {
+        await plugin.onError!(ctx, feeErr);
+      } catch {
+        /* FeeRetryError expected */
+      }
     }
 
     // Call ultimately "succeeds" — fire after hook
@@ -264,11 +268,19 @@ describe('createFeeRetryMiddleware attempt count (issue #685)', () => {
 
     // Consume both allowed retries
     for (let i = 0; i < 2; i++) {
-      try { await plugin.onError!(ctx, feeErr); } catch { /* expected */ }
+      try {
+        await plugin.onError!(ctx, feeErr);
+      } catch {
+        /* expected */
+      }
     }
 
     // Third call — maxAttempts exhausted, onComplete fires with succeeded=false
-    try { await plugin.onError!(ctx, feeErr); } catch { /* expected */ }
+    try {
+      await plugin.onError!(ctx, feeErr);
+    } catch {
+      /* expected */
+    }
 
     expect(onComplete).toHaveBeenCalledOnce();
     expect(onComplete).toHaveBeenCalledWith(2, false);
@@ -291,9 +303,90 @@ describe('createFeeRetryMiddleware attempt count (issue #685)', () => {
     });
 
     // 100 * 2 = 200 > 150 — cap hit immediately
-    try { await plugin.onError!(ctx, feeErr); } catch { /* expected */ }
+    try {
+      await plugin.onError!(ctx, feeErr);
+    } catch {
+      /* expected */
+    }
 
     expect(onComplete).toHaveBeenCalledOnce();
     expect(onComplete).toHaveBeenCalledWith(0, false);
+  });
+});
+
+// ── Issue #723: alternating fee and transient network errors ──────────────────
+
+describe('createFeeRetryMiddleware alternating fee and transient errors (issue #723)', () => {
+  it('enforces maxAttempts across an alternating fee-error and network-error sequence', async () => {
+    const onRetry = vi.fn();
+    const onComplete = vi.fn();
+    const plugin = createFeeRetryMiddleware({
+      maxFeeStroops: 50_000,
+      bumpFactor: 2,
+      maxAttempts: 3,
+      onRetry,
+      onComplete,
+    });
+    const ctx = makeCtx();
+    plugin.before!(ctx);
+
+    const feeErr = Object.assign(new Error('tx_insufficient_fee'), {
+      result_code: 'tx_insufficient_fee',
+      minFee: 100,
+    });
+    const networkErr = new Error('ETIMEDOUT');
+
+    // Attempt 1: fee error → bumps fee to 200, consumes retry #1
+    await expect(plugin.onError!(ctx, feeErr)).rejects.toMatchObject({
+      name: 'FeeRetryError',
+      attempt: 1,
+      suggestedFeeStroops: 200,
+    });
+
+    // Attempt 2: transient network error → re-throws unchanged, consumes retry #2
+    await expect(plugin.onError!(ctx, networkErr)).rejects.toBe(networkErr);
+
+    // Attempt 3: fee error → bumps fee to 400 (does not reset counter), consumes retry #3
+    await expect(plugin.onError!(ctx, feeErr)).rejects.toMatchObject({
+      name: 'FeeRetryError',
+      attempt: 3,
+      suggestedFeeStroops: 400,
+    });
+
+    // Attempt 4: maxAttempts (3) is now reached — must re-throw raw feeErr and stop retrying
+    await expect(plugin.onError!(ctx, feeErr)).rejects.toBe(feeErr);
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledWith(3, false);
+  });
+
+  it('does not reset the retry counter when before(ctx) is re-invoked during an alternating retry sequence', async () => {
+    const onComplete = vi.fn();
+    const plugin = createFeeRetryMiddleware({
+      maxFeeStroops: 50_000,
+      bumpFactor: 2,
+      maxAttempts: 2,
+      onComplete,
+    });
+    const ctx = makeCtx();
+
+    const feeErr = Object.assign(new Error('tx_insufficient_fee'), {
+      result_code: 'tx_insufficient_fee',
+      minFee: 100,
+    });
+    const networkErr = new Error('ECONNRESET');
+
+    // Retry 1: fee error
+    plugin.before!(ctx);
+    await expect(plugin.onError!(ctx, feeErr)).rejects.toBeInstanceOf(FeeRetryError);
+
+    // Retry 2: transient network error (runner calls before(ctx) again)
+    plugin.before!(ctx);
+    await expect(plugin.onError!(ctx, networkErr)).rejects.toBe(networkErr);
+
+    // Retry 3: fee error after maxAttempts (2) already consumed → must not allow a 3rd retry
+    plugin.before!(ctx);
+    await expect(plugin.onError!(ctx, feeErr)).rejects.toBe(feeErr);
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledWith(2, false);
   });
 });

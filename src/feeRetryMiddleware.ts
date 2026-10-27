@@ -206,6 +206,7 @@ export function createFeeRetryMiddleware(
     {
       attempts: number;
       currentFee: number;
+      completed: boolean;
       /** The bound executor injected on the first `before` call. */
       executor?: () => Promise<unknown>;
     }
@@ -216,7 +217,7 @@ export function createFeeRetryMiddleware(
     // Use the args array as the key — it's a stable object reference for the call.
     let state = callState.get(ctx.args as object);
     if (!state) {
-      state = { attempts: 0, currentFee: 0 };
+      state = { attempts: 0, currentFee: 0, completed: false };
       callState.set(ctx.args as object, state);
     }
     return state;
@@ -224,31 +225,43 @@ export function createFeeRetryMiddleware(
 
   const plugin: SoroStreamPlugin = {
     before(ctx: MiddlewareContext): void {
-      // Initialise state for this call; currentFee = 0 means "use SDK default"
+      // Initialise state for a new logical call; preserve accumulated retry
+      // count and fee state when `before` is re-entered during an in-flight
+      // retry sequence (issue #723).
       const state = getState(ctx);
-      state.attempts = 0;
-      state.currentFee = 0;
+      if (state.completed) {
+        state.attempts = 0;
+        state.currentFee = 0;
+        state.completed = false;
+      }
     },
 
     after(ctx: MiddlewareContext, _result: unknown): void {
-      // Call succeeded — report attempt count to the caller.
+      // Call succeeded — mark logical call complete and report attempt count.
+      const state = callState.get(ctx.args as object);
+      if (state) {
+        state.completed = true;
+      }
       if (onComplete) {
-        const state = callState.get(ctx.args as object);
         onComplete(state?.attempts ?? 0, true);
       }
     },
 
     async onError(ctx: MiddlewareContext, error: unknown): Promise<void> {
-      if (!isFeeError(error)) {
-        // Not a fee error — let it propagate unchanged
-        throw error;
-      }
-
       const state = getState(ctx);
 
       if (state.attempts >= maxAttempts) {
-        // Exhausted retries — report and re-throw
+        // Exhausted retries across the logical call — report and re-throw
+        state.completed = true;
         onComplete?.(state.attempts, false);
+        throw error;
+      }
+
+      if (!isFeeError(error)) {
+        // Track retry attempts across the logical call regardless of which
+        // failure type triggered the retry (issue #723), while propagating
+        // non-fee errors unchanged.
+        state.attempts += 1;
         throw error;
       }
 
@@ -265,6 +278,7 @@ export function createFeeRetryMiddleware(
 
       if (bumpedFee > maxFeeStroops) {
         // Fee would exceed the cap — report and stop retrying
+        state.completed = true;
         onComplete?.(state.attempts, false);
         throw error;
       }
