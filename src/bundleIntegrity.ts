@@ -127,13 +127,20 @@ export function generateIntegrityManifest(
 
 // ── Manifest verification ────────────────────────────────────────────────────
 
+const SHA256_HEX_REGEX = /^[a-f0-9]{64}$/i;
+
+function isValidSha256Hash(hash: unknown): hash is string {
+  return typeof hash === 'string' && SHA256_HEX_REGEX.test(hash);
+}
+
 /**
  * Verifies a single file against an expected SHA-256 hash.
  *
  * @param filePath       - Absolute or resolvable path to the file to check.
  * @param expectedSha256 - Expected hex SHA-256 hash (case-insensitive).
  * @returns `true` when the computed hash matches `expectedSha256`,
- *          `false` if they differ or if the file cannot be read.
+ *          `false` if they differ, if `expectedSha256` is empty/malformed,
+ *          or if the file cannot be read.
  *
  * @example
  * ```ts
@@ -144,6 +151,9 @@ export function generateIntegrityManifest(
 export function verifyFileIntegrity(filePath: string, expectedSha256: string): boolean {
   try {
     const content = readFileSync(filePath);
+    if (!isValidSha256Hash(expectedSha256)) {
+      return false;
+    }
     const actual = computeSha256(content);
     return actual === expectedSha256.toLowerCase();
   } catch {
@@ -194,7 +204,7 @@ export function verifyManifest(
 
   for (const entry of manifest.files) {
     const full = join(distDirOrResolver, entry.file);
-    if (!verifyFileIntegrity(full, entry.sha256)) {
+    if (!verifyFileIntegrity(full, entry.sha256) || !isValidSha256Hash(entry.sha256)) {
       failures.push(entry.file);
     }
   }
@@ -213,6 +223,7 @@ async function verifyManifestFromResolver(
       const response = await resolveResource(entry.file);
       if (
         !response.ok ||
+        !isValidSha256Hash(entry.sha256) ||
         computeSha256(Buffer.from(await response.arrayBuffer())) !== entry.sha256.toLowerCase()
       ) {
         failures.push(entry.file);
