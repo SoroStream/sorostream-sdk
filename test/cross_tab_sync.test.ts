@@ -363,12 +363,20 @@ describe('SoroStreamClient cross-tab sync', () => {
     clientB.destroy();
   });
 
-  it('re-scopes the channel when the network changes', () => {
+  it('re-scopes the channel when the network changes', async () => {
     globalThis.BroadcastChannel = FakeBroadcastChannel as unknown as typeof BroadcastChannel;
     const client = new SoroStreamClient(makeClientOptions({ crossTabSync: true }));
     const first = FakeBroadcastChannel.instances[0]!;
 
     client.setNetwork('mainnet');
+
+    // setNetwork emits a `cacheInvalidated` event on the old channel just
+    // before rebuilding the relay, which leaves one broadcast pending at the
+    // moment destroy() is called. CrossTabSync intentionally defers physical
+    // teardown (listener removal + channel.close()) until that pending
+    // broadcast's delivery turn has passed — see CrossTabSync.destroy()'s
+    // own doc comment. Flush that macrotask before asserting teardown.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(FakeBroadcastChannel.instances).toHaveLength(2);
     const second = FakeBroadcastChannel.instances[1]!;
@@ -438,7 +446,10 @@ describe('compareTabMessages (issue #683)', () => {
         const ch = new FakeBroadcastChannel(name);
         // Intercept postMessage to capture the raw payload
         const orig = ch.postMessage.bind(ch);
-        ch.postMessage = (data: unknown) => { messages.push(data); orig(data); };
+        ch.postMessage = (data: unknown) => {
+          messages.push(data);
+          orig(data);
+        };
         return ch as unknown as BroadcastChannel;
       },
     });

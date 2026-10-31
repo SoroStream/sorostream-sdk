@@ -13,13 +13,7 @@
  * hash comparison must surface it.
  */
 import { describe, it, expect } from 'vitest';
-import {
-  Account,
-  Contract,
-  Keypair,
-  Networks,
-  TransactionBuilder,
-} from '@stellar/stellar-sdk';
+import { Account, Contract, Keypair, Networks, TransactionBuilder } from '@stellar/stellar-sdk';
 import { assertEnvelopeUnmutated } from '../src/xdrValidation.js';
 import { createContractEncoder } from '../src/contractEncoders.js';
 import { XdrValidationError } from '../src/errors.js';
@@ -40,10 +34,7 @@ const encoder = createContractEncoder(new Contract(CONTRACT_ID), 'v1');
  * Builds a multi-operation transaction.
  * `ops` is an array of xdr.Operation in the order they should appear.
  */
-function buildMultiOpTx(
-  account: Account,
-  ops: ReturnType<typeof encoder.pauseStream>[],
-) {
+function buildMultiOpTx(account: Account, ops: ReturnType<typeof encoder.pauseStream>[]) {
   let builder = new TransactionBuilder(account, {
     fee: '100',
     networkPassphrase: NETWORK,
@@ -161,9 +152,7 @@ describe('assertEnvelopeUnmutated — operation reordering detection (#781)', ()
     const original = buildMultiOpTx(account, [opA, opB]);
 
     // Same XDR as the original (no mutation).
-    expect(() =>
-      assertEnvelopeUnmutated(original, original.toXDR(), NETWORK),
-    ).not.toThrow();
+    expect(() => assertEnvelopeUnmutated(original, original.toXDR(), NETWORK)).not.toThrow();
   });
 
   /**
@@ -187,8 +176,8 @@ describe('assertEnvelopeUnmutated — operation reordering detection (#781)', ()
     const acc2 = new Account(keypair.publicKey(), '500');
     const reordered = buildMultiOpTx(acc2, [opB, opA]);
 
-    expect(() =>
-      assertEnvelopeUnmutated(original, reordered.toXDR(), NETWORK),
-    ).toThrow(XdrValidationError);
+    expect(() => assertEnvelopeUnmutated(original, reordered.toXDR(), NETWORK)).toThrow(
+      XdrValidationError,
+    );
   });
 });

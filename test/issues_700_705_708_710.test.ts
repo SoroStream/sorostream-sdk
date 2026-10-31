@@ -23,7 +23,8 @@ import {
 } from '@stellar/stellar-sdk';
 import { BatchBuilder, SOROBAN_MAX_OPS_PER_TX } from '../src/batchBuilder.js';
 import { BatchOperationLimitExceededError, FeeBumpExpiredError } from '../src/errors.js';
-import { renewTimeBounds, withFeeBump, bigintReplacer, bigintReviver } from '../src/utils.js';
+import { withFeeBump, bigintReplacer, bigintReviver } from '../src/utils.js';
+import { renewTimeBounds } from '../src/feeBump.js';
 import { templates } from '../src/templates.js';
 import { deserializeStreamRecords, deserializeStreamFromJSON } from '../src/utils.js';
 import type { SoroStreamClient } from '../src/SoroStreamClient.js';
@@ -56,7 +57,7 @@ function makeInnerTransaction(expired: boolean) {
     }),
   );
   const tx = expired
-    ? builder.setTimeBounds(0, Math.floor(Date.now() / 1000) - 60).build()
+    ? builder.setTimebounds(0, Math.floor(Date.now() / 1000) - 60).build()
     : builder.setTimeout(30).build();
   tx.sign(keypair);
   return { tx, keypair };

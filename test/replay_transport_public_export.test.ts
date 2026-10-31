@@ -9,11 +9,7 @@
 import { describe, it, expect } from 'vitest';
 
 // Import from the barrel re-export, not the deep path
-import {
-  ReplayTransport,
-  ReplayFixtureError,
-  ReplayFixtureParseError,
-} from '../src/index.js';
+import { ReplayTransport, ReplayFixtureError, ReplayFixtureParseError } from '../src/index.js';
 import type {
   FixtureEntry,
   FixtureFile,
@@ -131,9 +127,7 @@ describe('Issue #760: ReplayTransport exports reachable via public entry point',
     expect(recording.getEntries).toBeDefined();
     expect(recording.toJSON).toBeDefined();
 
-    const fixture = makeFixture([
-      { method: 'getHealth', request: {}, response: { status: 'ok' } },
-    ]);
+    const fixture = makeFixture([{ method: 'getHealth', request: {}, response: { status: 'ok' } }]);
     const replaying: ReplayingRpcTransport = ReplayTransport.replay(fixture);
     expect(replaying.getFixture).toBeDefined();
   });

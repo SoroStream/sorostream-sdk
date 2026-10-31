@@ -459,9 +459,21 @@ describe('ReplayTransport.replay – fixture exhaustion mid-sequence (issue #732
   it('successfully replays several calls before exhausting, then throws ReplayFixtureError', async () => {
     // Provide exactly 3 fixtures for getLatestLedger
     const fixture = makeFixture([
-      { method: 'getLatestLedger', request: {}, response: { id: 'l1', sequence: 1, protocolVersion: 21 } },
-      { method: 'getLatestLedger', request: {}, response: { id: 'l2', sequence: 2, protocolVersion: 21 } },
-      { method: 'getLatestLedger', request: {}, response: { id: 'l3', sequence: 3, protocolVersion: 21 } },
+      {
+        method: 'getLatestLedger',
+        request: {},
+        response: { id: 'l1', sequence: 1, protocolVersion: 21 },
+      },
+      {
+        method: 'getLatestLedger',
+        request: {},
+        response: { id: 'l2', sequence: 2, protocolVersion: 21 },
+      },
+      {
+        method: 'getLatestLedger',
+        request: {},
+        response: { id: 'l3', sequence: 3, protocolVersion: 21 },
+      },
     ]);
 
     const transport = ReplayTransport.replay(fixture);

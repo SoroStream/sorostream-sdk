@@ -10,11 +10,7 @@ import { describe, it, expect } from 'vitest';
 
 // Import from the barrel re-export, not the deep path
 import { GasProfiler } from '../src/index.js';
-import type {
-  SimulationProfile,
-  ProfileReport,
-  ProfilerConfig,
-} from '../src/index.js';
+import type { SimulationProfile, ProfileReport, ProfilerConfig } from '../src/index.js';
 
 describe('Issue #758: profiler exports reachable via public entry point', () => {
   it('GasProfiler is exported and constructable', () => {

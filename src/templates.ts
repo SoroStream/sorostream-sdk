@@ -33,10 +33,7 @@ export type ConditionalBranchMap<T> = Partial<Record<TemplateTokenType, T>> & {
  * a resolver evaluated at instantiation time with the token context, or
  * a dictionary of branches by token type with a default fallback (issue #710, #791).
  */
-export type ConditionalParam<T> =
-  | T
-  | ((ctx: TemplateTokenContext) => T)
-  | ConditionalBranchMap<T>;
+export type ConditionalParam<T> = T | ((ctx: TemplateTokenContext) => T) | ConditionalBranchMap<T>;
 
 /**
  * Helper to construct a conditional parameter branch map with an explicit fallback default (issue #791).

@@ -66,30 +66,62 @@ describe('Issue #780: WebhookForwarder respects jitterDelay bounds and retry sch
 
 describe('Issue #774: ReplayTransport.record preserves successful entries when baseTransport throws mid-recording', () => {
   it('preserves already-recorded interactions and allows toJSON/save after subsequent call failure', async () => {
+    // `RpcTransportAdapter` has no generic `request(method, params)` entry
+    // point — each RPC operation is its own named method (getAccount,
+    // getLatestLedger, sendTransaction, ...), which is what `ReplayTransport.record`
+    // actually wraps. Share one counter across the three named methods this
+    // test exercises so the 3rd overall call is the one that throws.
     let callCount = 0;
+    function nextResult(): { result: string } {
+      callCount++;
+      if (callCount === 3) {
+        throw new Error('RPC connection dropped mid-session');
+      }
+      return { result: `success-${callCount}` };
+    }
     const mockBaseTransport: RpcTransportAdapter = {
-      serverURL: 'https://soroban-testnet.stellar.org',
-      async request(method: string, params?: unknown): Promise<unknown> {
-        callCount++;
-        if (callCount === 3) {
-          throw new Error('RPC connection dropped mid-session');
-        }
-        return { result: `success-${callCount}` };
+      serverURL: new URL('https://soroban-testnet.stellar.org'),
+      async getAccount(): Promise<any> {
+        return nextResult();
+      },
+      async getHealth(): Promise<any> {
+        throw new Error('not used in this test');
+      },
+      async getLatestLedger(): Promise<any> {
+        return nextResult();
+      },
+      async getTransaction(): Promise<any> {
+        throw new Error('not used in this test');
+      },
+      async simulateTransaction(): Promise<any> {
+        throw new Error('not used in this test');
+      },
+      async prepareTransaction(): Promise<any> {
+        throw new Error('not used in this test');
+      },
+      async sendTransaction(): Promise<any> {
+        return nextResult();
+      },
+      async getEvents(): Promise<any> {
+        throw new Error('not used in this test');
       },
     };
 
     const recordingTransport = ReplayTransport.record(mockBaseTransport);
+    const dummyTx = { toXDR: () => 'dummy-xdr' } as unknown as Parameters<
+      RpcTransportAdapter['sendTransaction']
+    >[0];
 
     // Call 1: success
-    const res1 = await recordingTransport.request('getAccount', { id: 'GABC' });
+    const res1 = await recordingTransport.getAccount('GABC');
     expect(res1).toEqual({ result: 'success-1' });
 
     // Call 2: success
-    const res2 = await recordingTransport.request('getLatestLedger');
+    const res2 = await recordingTransport.getLatestLedger();
     expect(res2).toEqual({ result: 'success-2' });
 
     // Call 3: throws
-    await expect(recordingTransport.request('sendTransaction')).rejects.toThrow(
+    await expect(recordingTransport.sendTransaction(dummyTx)).rejects.toThrow(
       'RPC connection dropped mid-session',
     );
 
@@ -136,14 +168,24 @@ describe('Issue #778: Comparative benchmark/workload test between RateLimiter, W
     const p2 = rateLimiter.run(async () => 'ok2');
     await expect(Promise.all([p1, p2])).resolves.toEqual(['ok1', 'ok2']);
 
-    // In contrast, WriteRateLimiter applies backpressure and rejects when queue size is exceeded
+    // In contrast, WriteRateLimiter applies backpressure and rejects when queue size is exceeded.
+    // `queueSize` caps how many *waiting* operations are tolerated, not the
+    // total call count — so with burst: 1 and queueSize: 1, the 1st call
+    // consumes the burst allowance (resolves immediately), the 2nd exceeds it
+    // and takes the single queue slot (waits, then resolves), and only a 3rd
+    // call arriving while that slot is still occupied gets rejected. Fire all
+    // three without awaiting in between so the 3rd genuinely overlaps the 2nd.
     const writeLimiter = new WriteRateLimiter({
       maxPerSecond: 10,
       burst: 1,
       queueSize: 1,
     });
 
-    await writeLimiter.acquire('op');
-    await expect(writeLimiter.acquire('op')).rejects.toThrow();
+    const w1 = writeLimiter.acquire('op');
+    const w2 = writeLimiter.acquire('op');
+    const w3 = writeLimiter.acquire('op');
+
+    await expect(w3).rejects.toThrow();
+    await expect(Promise.all([w1, w2])).resolves.toBeDefined();
   });
 });

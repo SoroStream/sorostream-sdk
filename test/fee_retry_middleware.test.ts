@@ -239,7 +239,11 @@ describe('createFeeRetryMiddleware attempt count (issue #685)', () => {
 
     // Two fee errors consumed as retries
     for (let i = 0; i < 2; i++) {
-      try { await plugin.onError!(ctx, feeErr); } catch { /* FeeRetryError expected */ }
+      try {
+        await plugin.onError!(ctx, feeErr);
+      } catch {
+        /* FeeRetryError expected */
+      }
     }
 
     // Call ultimately "succeeds" — fire after hook
@@ -264,11 +268,19 @@ describe('createFeeRetryMiddleware attempt count (issue #685)', () => {
 
     // Consume both allowed retries
     for (let i = 0; i < 2; i++) {
-      try { await plugin.onError!(ctx, feeErr); } catch { /* expected */ }
+      try {
+        await plugin.onError!(ctx, feeErr);
+      } catch {
+        /* expected */
+      }
     }
 
     // Third call — maxAttempts exhausted, onComplete fires with succeeded=false
-    try { await plugin.onError!(ctx, feeErr); } catch { /* expected */ }
+    try {
+      await plugin.onError!(ctx, feeErr);
+    } catch {
+      /* expected */
+    }
 
     expect(onComplete).toHaveBeenCalledOnce();
     expect(onComplete).toHaveBeenCalledWith(2, false);
@@ -291,7 +303,11 @@ describe('createFeeRetryMiddleware attempt count (issue #685)', () => {
     });
 
     // 100 * 2 = 200 > 150 — cap hit immediately
-    try { await plugin.onError!(ctx, feeErr); } catch { /* expected */ }
+    try {
+      await plugin.onError!(ctx, feeErr);
+    } catch {
+      /* expected */
+    }
 
     expect(onComplete).toHaveBeenCalledOnce();
     expect(onComplete).toHaveBeenCalledWith(0, false);

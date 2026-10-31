@@ -27,13 +27,12 @@ describe('SoroStreamSandbox sequence scenarios (issue #696)', () => {
   });
 
   it('array scenario returns handlers in order', async () => {
-    const sandbox = new SoroStreamSandbox({
-      getClaimable: [
-        async () => 1n,
-        async () => 2n,
-        async () => 3n,
-      ],
-    }, { defaultBehavior: 'empty' });
+    const sandbox = new SoroStreamSandbox(
+      {
+        getClaimable: [async () => 1n, async () => 2n, async () => 3n],
+      },
+      { defaultBehavior: 'empty' },
+    );
 
     expect(await sandbox.getClaimable(STREAM_ID)).toBe(1n);
     expect(await sandbox.getClaimable(STREAM_ID)).toBe(2n);
@@ -41,9 +40,12 @@ describe('SoroStreamSandbox sequence scenarios (issue #696)', () => {
   });
 
   it('falls back to defaultBehavior:"empty" after sequence is exhausted', async () => {
-    const sandbox = new SoroStreamSandbox({
-      getClaimable: [async () => 99n],
-    }, { defaultBehavior: 'empty' });
+    const sandbox = new SoroStreamSandbox(
+      {
+        getClaimable: [async () => 99n],
+      },
+      { defaultBehavior: 'empty' },
+    );
 
     expect(await sandbox.getClaimable(STREAM_ID)).toBe(99n);
     // Sequence exhausted — falls back to empty default (0n)
@@ -51,24 +53,36 @@ describe('SoroStreamSandbox sequence scenarios (issue #696)', () => {
   });
 
   it('falls back to defaultBehavior:"error" after sequence is exhausted', async () => {
-    const sandbox = new SoroStreamSandbox({
-      getClaimable: [async () => 5n],
-    }, { defaultBehavior: 'error' });
+    const sandbox = new SoroStreamSandbox(
+      {
+        getClaimable: [async () => 5n],
+      },
+      { defaultBehavior: 'error' },
+    );
 
     expect(await sandbox.getClaimable(STREAM_ID)).toBe(5n);
     // Sequence exhausted — throws SandboxUnexpectedCallError
-    await expect(sandbox.getClaimable(STREAM_ID)).rejects.toBeInstanceOf(SandboxUnexpectedCallError);
+    await expect(sandbox.getClaimable(STREAM_ID)).rejects.toBeInstanceOf(
+      SandboxUnexpectedCallError,
+    );
   });
 
   it('2-fail-then-succeed scenario for getClaimable', async () => {
     const flakyError = new Error('RPC timeout');
-    const sandbox = new SoroStreamSandbox({
-      getClaimable: [
-        async () => { throw flakyError; },
-        async () => { throw flakyError; },
-        async () => 1_000_000n,
-      ],
-    }, { defaultBehavior: 'error' });
+    const sandbox = new SoroStreamSandbox(
+      {
+        getClaimable: [
+          async () => {
+            throw flakyError;
+          },
+          async () => {
+            throw flakyError;
+          },
+          async () => 1_000_000n,
+        ],
+      },
+      { defaultBehavior: 'error' },
+    );
 
     await expect(sandbox.getClaimable(STREAM_ID)).rejects.toBe(flakyError);
     await expect(sandbox.getClaimable(STREAM_ID)).rejects.toBe(flakyError);
@@ -77,13 +91,20 @@ describe('SoroStreamSandbox sequence scenarios (issue #696)', () => {
 
   it('2-fail-then-succeed scenario for createStream', async () => {
     const netErr = new Error('network error');
-    const sandbox = new SoroStreamSandbox({
-      createStream: [
-        async () => { throw netErr; },
-        async () => { throw netErr; },
-        async () => ({ streamId: 'stream-42', txHash: '0xabc' }),
-      ],
-    }, { defaultBehavior: 'error' });
+    const sandbox = new SoroStreamSandbox(
+      {
+        createStream: [
+          async () => {
+            throw netErr;
+          },
+          async () => {
+            throw netErr;
+          },
+          async () => ({ streamId: 'stream-42', txHash: '0xabc' }),
+        ],
+      },
+      { defaultBehavior: 'error' },
+    );
 
     await expect(sandbox.createStream(FAKE_PARAMS)).rejects.toBe(netErr);
     await expect(sandbox.createStream(FAKE_PARAMS)).rejects.toBe(netErr);
@@ -92,10 +113,13 @@ describe('SoroStreamSandbox sequence scenarios (issue #696)', () => {
   });
 
   it('independent sequences per method do not interfere', async () => {
-    const sandbox = new SoroStreamSandbox({
-      getClaimable: [async () => 1n, async () => 2n],
-      estimateFee: [async () => 100n, async () => 200n],
-    }, { defaultBehavior: 'empty' });
+    const sandbox = new SoroStreamSandbox(
+      {
+        getClaimable: [async () => 1n, async () => 2n],
+        estimateFee: [async () => 100n, async () => 200n],
+      },
+      { defaultBehavior: 'empty' },
+    );
 
     expect(await sandbox.getClaimable(STREAM_ID)).toBe(1n);
     expect(await sandbox.estimateFee({})).toBe(100n);

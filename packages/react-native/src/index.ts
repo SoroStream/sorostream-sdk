@@ -189,7 +189,8 @@ export function setupExpoPolyfills(options?: ExpoPolyfillOptions): void {
     if (typeof globalThis.crypto === 'undefined') {
       (globalThis as unknown as { crypto: unknown }).crypto = options.crypto;
     } else if (globalThis.crypto && typeof globalThis.crypto.getRandomValues !== 'function') {
-      (globalThis.crypto as unknown as { getRandomValues: unknown }).getRandomValues = options.crypto.getRandomValues;
+      (globalThis.crypto as unknown as { getRandomValues: unknown }).getRandomValues =
+        options.crypto.getRandomValues;
     }
   }
 }
@@ -240,14 +241,20 @@ export interface FreighterMobileOptions {
  * Rejects with a timeout error if the Freighter mobile bridge does not respond within the configured timeout.
  * Issue #797.
  */
-export async function createFreighterMobileAdapter(options: FreighterMobileOptions = {}): Promise<WalletAdapter> {
+export async function createFreighterMobileAdapter(
+  options: FreighterMobileOptions = {},
+): Promise<WalletAdapter> {
   const timeoutMs = options.timeoutMs ?? 5000;
-  
+
   if (options.checkBridge) {
     const bridgeAvailable = await Promise.race([
       options.checkBridge(),
       new Promise<boolean>((_, reject) =>
-        setTimeout(() => reject(new Error(`Freighter mobile bridge failed to respond within ${timeoutMs}ms`)), timeoutMs)
+        setTimeout(
+          () =>
+            reject(new Error(`Freighter mobile bridge failed to respond within ${timeoutMs}ms`)),
+          timeoutMs,
+        ),
       ),
     ]);
     if (!bridgeAvailable) {

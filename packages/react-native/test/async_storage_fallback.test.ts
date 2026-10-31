@@ -7,10 +7,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
-import {
-  createAsyncStorageAdapter,
-  createReactNativeAdapters,
-} from '../src/index.js';
+import { createAsyncStorageAdapter, createReactNativeAdapters } from '../src/index.js';
 import type { AsyncStorageLike } from '../src/index.js';
 
 // ---------------------------------------------------------------------------

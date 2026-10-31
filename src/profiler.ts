@@ -389,11 +389,12 @@ export class GasProfiler {
       const ledgerReads = readOnlyKeys.length + readWriteKeys.length;
       const ledgerWrites = readWriteKeys.length;
       const minFee = cost.minFee ?? success.minResourceFee ?? '0';
+      const cpuInstructions = cost.cpuInsns ?? '0';
 
       return {
         operationType,
         params,
-        cpuInstructions: '0',
+        cpuInstructions,
         minFee,
         ledgerReads,
         ledgerWrites,

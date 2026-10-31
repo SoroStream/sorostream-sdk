@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { buildSchema, graphql, GraphQLScalarType } from 'graphql';
+import { Account } from '@stellar/stellar-sdk';
 import { PersistedAddressBook, InMemoryAddressBook, AddressBookEntry } from '../src/addressBook.js';
 import type { StorageAdapter } from '../src/adapters.js';
 import { mergeSorostreamConfig, SorostreamConfig } from '../src/sorostream-config.js';
@@ -28,7 +29,7 @@ describe('Issue #777: PersistedAddressBook with custom StorageAdapter', () => {
     }
   }
 
-  const validAddress1 = 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J';
+  const validAddress1 = 'GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ';
   const validAddress2 = 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7';
 
   it('persists and retrieves entries via custom StorageAdapter', () => {
@@ -44,6 +45,10 @@ describe('Issue #777: PersistedAddressBook with custom StorageAdapter', () => {
     expect(book.get('alice')).toBe(validAddress1);
     expect(book.resolve('alice')).toBe(validAddress1);
     expect(book.size).toBe(2);
+
+    // Writes are debounced (default 50ms); force an immediate flush before
+    // inspecting the underlying storage adapter directly.
+    book.flush();
 
     // Verify data was written to the custom adapter under storageKey
     const rawData = customStorage.getItem('custom_test_address_book');
@@ -133,7 +138,7 @@ describe('Issue #776: sorostream-config.ts precedence rule across all overlappin
 describe('Issue #771: graphql.ts helpers compatibility with GraphQL execution (Apollo / Yoga resolver schema)', () => {
   const sampleStream: Stream = {
     id: 'stream-101',
-    sender: 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J',
+    sender: 'GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ',
     recipient: 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7',
     token: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
     deposit: 5_000_000_000n,
@@ -153,6 +158,15 @@ describe('Issue #771: graphql.ts helpers compatibility with GraphQL execution (A
         stream(id: ID!): Stream
       }
     `);
+
+    // `buildSchema` only parses the SDL; it doesn't know how to serialize the
+    // custom `BigInt` scalar it declares, so the resolver config must be
+    // attached to the schema's scalar type explicitly — the same step
+    // real servers perform via `resolvers: { BigInt: new GraphQLScalarType(bigIntScalarConfig) }`.
+    const bigIntType = schema.getType('BigInt') as GraphQLScalarType;
+    bigIntType.serialize = bigIntScalarConfig.serialize;
+    bigIntType.parseValue = bigIntScalarConfig.parseValue;
+    bigIntType.parseLiteral = bigIntScalarConfig.parseLiteral;
 
     // In Apollo Server / graphql-yoga, resolvers map to root value / resolver functions
     const rootValue = {
@@ -201,7 +215,7 @@ describe('Issue #772: profiler.ts simulation cost comparison between Linear and 
     const profiler = new GasProfiler({
       contractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
       network: 'testnet',
-      publicKey: 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J',
+      publicKey: 'GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ',
     });
 
     // Mock simulateTransaction to test resource profile extraction
@@ -231,13 +245,14 @@ describe('Issue #772: profiler.ts simulation cost comparison between Linear and 
     // @ts-ignore
     profiler['server'].simulateTransaction = mockSimulate;
     // @ts-ignore
-    profiler['server'].getAccount = vi.fn().mockResolvedValue({
-      id: 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J',
-      sequenceNumber: () => '100',
-    });
+    profiler['server'].getAccount = vi
+      .fn()
+      .mockResolvedValue(
+        new Account('GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ', '100'),
+      );
 
     const linearProfile = await profiler.profileCreateStream({
-      sender: 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J',
+      sender: 'GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ',
       recipient: 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7',
       token: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
       amount: 1000n,

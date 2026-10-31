@@ -441,9 +441,9 @@ describe('validateCreateStreamParams (vue)', () => {
   });
 
   it('rejects null/undefined params', () => {
-    expect(() =>
-      validateCreateStreamParams(null as unknown as CreateStreamParams),
-    ).toThrow(/must be a non-null object/);
+    expect(() => validateCreateStreamParams(null as unknown as CreateStreamParams)).toThrow(
+      /must be a non-null object/,
+    );
   });
 
   it('rejects a missing recipient', () => {
@@ -507,9 +507,7 @@ describe('useCreateStream (#765)', () => {
   });
 
   it('sets txResult on success and clears loading', async () => {
-    const createStream = vi
-      .fn()
-      .mockResolvedValue({ streamId: '42', txHash: 'tx-abc' });
+    const createStream = vi.fn().mockResolvedValue({ streamId: '42', txHash: 'tx-abc' });
     const client: CreateStreamClientLike = { createStream };
     const { result } = withScope(() => useCreateStream(client));
 
@@ -552,9 +550,7 @@ describe('useCreateStream (#765)', () => {
 
   it('works against the in-memory mock client', async () => {
     const mock = new MockSoroStreamClient();
-    const { result } = withScope(() =>
-      useCreateStream(mock as unknown as CreateStreamClientLike),
-    );
+    const { result } = withScope(() => useCreateStream(mock as unknown as CreateStreamClientLike));
 
     const r = await result.create(validParams());
     expect((r as { streamId: string }).streamId).toBeTruthy();

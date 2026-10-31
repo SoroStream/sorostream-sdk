@@ -1,9 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { isValidStellarAddress, isStellarAddress, assertStellarAddress } from '../src/utils.js';
-import {
-  StreamSimulator,
-  type SimulatedWithdrawResult,
-} from '../src/simulator.js';
+import { StreamSimulator, type SimulatedWithdrawResult } from '../src/simulator.js';
 import {
   templates,
   resolveConditionalParam,

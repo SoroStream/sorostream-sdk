@@ -22,10 +22,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  StreamStateMachine,
-  InvalidStateTransitionError,
-} from '../src/state-machine.js';
+import { StreamStateMachine, InvalidStateTransitionError } from '../src/state-machine.js';
 import type { StreamState, StreamAction } from '../src/state-machine.js';
 
 // ── All states and actions declared in state-machine.ts ──────────────────────
@@ -46,9 +43,11 @@ const ALL_ACTIONS: StreamAction[] = [
 // ── Expected next-state for valid transitions ─────────────────────────────────
 // Derived from the getNextState implementation in state-machine.ts.
 
-const EXPECTED_NEXT_STATE: Partial<Record<StreamState, Partial<Record<StreamAction, StreamState>>>> = {
+const EXPECTED_NEXT_STATE: Partial<
+  Record<StreamState, Partial<Record<StreamAction, StreamState>>>
+> = {
   Active: {
-    withdraw: 'Active',        // no isFullyWithdrawn / isExpired context → stays Active
+    withdraw: 'Active', // no isFullyWithdrawn / isExpired context → stays Active
     cancel: 'Cancelled',
     topUp: 'Active',
     updateFlowRate: 'Active',
@@ -59,7 +58,7 @@ const EXPECTED_NEXT_STATE: Partial<Record<StreamState, Partial<Record<StreamActi
   Paused: {
     resume: 'Active',
     cancel: 'Cancelled',
-    withdraw: 'Paused',        // withdraw from Paused keeps same state (nothing accrued)
+    withdraw: 'Paused', // withdraw from Paused keeps same state (nothing accrued)
   },
 };
 
@@ -77,9 +76,7 @@ describe('StreamStateMachine – exhaustive state × action matrix (#738)', () =
 
         if (valid) {
           it('assertValidTransition does not throw', () => {
-            expect(() =>
-              StreamStateMachine.assertValidTransition(state, action),
-            ).not.toThrow();
+            expect(() => StreamStateMachine.assertValidTransition(state, action)).not.toThrow();
           });
 
           const expectedNext = EXPECTED_NEXT_STATE[state]?.[action];
@@ -90,9 +87,9 @@ describe('StreamStateMachine – exhaustive state × action matrix (#738)', () =
           }
         } else {
           it('assertValidTransition throws InvalidStateTransitionError', () => {
-            expect(() =>
-              StreamStateMachine.assertValidTransition(state, action),
-            ).toThrow(InvalidStateTransitionError);
+            expect(() => StreamStateMachine.assertValidTransition(state, action)).toThrow(
+              InvalidStateTransitionError,
+            );
           });
 
           it('error records correct currentState and action', () => {
@@ -109,9 +106,9 @@ describe('StreamStateMachine – exhaustive state × action matrix (#738)', () =
           });
 
           it('getNextState throws InvalidStateTransitionError', () => {
-            expect(() =>
-              StreamStateMachine.getNextState(state, action),
-            ).toThrow(InvalidStateTransitionError);
+            expect(() => StreamStateMachine.getNextState(state, action)).toThrow(
+              InvalidStateTransitionError,
+            );
           });
         }
       });
@@ -144,15 +141,15 @@ describe('StreamStateMachine – valid-transition counts per state (#738)', () =
 
 describe('StreamStateMachine – getNextState withdraw context flags (#738)', () => {
   it('Active + withdraw + isFullyWithdrawn → Completed', () => {
-    expect(
-      StreamStateMachine.getNextState('Active', 'withdraw', { isFullyWithdrawn: true }),
-    ).toBe('Completed');
+    expect(StreamStateMachine.getNextState('Active', 'withdraw', { isFullyWithdrawn: true })).toBe(
+      'Completed',
+    );
   });
 
   it('Active + withdraw + isExpired → Completed', () => {
-    expect(
-      StreamStateMachine.getNextState('Active', 'withdraw', { isExpired: true }),
-    ).toBe('Completed');
+    expect(StreamStateMachine.getNextState('Active', 'withdraw', { isExpired: true })).toBe(
+      'Completed',
+    );
   });
 
   it('Active + withdraw + no context → Active', () => {

@@ -318,16 +318,21 @@ describe('#719 OfflineQueue priority ties', () => {
       }
       drained.push('retried');
     });
-    queue.enqueue('high', async () => {
-      drained.push('high');
-    }, 10);
+    queue.enqueue(
+      'high',
+      async () => {
+        drained.push('high');
+      },
+      10,
+    );
 
-    // Drain once while offline: "retried" fails first (priority 0) and is
-    // re-queued; "high" is never reached because drainage stops at the
-    // first failure while offline.
+    // Drain once while offline: "high" (priority 10) drains first and
+    // succeeds, per the documented "higher values drain first" ordering;
+    // "retried" (priority 0, default) drains next, fails, and is re-queued,
+    // at which point drainage stops because we're still offline.
     const first = await queue.drain();
     expect(first.failed).toBe(1);
-    expect(queue.size).toBe(2);
+    expect(queue.size).toBe(1);
 
     // While offline, an equal-priority operation is enqueued *after* the
     // re-queued one — it must still replay behind it.

@@ -22,12 +22,20 @@ export function renewTimeBounds(
   inner: Transaction,
   opts?: { timeoutSeconds?: number; networkPassphrase?: string },
 ): Transaction {
+  const timeoutSeconds = opts?.timeoutSeconds ?? 30;
+  // `cloneFrom` carries over the inner transaction's existing (expired) time
+  // bounds, and stellar-base's `setTimeout` refuses to overwrite an
+  // already-set `max_time` as a safety check — so the renewed bounds must be
+  // passed directly via `optionOverrides.timebounds` instead of chaining
+  // `.setTimeout()` after the clone.
   return TransactionBuilder.cloneFrom(inner, {
     fee: inner.fee,
     networkPassphrase: opts?.networkPassphrase ?? Networks.TESTNET,
-  })
-    .setTimeout(opts?.timeoutSeconds ?? 30)
-    .build();
+    timebounds: {
+      minTime: 0,
+      maxTime: Math.floor(Date.now() / 1000) + timeoutSeconds,
+    },
+  }).build();
 }
 
 /** Options for the renewal path of {@link wrapForFeeBump} (issue #705). */

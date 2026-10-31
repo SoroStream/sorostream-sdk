@@ -38,9 +38,7 @@ describe('Issue #759: RateLimiter exported from public entry point', () => {
       return id;
     };
 
-    const results = await Promise.all(
-      [1, 2, 3, 4, 5].map((id) => limiter.run(() => task(id))),
-    );
+    const results = await Promise.all([1, 2, 3, 4, 5].map((id) => limiter.run(() => task(id))));
 
     expect(results).toEqual([1, 2, 3, 4, 5]);
     expect(maxActive).toBeLessThanOrEqual(2);
@@ -69,7 +67,9 @@ describe('Issue #759: RateLimiter exported from public entry point', () => {
     const limiter = new RateLimiter(1);
 
     let release!: () => void;
-    const gate = new Promise<void>((r) => { release = r; });
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
 
     const p1 = limiter.run(() => gate);
     const p2 = limiter.run(() => Promise.resolve('done'));

@@ -110,7 +110,7 @@ export async function cmdStreamCreate(opts: StreamCreateOptions): Promise<void> 
 
   // createStream can return a dry-run description when dryRun is opted into;
   // the CLI never opts in, so narrow to the { streamId, txHash } shape.
-  if (!result || typeof (result as { streamId?: string }).streamId !== 'string') {
+  if (!result || !('streamId' in result) || typeof result.streamId !== 'string') {
     throw new Error('stream create: unexpected createStream result shape');
   }
 
@@ -176,27 +176,6 @@ export async function cmdClaimable(opts: GlobalOptions, streamId: string): Promi
   printOutput({ claimable: claimable.toString(), usdc: formatUSDC(claimable) }, opts.output);
 }
 
-export async function cmdForecast(opts: GlobalOptions, streamId: string): Promise<void> {
-  const client = createClient(opts);
-  const forecast = await client.getRenewalForecast(streamId);
-  if (!forecast) {
-    printOutput(
-      { forecast: null, message: 'Stream does not auto-renew or is cancelled' },
-      opts.output,
-    );
-    return;
-  }
-  printOutput(
-    {
-      nextRenewalDate: forecast.nextRenewalDate.toISOString(),
-      amount: forecast.amount.toString(),
-      usdc: formatUSDC(forecast.amount),
-      nextEndTime: forecast.nextEndTime.toISOString(),
-    },
-    opts.output,
-  );
-}
-
 export async function cmdList(
   opts: GlobalOptions & {
     sender?: string;
@@ -210,11 +189,11 @@ export async function cmdList(
   let result: any = [];
 
   if (opts.sender) {
-    result = await client.getStreamsBySender(opts.sender, {
-      limit: opts.limit,
-      cursor: opts.cursor,
-      activeOnly: opts.status === 'active',
-    });
+    result = await client.getStreamsBySender(
+      opts.sender,
+      { limit: opts.limit, cursor: opts.cursor },
+      { activeOnly: opts.status === 'active' },
+    );
   } else if (opts.recipient) {
     result = await client.getStreamsByRecipient(
       opts.recipient,
@@ -224,11 +203,11 @@ export async function cmdList(
   } else {
     const keypairAdapter = createKeypairAdapter(opts.secret);
     const publicKey = await keypairAdapter.getPublicKey();
-    result = await client.getStreamsBySender(publicKey, {
-      limit: opts.limit,
-      cursor: opts.cursor,
-      activeOnly: opts.status === 'active',
-    });
+    result = await client.getStreamsBySender(
+      publicKey,
+      { limit: opts.limit, cursor: opts.cursor },
+      { activeOnly: opts.status === 'active' },
+    );
   }
 
   printOutput(result, opts.output);

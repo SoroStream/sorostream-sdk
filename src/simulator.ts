@@ -28,9 +28,7 @@ export type StreamExpiryCallback = (stream: Stream) => void;
  * - `insufficientClaimable`: requested amount exceeds the claimable balance.
  */
 export type SimulatedWithdrawFailureReason =
-  | 'storageExpired'
-  | 'streamNotActive'
-  | 'insufficientClaimable';
+  'storageExpired' | 'streamNotActive' | 'insufficientClaimable';
 
 /** Result of {@link StreamSimulator.simulateWithdraw}. */
 export interface SimulatedWithdrawResult {
@@ -44,6 +42,8 @@ export interface SimulatedWithdrawResult {
   reason?: SimulatedWithdrawFailureReason;
   /** Human-readable, actionable explanation when `success` is false. */
   error?: string;
+  /** Ledger sequence the check was evaluated at (`opts.ledger` if given, else the simulator's current ledger). */
+  ledger: number;
 }
 
 /**
@@ -57,6 +57,7 @@ export class StreamSimulator {
   private expiryCallbacks = new Map<string, StreamExpiryCallback>();
   private firedExpiry = new Set<string>();
   private storageTtl = new Map<string, number>();
+  private storageTtlLedger = new Map<string, number>();
 
   /** Current simulated unix timestamp (seconds). */
   now(): number {
@@ -136,10 +137,34 @@ export class StreamSimulator {
     this.storageTtl.delete(streamId);
   }
 
-  /** True when the stream's recorded storage TTL has passed at the simulated time. */
+  /**
+   * Records the contract storage entry TTL for a stream in terms of ledger
+   * sequence number rather than unix timestamp, mirroring the on-chain
+   * `bump_ttl`/TTL-extension model where storage rent is tracked in ledgers.
+   * Independent of {@link setStorageTtl}; a stream may have either, both, or
+   * neither kind of TTL recorded, and expiry under either is sufficient to
+   * fail a simulated withdraw.
+   */
+  setStorageTtlLedger(streamId: string, ledger: number): void {
+    if (ledger < 0) throw new Error('ledger must be >= 0');
+    this.storageTtlLedger.set(streamId, ledger);
+  }
+
+  /** Removes any recorded ledger-based storage TTL for a stream (treated as never expiring). */
+  clearStorageTtlLedger(streamId: string): void {
+    this.storageTtlLedger.delete(streamId);
+  }
+
+  /**
+   * True when the stream's recorded storage TTL has passed — either the
+   * timestamp-based TTL at the given simulated time, or the ledger-based TTL
+   * at the simulator's current ledger sequence.
+   */
   isStorageExpired(streamId: string, at: number = this.now()): boolean {
     const expiresAt = this.storageTtl.get(streamId);
-    return expiresAt !== undefined && at >= expiresAt;
+    if (expiresAt !== undefined && at >= expiresAt) return true;
+    const expiresAtLedger = this.storageTtlLedger.get(streamId);
+    return expiresAtLedger !== undefined && this.currentLedgerSeq >= expiresAtLedger;
   }
 
   /**
@@ -148,9 +173,18 @@ export class StreamSimulator {
    * reports a distinct `storageExpired` failure with an actionable remedy,
    * mirroring the on-chain behaviour where the entry must be restored before
    * the write can succeed.
+   *
+   * `opts.ledger`, when given, is used in place of the simulator's current
+   * ledger sequence for the ledger-based TTL check only — an atomic,
+   * point-in-time check that doesn't mutate simulator state.
    */
-  simulateWithdraw(stream: Stream, amount?: bigint): SimulatedWithdrawResult {
+  simulateWithdraw(
+    stream: Stream,
+    amount?: bigint,
+    opts?: { ledger?: number },
+  ): SimulatedWithdrawResult {
     const claimable = this.claimableAt(stream);
+    const ledger = opts?.ledger ?? this.currentLedgerSeq;
     const fail = (
       reason: SimulatedWithdrawFailureReason,
       error: string,
@@ -160,14 +194,26 @@ export class StreamSimulator {
       claimable,
       reason,
       error,
+      ledger,
     });
 
-    if (this.isStorageExpired(stream.id)) {
-      const expiresAt = this.storageTtl.get(stream.id)!;
+    const expiresAt = this.storageTtl.get(stream.id);
+    const timestampExpired = expiresAt !== undefined && this.now() >= expiresAt;
+    const expiresAtLedger = this.storageTtlLedger.get(stream.id);
+    const ledgerExpired = expiresAtLedger !== undefined && ledger >= expiresAtLedger;
+
+    if (timestampExpired) {
       return fail(
         'storageExpired',
         `Contract storage entry for stream ${stream.id} expired at ${expiresAt} and must be ` +
           `restored (e.g. via a storage-rent top-up) before a withdraw can be submitted.`,
+      );
+    }
+    if (ledgerExpired) {
+      return fail(
+        'storageExpired',
+        `Contract storage entry for stream ${stream.id} expired at ledger ${expiresAtLedger} ` +
+          `and must be restored (e.g. via a storage-rent top-up) before a withdraw can be submitted.`,
       );
     }
     if (stream.status === 'Cancelled' || stream.status === 'Completed') {
@@ -184,7 +230,7 @@ export class StreamSimulator {
         `Requested ${target} exceeds the claimable balance of ${claimable} at the simulated time.`,
       );
     }
-    return { success: true, amount: target, claimable };
+    return { success: true, amount: target, claimable, ledger };
   }
 
   /** Resets the simulated clock to real time and clears expiry-firing state. */
@@ -193,6 +239,6 @@ export class StreamSimulator {
     this.currentLedgerSeq = 0;
     this.firedExpiry.clear();
     this.storageTtl.clear();
-    this.storageTtlLedgers.clear();
+    this.storageTtlLedger.clear();
   }
 }

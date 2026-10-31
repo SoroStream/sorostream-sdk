@@ -12,7 +12,7 @@ describe('Issue #783: contractEncoders.ts requireAddress guard consistency acros
   const encoder = createContractEncoder(contract, 'v1');
 
   // A syntactically valid Stellar Ed25519 public key that does NOT exist on-chain
-  const validNonExistentAddress = 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J';
+  const validNonExistentAddress = 'GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ';
   const malformedAddress = 'invalid-address-format-not-stellar';
 
   it('validates address format consistently and throws InvalidAddressError on malformed address', () => {
@@ -45,24 +45,40 @@ describe('Issue #783: contractEncoders.ts requireAddress guard consistency acros
     const updateFlowOp = encoder.updateFlowRate('1', validNonExistentAddress, 20n);
     expect(updateFlowOp).toBeDefined();
 
-    const setOperatorOp = encoder.setOperator('1', validNonExistentAddress, validNonExistentAddress, true);
+    const setOperatorOp = encoder.setOperator(
+      '1',
+      validNonExistentAddress,
+      validNonExistentAddress,
+      true,
+    );
     expect(setOperatorOp).toBeDefined();
 
-    const transferOp = encoder.transferStream('1', validNonExistentAddress, validNonExistentAddress);
+    const transferOp = encoder.transferStream(
+      '1',
+      validNonExistentAddress,
+      validNonExistentAddress,
+    );
     expect(transferOp).toBeDefined();
 
     const addDelegateOp = encoder.addDelegate(validNonExistentAddress, validNonExistentAddress);
     expect(addDelegateOp).toBeDefined();
 
-    const revokeDelegateOp = encoder.revokeDelegate(validNonExistentAddress, validNonExistentAddress);
+    const revokeDelegateOp = encoder.revokeDelegate(
+      validNonExistentAddress,
+      validNonExistentAddress,
+    );
     expect(revokeDelegateOp).toBeDefined();
   });
 
   it('consistently throws InvalidAddressError across all encoder operations if address is invalid', () => {
     expect(() => encoder.withdraw('1', malformedAddress)).toThrow(InvalidAddressError);
     expect(() => encoder.cancelStream('1', malformedAddress)).toThrow(InvalidAddressError);
-    expect(() => encoder.addDelegate(malformedAddress, validNonExistentAddress)).toThrow(InvalidAddressError);
-    expect(() => encoder.addDelegate(validNonExistentAddress, malformedAddress)).toThrow(InvalidAddressError);
+    expect(() => encoder.addDelegate(malformedAddress, validNonExistentAddress)).toThrow(
+      InvalidAddressError,
+    );
+    expect(() => encoder.addDelegate(validNonExistentAddress, malformedAddress)).toThrow(
+      InvalidAddressError,
+    );
   });
 });
 
@@ -93,11 +109,21 @@ describe('Issue #789: retry.ts retry policy distinguishing 429 rate-limit from g
       throw new Error('429 Too Many Requests');
     });
 
-    const retryPromise429 = withRetry(fn429, { maxAttempts: 3, baseDelayMs: 10, transientOnly: true });
-    
+    const retryPromise429 = withRetry(fn429, {
+      maxAttempts: 3,
+      baseDelayMs: 10,
+      transientOnly: true,
+    });
+    // Attach the rejection assertion before advancing timers, so a handler is
+    // already attached the moment the promise settles — otherwise there's a
+    // window between runAllTimersAsync() settling it and the later `await
+    // expect(...)` attaching a handler, which Node flags as an unhandled
+    // rejection even though it's not a real bug.
+    const assertion429 = expect(retryPromise429).rejects.toThrow();
+
     // Fast forward through backoffs
     await vi.runAllTimersAsync();
-    await expect(retryPromise429).rejects.toThrow();
+    await assertion429;
     expect(attempts429).toBe(3);
 
     let attempts503 = 0;
@@ -106,9 +132,14 @@ describe('Issue #789: retry.ts retry policy distinguishing 429 rate-limit from g
       throw new Error('503 Service Unavailable');
     });
 
-    const retryPromise503 = withRetry(fn503, { maxAttempts: 3, baseDelayMs: 10, transientOnly: true });
+    const retryPromise503 = withRetry(fn503, {
+      maxAttempts: 3,
+      baseDelayMs: 10,
+      transientOnly: true,
+    });
+    const assertion503 = expect(retryPromise503).rejects.toThrow();
     await vi.runAllTimersAsync();
-    await expect(retryPromise503).rejects.toThrow();
+    await assertion503;
     expect(attempts503).toBe(3);
   });
 
@@ -123,7 +154,9 @@ describe('Issue #789: retry.ts retry policy distinguishing 429 rate-limit from g
     });
 
     const fn = vi.fn().mockRejectedValueOnce(new Error('500 Internal Error'));
-    await expect(withRetry(fn, { shouldRetry: customPolicy, maxAttempts: 3 })).rejects.toThrow('500 Internal Error');
+    await expect(withRetry(fn, { shouldRetry: customPolicy, maxAttempts: 3 })).rejects.toThrow(
+      '500 Internal Error',
+    );
     expect(fn).toHaveBeenCalledTimes(1);
     expect(customPolicy).toHaveBeenCalledWith(expect.any(Error));
   });
@@ -138,10 +171,15 @@ describe('Issue #786: writeRateLimiter.ts RateLimitExceededError structured cont
       shared: false,
     });
 
-    // Acquire first token
-    await limiter.acquire('op');
+    // `queueSize` caps how many *waiting* operations are tolerated, not the
+    // total call count. The 1st call consumes the burst allowance (resolves
+    // immediately); the 2nd exceeds it and takes the single queue slot
+    // (waits, then resolves); only a 3rd call arriving while that slot is
+    // still occupied is rejected. Fire all three without awaiting in between
+    // so the 3rd genuinely overlaps the 2nd.
+    const first = limiter.acquire('op');
+    const second = limiter.acquire('op');
 
-    // Second acquire exceeds queue capacity
     try {
       await limiter.acquire('op');
       expect.fail('Should have thrown RateLimitExceededError');
@@ -156,6 +194,8 @@ describe('Issue #786: writeRateLimiter.ts RateLimitExceededError structured cont
       expect(rateLimitErr.queueDepth).toBeGreaterThan(0);
       expect(rateLimitErr.queueLimit).toBe(1);
     }
+
+    await Promise.all([first, second]);
   });
 
   it('rejects when over capacity while preserving normal behavior under capacity', async () => {
@@ -173,9 +213,9 @@ describe('Issue #788: streaming deserialization handling truncated mid-record pa
   it('correctly deserializes non-truncated full stream JSON payload', () => {
     const validStream: Stream = {
       id: 'stream-1',
-      sender: 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J',
-      recipient: 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J',
-      token: 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J',
+      sender: 'GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ',
+      recipient: 'GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ',
+      token: 'GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ',
       deposit: 1000n,
       flowRate: 10n,
       startTime: 1000,
@@ -199,8 +239,8 @@ describe('Issue #788: streaming deserialization handling truncated mid-record pa
   it('throws when stream payload is truncated mid-record', () => {
     const fullJson = JSON.stringify({
       id: 'stream-1',
-      sender: 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J',
-      recipient: 'GBJ6W7PZ22C3Y7GZ5S7L6Z7V4O7F5B6X7Y8Z9A0B1C2D3E4F5G6H7I8J',
+      sender: 'GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ',
+      recipient: 'GAHTD27MNDKJN5YSGH4IAVPNC2L3U4XZEHSLFERDVZKIS3RXQT3DHAJJ',
       deposit: '1000',
       flowRate: '10',
     });

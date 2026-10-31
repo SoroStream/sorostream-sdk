@@ -59,11 +59,11 @@ describe('OfflineQueue FIFO-within-priority ordering (issue #731)', () => {
     const { queue } = makeQueue();
 
     // Enqueue in a mixed order to expose ordering bugs
-    queue.enqueue('med-1', exec('med-1'), 5);  // priority 5, inserted 1st
-    queue.enqueue('low-1', exec('low-1'), 1);  // priority 1, inserted 2nd
+    queue.enqueue('med-1', exec('med-1'), 5); // priority 5, inserted 1st
+    queue.enqueue('low-1', exec('low-1'), 1); // priority 1, inserted 2nd
     queue.enqueue('high-1', exec('high-1'), 10); // priority 10, inserted 3rd
-    queue.enqueue('med-2', exec('med-2'), 5);  // priority 5, inserted 4th
-    queue.enqueue('low-2', exec('low-2'), 1);  // priority 1, inserted 5th
+    queue.enqueue('med-2', exec('med-2'), 5); // priority 5, inserted 4th
+    queue.enqueue('low-2', exec('low-2'), 1); // priority 1, inserted 5th
     queue.enqueue('high-2', exec('high-2'), 10); // priority 10, inserted 6th
 
     const event = await queue.drain();

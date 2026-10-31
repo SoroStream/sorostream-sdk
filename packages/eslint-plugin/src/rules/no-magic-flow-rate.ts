@@ -61,7 +61,7 @@ const rule: Rule.RuleModule = {
   create(context) {
     return {
       // Check for flowRate property in object literals and updateFlowRate calls
-      Property(node: Rule.Node) {
+      Property(node: Extract<Rule.Node, { type: 'Property' }>) {
         // Handle object properties like: flowRate: 1000000
         if (
           node.key &&
@@ -69,14 +69,14 @@ const rule: Rule.RuleModule = {
           node.key.name === 'flowRate' &&
           node.value
         ) {
-          if (isNumericLiteral(node.value)) {
-            context.report({ node: node.value, messageId: 'magicFlowRate' });
+          if (isNumericLiteral(node.value as Rule.Node)) {
+            context.report({ node: node.value as Rule.Node, messageId: 'magicFlowRate' });
           }
         }
       },
 
       // Check for updateFlowRate calls with numeric literals
-      CallExpression(node: Rule.Node) {
+      CallExpression(node: Extract<Rule.Node, { type: 'CallExpression' }>) {
         if (
           node.callee.type === 'MemberExpression' &&
           !node.callee.computed &&
@@ -84,7 +84,7 @@ const rule: Rule.RuleModule = {
           node.callee.property.name === 'updateFlowRate' &&
           node.arguments.length === 1
         ) {
-          const arg = node.arguments[0];
+          const arg = node.arguments[0]!;
           if (arg.type === 'ObjectExpression') {
             // Look for flowRate property in the argument object
             for (const prop of arg.properties) {
@@ -95,8 +95,8 @@ const rule: Rule.RuleModule = {
                 prop.key.name === 'newFlowRate' &&
                 prop.value
               ) {
-                if (isNumericLiteral(prop.value)) {
-                  context.report({ node: prop.value, messageId: 'magicFlowRate' });
+                if (isNumericLiteral(prop.value as Rule.Node)) {
+                  context.report({ node: prop.value as Rule.Node, messageId: 'magicFlowRate' });
                 }
               }
             }

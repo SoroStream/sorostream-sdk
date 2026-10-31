@@ -8,7 +8,6 @@ import {
   cmdCancel,
   cmdTopUp,
   cmdClaimable,
-  cmdForecast,
   cmdStreamCreate,
 } from './commands.js';
 import { cmdAnalyze } from './analyze.js';
@@ -112,16 +111,6 @@ program
   .action(async (streamId) => {
     const opts = program.opts<GlobalOptions>();
     await cmdClaimable(opts, streamId);
-  });
-
-// --- forecast --------------------------------------------------------------
-program
-  .command('forecast')
-  .description('Get the renewal forecast for an auto-renewing stream')
-  .argument('<streamId>', 'Stream ID')
-  .action(async (streamId) => {
-    const opts = program.opts<GlobalOptions>();
-    await cmdForecast(opts, streamId);
   });
 
 // --- analyze ---------------------------------------------------------------

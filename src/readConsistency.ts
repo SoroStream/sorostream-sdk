@@ -123,10 +123,13 @@ export async function waitForLedger(
         cleanup();
         reject(abortError());
       };
-      timer = setTimeout(() => {
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      }, Math.min(pollIntervalMs, remaining));
+      timer = setTimeout(
+        () => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        },
+        Math.min(pollIntervalMs, remaining),
+      );
       signal?.addEventListener('abort', onAbort, { once: true });
       if (signal?.aborted) onAbort();
     });

@@ -146,7 +146,9 @@ describe('React and Vue useWithdraw parity (#770)', () => {
       expect(client.withdraw).toHaveBeenNthCalledWith(1, { streamId: '42' });
       expect(client.withdraw).toHaveBeenNthCalledWith(2, { streamId: '42' });
       expect(reactHook.result.current.loading).toBe(vueHook.submitting.value);
-      expect(reactHook.result.current.error?.message ?? null).toBe(vueHook.error.value?.message ?? null);
+      expect(reactHook.result.current.error?.message ?? null).toBe(
+        vueHook.error.value?.message ?? null,
+      );
       expect(reactHook.result.current.txResult).toEqual(response);
       expect({ txHash: vueHook.txHash.value, amount: vueHook.amount.value }).toEqual(response);
     } finally {

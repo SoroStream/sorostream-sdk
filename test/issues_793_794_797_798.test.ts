@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PluginRegistry } from '../src/pluginRegistry.js';
 import type { SoroStreamPlugin } from '../src/types.js';
-import { setupExpoPolyfills, createFreighterMobileAdapter } from '../packages/react-native/src/index.js';
+import {
+  setupExpoPolyfills,
+  createFreighterMobileAdapter,
+} from '../packages/react-native/src/index.js';
 
 describe('Issue #798: setupExpoPolyfills idempotency', () => {
   let originalCrypto: unknown;

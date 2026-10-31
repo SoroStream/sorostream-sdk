@@ -56,12 +56,8 @@ import { assertStellarAddress } from '../../../src/utils.js';
 // Test fixtures
 // ---------------------------------------------------------------------------
 
-const RECIPIENT = assertStellarAddress(
-  'GAXXZ5XSL2VTQPGWB3LPU5273HSJXMK7VHLZTF2XKW65QFZVA3XKULQZ',
-);
-const TOKEN = assertStellarAddress(
-  'CAVTXNC2WCHINDNP4VBLSOQA2667VE3RPQZNGD5TFI4U2QSHTVAC667T',
-);
+const RECIPIENT = assertStellarAddress('GAXXZ5XSL2VTQPGWB3LPU5273HSJXMK7VHLZTF2XKW65QFZVA3XKULQZ');
+const TOKEN = assertStellarAddress('CAVTXNC2WCHINDNP4VBLSOQA2667VE3RPQZNGD5TFI4U2QSHTVAC667T');
 
 /** Returns a baseline valid params object; each test overrides only what it tests. */
 function valid(overrides: Partial<CreateStreamParams> = {}): CreateStreamParams {
@@ -126,21 +122,21 @@ describe('validateCreateStreamParams (#800) — happy path', () => {
 
 describe('validateCreateStreamParams (#800) — null / missing params', () => {
   it('rejects null params (mirrors contract: must be a non-null object)', () => {
-    expect(() =>
-      validateCreateStreamParams(null as unknown as CreateStreamParams),
-    ).toThrow(/must be a non-null object/i);
+    expect(() => validateCreateStreamParams(null as unknown as CreateStreamParams)).toThrow(
+      /must be a non-null object/i,
+    );
   });
 
   it('rejects undefined params', () => {
-    expect(() =>
-      validateCreateStreamParams(undefined as unknown as CreateStreamParams),
-    ).toThrow(/must be a non-null object/i);
+    expect(() => validateCreateStreamParams(undefined as unknown as CreateStreamParams)).toThrow(
+      /must be a non-null object/i,
+    );
   });
 
   it('rejects a primitive string instead of params object', () => {
-    expect(() =>
-      validateCreateStreamParams('bad' as unknown as CreateStreamParams),
-    ).toThrow(/must be a non-null object/i);
+    expect(() => validateCreateStreamParams('bad' as unknown as CreateStreamParams)).toThrow(
+      /must be a non-null object/i,
+    );
   });
 });
 
@@ -186,9 +182,9 @@ describe('validateCreateStreamParams (#800) — token', () => {
   });
 
   it('rejects a whitespace-only token', () => {
-    expect(() =>
-      validateCreateStreamParams(valid({ token: '   ' as typeof TOKEN })),
-    ).toThrow(/token is required/i);
+    expect(() => validateCreateStreamParams(valid({ token: '   ' as typeof TOKEN }))).toThrow(
+      /token is required/i,
+    );
   });
 
   it('rejects undefined token', () => {
@@ -288,9 +284,9 @@ describe('validateCreateStreamParams (#800) — autoRenew', () => {
   });
 
   it('rejects autoRenew as a number 1', () => {
-    expect(() =>
-      validateCreateStreamParams(valid({ autoRenew: 1 as unknown as boolean })),
-    ).toThrow(/autoRenew is required/i);
+    expect(() => validateCreateStreamParams(valid({ autoRenew: 1 as unknown as boolean }))).toThrow(
+      /autoRenew is required/i,
+    );
   });
 
   it('rejects autoRenew as null', () => {

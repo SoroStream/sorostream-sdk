@@ -1,5 +1,12 @@
 import type { Rule } from 'eslint';
 
+// Deliberately returns a plain `boolean`, not a type predicate: this helper
+// is called twice in sequence against the same `node` with different
+// `methodName` values (see below), and a type predicate's false-branch
+// narrowing from the first call would permanently exclude CallExpression
+// from `node`'s type before the second call ever runs, making it resolve to
+// `never`. The CallExpression shape needed by the fixer is asserted
+// explicitly at its one call site instead.
 function isMethodCall(node: Rule.Node, methodName: string): boolean {
   return (
     node.type === 'CallExpression' &&
@@ -59,24 +66,31 @@ const rule: Rule.RuleModule = {
           return;
         }
         if (isMethodCall(node, 'withdraw')) {
+          // isMethodCall() returning true here guarantees node.type ===
+          // 'CallExpression' at runtime; assert it explicitly since
+          // isMethodCall is deliberately typed as returning a plain boolean
+          // (see its definition above).
+          const withdrawNode = node as Extract<Rule.Node, { type: 'CallExpression' }>;
           const checked = scopeStack[scopeStack.length - 1];
           if (!checked) {
             context.report({
-              node,
+              node: withdrawNode,
               messageId: 'missingCheck',
               fix(fixer) {
                 // Get the source code
                 const sourceCode = context.getSourceCode();
 
                 // Extract arguments from the withdraw call
-                const args = node.arguments.map((arg) => sourceCode.getText(arg)).join(', ');
+                const args = withdrawNode.arguments
+                  .map((arg) => sourceCode.getText(arg))
+                  .join(', ');
 
                 // Create the getClaimable call with proper await
                 const getClaimableCall = `await client.getClaimable(${args});`;
 
                 // Try to get the parent statement to insert before it properly
                 // The structure should be: ExpressionStatement -> AwaitExpression -> CallExpression (node)
-                let parentStmt = node.parent;
+                let parentStmt: Rule.Node | null = withdrawNode.parent;
                 while (parentStmt && parentStmt.type !== 'ExpressionStatement') {
                   parentStmt = parentStmt.parent;
                 }
@@ -93,7 +107,7 @@ const rule: Rule.RuleModule = {
                   return fixer.insertTextBefore(parentStmt, `${getClaimableCall}\n${indentation}`);
                 } else {
                   // Fallback: insert before the withdraw call expression (original approach)
-                  return fixer.insertTextBefore(node, `${getClaimableCall} `);
+                  return fixer.insertTextBefore(withdrawNode, `${getClaimableCall} `);
                 }
               },
             });

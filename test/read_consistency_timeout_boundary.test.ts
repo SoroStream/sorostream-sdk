@@ -23,10 +23,7 @@ import { waitForLedger } from '../src/readConsistency.js';
  * is made.  This lets us simulate a ledger that "arrives" at a precise
  * virtual timestamp without any real I/O.
  */
-function makeMockServer(
-  schedule: Array<{ atMs: number; sequence: number }>,
-  baseMs = 0,
-) {
+function makeMockServer(schedule: Array<{ atMs: number; sequence: number }>, baseMs = 0) {
   return {
     getLatestLedger: vi.fn().mockImplementation(async () => {
       const now = Date.now() - baseMs;
@@ -74,10 +71,7 @@ describe('waitForLedger – timeoutMs boundary (#730)', () => {
     const targetSequence = 10;
     const startMs = Date.now(); // captured before advancing fake clock
 
-    const server = makeMockServer(
-      [{ atMs: timeoutMs, sequence: targetSequence }],
-      startMs,
-    );
+    const server = makeMockServer([{ atMs: timeoutMs, sequence: targetSequence }], startMs);
 
     const promise = waitForLedger(server, targetSequence, {
       timeoutMs,
@@ -226,8 +220,6 @@ describe('waitForLedger – timeoutMs boundary (#730)', () => {
 
     await vi.advanceTimersByTimeAsync(timeoutMs + 1);
 
-    await expect(promise).rejects.toThrow(
-      /waitForLedger: timed out after 100ms/,
-    );
+    await expect(promise).rejects.toThrow(/waitForLedger: timed out after 100ms/);
   });
 });

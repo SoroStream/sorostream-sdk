@@ -525,4 +525,3 @@ export function withBackpressure<T>(
 ): (source: SoroStreamObservable<T>) => SoroStreamObservable<T> {
   return (source: SoroStreamObservable<T>) => source.withBackpressure(options);
 }
-
