@@ -123,7 +123,15 @@ export type {
 } from './templates.js';
 export { serializeStream, deserializeStream, buildUnsignedXdr } from './serialization.js';
 export type { SerializedStream } from './serialization.js';
-export { ScValCache, cachedScVal, cachedBool, cachedScValBase64 } from './scValCache.js';
+export {
+  ScValCache,
+  cachedScVal,
+  cachedBool,
+  cachedScValBase64,
+  invalidateCachedScVal,
+  invalidateCachedAddress,
+} from './scValCache.js';
+export type { ScValType } from './scValCache.js';
 export type { BuildUnsignedXdrParams } from './types.js';
 export { getTransactionHistory, getAddressActivity } from './horizon.js';
 export type {

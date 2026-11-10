@@ -70,7 +70,17 @@ import { nativeToScVal, xdr } from '@stellar/stellar-sdk';
 
 const DEFAULT_MAX_SIZE = 256;
 
-type ScValType = 'address' | 'u64' | 'i128' | 'u32' | 'symbol' | 'string' | 'bool';
+export type ScValType = 'address' | 'u64' | 'i128' | 'u32' | 'symbol' | 'string' | 'bool';
+
+const ALL_SCVAL_TYPES: readonly ScValType[] = [
+  'address',
+  'u64',
+  'i128',
+  'u32',
+  'symbol',
+  'string',
+  'bool',
+];
 
 export class ScValCache {
   private readonly cache = new Map<string, xdr.ScVal>();
@@ -100,6 +110,54 @@ export class ScValCache {
     return scVal;
   }
 
+  /**
+   * Check whether a cached entry exists for `value` and `type` without
+   * altering LRU ordering.
+   */
+  has(value: unknown, type: ScValType): boolean {
+    return this.cache.has(`${type}:${String(value)}`);
+  }
+
+  /**
+   * Invalidate cached entry/entries for a single value without clearing
+   * unrelated hot entries (issue #679).
+   *
+   * - When `type` is provided, removes only `"${type}:${String(value)}"`.
+   * - When `type` is omitted, removes entries matching `String(value)` across
+   *   all supported `ScValType` prefixes.
+   *
+   * @returns The number of removed entries.
+   */
+  invalidate(value: unknown, type?: ScValType): number {
+    const strVal = String(value);
+    if (type !== undefined) {
+      return this.cache.delete(`${type}:${strVal}`) ? 1 : 0;
+    }
+
+    let removed = 0;
+    for (const candidateType of ALL_SCVAL_TYPES) {
+      if (this.cache.delete(`${candidateType}:${strVal}`)) {
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * Invalidate all cached `ScVal` entries associated with a single Stellar
+   * address (issue #679).
+   *
+   * Removes `"address:<address>"` as well as any other cached representation
+   * (such as `"string:<address>"` or `"symbol:<address>"`) for that address,
+   * leaving all other cached entries and their LRU order intact.
+   *
+   * @returns The number of removed entries.
+   */
+  invalidateAddress(address: string): number {
+    if (!address) return 0;
+    return this.invalidate(address);
+  }
+
   clear(): void {
     this.cache.clear();
   }
@@ -119,6 +177,35 @@ const globalCache = new ScValCache();
  */
 export function cachedScVal(value: unknown, type: ScValType): xdr.ScVal {
   return globalCache.get(value, type);
+}
+
+/**
+ * Invalidate cached `ScVal` (and base64 XDR) entries for a specific value
+ * (optionally scoped to `type`) in the shared global cache (issue #679).
+ *
+ * @returns The number of entries removed from the global `ScValCache`.
+ */
+export function invalidateCachedScVal(value: unknown, type?: ScValType): number {
+  const strVal = String(value);
+  if (type !== undefined) {
+    xdrBase64Cache.delete(`${type}:${strVal}`);
+  } else {
+    for (const candidateType of ALL_SCVAL_TYPES) {
+      xdrBase64Cache.delete(`${candidateType}:${strVal}`);
+    }
+  }
+  return globalCache.invalidate(value, type);
+}
+
+/**
+ * Invalidate all cached `ScVal` (and base64 XDR) entries for a single Stellar
+ * address in the shared global cache when its account state changes (issue #679).
+ *
+ * @returns The number of entries removed from the global `ScValCache`.
+ */
+export function invalidateCachedAddress(address: string): number {
+  if (!address) return 0;
+  return invalidateCachedScVal(address);
 }
 
 // Pre-warm boolean singletons — these never change.

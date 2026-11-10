@@ -29,6 +29,28 @@ The default capacity is `DEFAULT_MAX_SIZE = 256`.
 
 ---
 
+## Scoped Invalidation (`invalidate` / `invalidateAddress`)
+
+When a single account's state changes (for example after a sequence number bump,
+trustline update, or key rotation), callers can evict only the entries tied to
+that address/value instead of clearing all 256 cached entries (issue #679):
+
+```ts
+import { ScValCache, invalidateCachedAddress, invalidateCachedScVal } from 'sorostream-sdk';
+
+const cache = new ScValCache();
+cache.invalidateAddress('GABC...'); // removes 'address:GABC...' (and any string/symbol entry for that address)
+cache.invalidate(100n, 'u64'); // removes only 'u64:100'
+
+// Or against the process-wide singleton cache:
+invalidateCachedAddress('GABC...');
+invalidateCachedScVal(100n, 'u64');
+```
+
+Unrelated entries and their relative LRU ordering remain untouched.
+
+---
+
 ## Choosing `maxSize`
 
 Each cached entry consists of a string key (`"<type>:<value>"`, e.g.
