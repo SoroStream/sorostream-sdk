@@ -449,3 +449,19 @@ export type {
   ReplayingRpcTransport,
   ReplayOptions,
 } from './replayTransport.js';
+
+// ── Issue #681: Offline queue persistence across reloads ────────────────────
+export {
+  OfflineWriteQueue,
+  OfflineQueue,
+  DEFAULT_QUEUE_OPTIONS,
+  DEFAULT_OFFLINE_QUEUE_STORAGE_KEY,
+} from './offlineQueue.js';
+export type {
+  QueuedOperation,
+  SerializedQueuedOperation,
+  OfflineQueuePersistenceAdapter,
+  OfflineQueueOptions,
+  QueueReplayResult,
+  QueueDrainedEvent,
+} from './offlineQueue.js';
