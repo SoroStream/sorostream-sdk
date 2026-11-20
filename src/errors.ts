@@ -68,12 +68,19 @@ export class TransactionFailedError extends SoroStreamError {
 export class RateLimitExceededError extends SoroStreamError {
   readonly queueDepth: number;
   readonly queueLimit: number;
+  /**
+   * Minimum number of milliseconds the caller should wait before retrying,
+   * derived from the write-rate limiter's configured interval. Provided as a
+   * hint for backoff/retry UX; not a guarantee of success on retry.
+   */
+  readonly suggestedRetryAfterMs: number;
 
-  constructor(queueDepth: number, queueLimit: number) {
+  constructor(queueDepth: number, queueLimit: number, suggestedRetryAfterMs: number) {
     super(`Rate limit exceeded: ${queueDepth}/${queueLimit}`);
     this.name = 'RateLimitExceededError';
     this.queueDepth = queueDepth;
     this.queueLimit = queueLimit;
+    this.suggestedRetryAfterMs = suggestedRetryAfterMs;
   }
 }
 
