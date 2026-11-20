@@ -18,4 +18,21 @@ describe('verifyManifest', () => {
     });
     expect(resolver).toHaveBeenCalledWith('index.js');
   });
+
+  it('reports a passing hash from a fetched resource resolver', async () => {
+    const content = 'expected';
+    const manifest: IntegrityManifest = {
+      package: '@sorostream/sdk',
+      version: '0.1.0',
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      files: [{ file: 'index.js', sha256: computeSha256(content), size: content.length }],
+    };
+    const resolver = vi.fn().mockResolvedValue(new Response(content));
+
+    await expect(verifyManifest(manifest, resolver)).resolves.toEqual({
+      valid: true,
+      failures: [],
+    });
+    expect(resolver).toHaveBeenCalledWith('index.js');
+  });
 });

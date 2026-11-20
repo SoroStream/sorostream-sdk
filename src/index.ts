@@ -125,11 +125,12 @@ export { serializeStream, deserializeStream, buildUnsignedXdr } from './serializ
 export type { SerializedStream } from './serialization.js';
 export { ScValCache, cachedScVal, cachedBool, cachedScValBase64 } from './scValCache.js';
 export type { BuildUnsignedXdrParams } from './types.js';
-export { getTransactionHistory, getAddressActivity } from './horizon.js';
+export { getTransactionHistory, getAddressActivity, resolveHorizonUrl } from './horizon.js';
 export type {
   StreamTransaction,
   TransactionHistoryPage,
   TransactionHistoryOptions,
+  HorizonUrlOverrides,
 } from './horizon.js';
 export { CircuitBreaker } from './circuitBreaker.js';
 export { withRetry, RetryBackoff, isTransientRpcError, computeBackoffDelay } from './retry.js';
@@ -426,7 +427,11 @@ export {
   verifyFileIntegrity,
   verifyManifest,
 } from './bundleIntegrity.js';
-export type { IntegrityEntry, IntegrityManifest } from './bundleIntegrity.js';
+export type {
+  IntegrityEntry,
+  IntegrityManifest,
+  ManifestResourceResolver,
+} from './bundleIntegrity.js';
 
 // ── Issue #758: Gas/fee profiler ─────────────────────────────────────────────
 export { GasProfiler } from './profiler.js';
