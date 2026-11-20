@@ -951,13 +951,19 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       }
     }
 
-    // Issue #260: Initialize offline write queue if enabled
+    // Issue #260 / #681: Initialize offline write queue if enabled
     if (options.offlineQueue) {
+      const offlineStorage =
+        options.adapters?.storage !== undefined
+          ? options.adapters.storage
+          : getDefaultStorageAdapter();
       this.offlineQueue = new OfflineWriteQueue(
         {
           enabled: true,
           maxQueueSize: options.maxQueueSize ?? DEFAULT_QUEUE_OPTIONS.maxQueueSize,
           healthCheckIntervalMs: DEFAULT_QUEUE_OPTIONS.healthCheckIntervalMs,
+          storage: offlineStorage,
+          storageKey: `sorostream:offline_queue:${this.network}:${options.contractId}`,
         },
         this.eventBus,
       );

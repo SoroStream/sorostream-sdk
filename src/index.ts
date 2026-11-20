@@ -449,3 +449,13 @@ export type {
   ReplayingRpcTransport,
   ReplayOptions,
 } from './replayTransport.js';
+
+// ── Issue #396 / #756: Decimal-aware stroop conversion utilities ────────────
+export {
+  toStroopsForToken,
+  fromStroopsForToken,
+  getTokenDecimals,
+  convertToTokenUnits,
+  formatTokenAmount,
+} from './decimalAware.js';
+export type { TokenMetadataProvider } from './decimalAware.js';
