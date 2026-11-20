@@ -95,3 +95,96 @@ describe('ScValCache (issue #616)', () => {
     expect(xdrBytes.length).toBeGreaterThan(0);
   });
 });
+
+// ── Issue #679: per-entry and per-address invalidation ────────────────────────
+
+describe('ScValCache per-entry invalidation (#679)', () => {
+  const ADDR_1 = 'GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF';
+  const ADDR_2 = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
+
+  it('delete(value, type) removes the specific entry and returns true', () => {
+    const cache = new ScValCache();
+    cache.get('sym1', 'symbol');
+    cache.get('sym2', 'symbol');
+    expect(cache.size).toBe(2);
+
+    const deleted = cache.delete('sym1', 'symbol');
+    expect(deleted).toBe(true);
+    expect(cache.size).toBe(1);
+  });
+
+  it('delete returns false when the entry is not cached', () => {
+    const cache = new ScValCache();
+    expect(cache.delete('nonexistent', 'symbol')).toBe(false);
+  });
+
+  it('delete invalidates only the targeted entry, not unrelated entries', () => {
+    const cache = new ScValCache();
+    cache.get(1n, 'u64');
+    cache.get(2n, 'u64');
+    cache.get('sym', 'symbol');
+    expect(cache.size).toBe(3);
+
+    cache.delete(1n, 'u64');
+    expect(cache.size).toBe(2);
+
+    // Other entries are unaffected.
+    const two = cache.get(2n, 'u64');
+    const sym = cache.get('sym', 'symbol');
+    expect(two).toBeDefined();
+    expect(sym).toBeDefined();
+  });
+
+  it('after delete, re-fetching the value computes a fresh ScVal instance', () => {
+    const cache = new ScValCache();
+    const original = cache.get('StreamCreated', 'symbol');
+    cache.delete('StreamCreated', 'symbol');
+    const refetched = cache.get('StreamCreated', 'symbol');
+    // Not the same object — was evicted and recomputed.
+    expect(refetched).not.toBe(original);
+  });
+
+  it('deleteByAddress removes an address entry without touching other types', () => {
+    const cache = new ScValCache();
+    cache.get(ADDR_1, 'address');
+    cache.get(ADDR_2, 'address');
+    cache.get(42n, 'u64');
+    expect(cache.size).toBe(3);
+
+    const removed = cache.deleteByAddress(ADDR_1);
+    expect(removed).toBe(true);
+    expect(cache.size).toBe(2);
+
+    // ADDR_2 and u64 entry survive.
+    expect(cache.get(ADDR_2, 'address')).toBeDefined();
+    expect(cache.get(42n, 'u64')).toBeDefined();
+  });
+
+  it('deleteByAddress returns false for an address not in the cache', () => {
+    const cache = new ScValCache();
+    expect(cache.deleteByAddress(ADDR_1)).toBe(false);
+  });
+
+  it('delete does not interfere with LRU eviction order after the entry is removed', () => {
+    const cache = new ScValCache(3);
+    cache.get('a', 'symbol');
+    cache.get('b', 'symbol');
+    cache.get('c', 'symbol');
+
+    // Delete 'a' manually.
+    cache.delete('a', 'symbol');
+    expect(cache.size).toBe(2);
+
+    // Insert 'd' — no eviction needed (size is 2, limit is 3).
+    cache.get('d', 'symbol');
+    expect(cache.size).toBe(3);
+
+    // Insert 'e' — now full; LRU is 'b' (oldest remaining).
+    cache.get('e', 'symbol');
+    expect(cache.size).toBe(3);
+
+    // 'c' and 'd' and 'e' should be present; 'b' was evicted.
+    const c = cache.get('c', 'symbol');
+    expect(c).toBeDefined();
+  });
+});
