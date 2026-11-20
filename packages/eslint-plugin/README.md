@@ -40,7 +40,7 @@ export default [
   {
     plugins: { "@sorostream": sorostream },
     rules: {
-      "@sorostream/no-withdraw-without-claimable-check": "error",
+      "@sorostream/require-claimable-before-withdraw": "error",
       "@sorostream/await-async-sdk-methods": "error",
       "@sorostream/no-hardcoded-contract-id": "warn",
     },
@@ -50,9 +50,11 @@ export default [
 
 ## Rules
 
-### `no-withdraw-without-claimable-check`
+### `require-claimable-before-withdraw` (fixable)
 
 Warns when `withdraw` is called without a preceding `getClaimable` call in the same function scope. Calling `withdraw` blind risks a wasteful zero-amount transaction.
+
+> **Note:** `no-withdraw-without-claimable-check` is a deprecated alias without auto-fix; prefer `require-claimable-before-withdraw`.
 
 ```js
 // ❌ Incorrect
