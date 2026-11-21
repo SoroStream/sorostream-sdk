@@ -6,6 +6,7 @@ export type {
   SoroStreamConfigUpdate,
   ConfigUpdatedEvent,
   CreateStreamsParams,
+  CreateClientOptions,
 } from './SoroStreamClient.js';
 export type {
   StorageAdapter,
@@ -449,3 +450,14 @@ export type {
   ReplayingRpcTransport,
   ReplayOptions,
 } from './replayTransport.js';
+
+// ── Issue #762: Project-level config file support ───────────────────────────
+// `loadSorostreamConfig` reads a `sorostream.config.*` file from the project
+// root and `mergeSorostreamConfig` applies it as defaults over runtime options.
+// Both are also invoked automatically by `createClient` before constructing
+// the client, so a config file actually takes effect without manual wiring.
+export {
+  loadSorostreamConfig,
+  mergeSorostreamConfig,
+} from './sorostream-config.js';
+export type { SorostreamConfig } from './sorostream-config.js';
