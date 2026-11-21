@@ -69,6 +69,17 @@ async function claim(client, streamId) {
 }
 ```
 
+Scope is tracked per function: a `getClaimable` call in an outer function does **not** satisfy a `withdraw` call inside a nested function (including arrow callbacks), because each nested function starts with its own unchecked scope.
+
+```js
+// ❌ Reported — the check lives in the outer function, not the arrow
+async function claim(client, streamId) {
+  await client.getClaimable(streamId);
+  const run = async () => client.withdraw(streamId);
+  await run();
+}
+```
+
 ### `await-async-sdk-methods`
 
 Warns when a known SDK async method (`createStream`, `withdraw`, `getStream`, `getClaimable`, `batchWithdraw`, etc.) is called as a bare statement without `await` — an unhandled rejection risk.
