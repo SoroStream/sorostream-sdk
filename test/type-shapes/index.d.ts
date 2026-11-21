@@ -1,6 +1,6 @@
 export { VERSION, SDK_VERSION } from './version.js';
 export { SoroStreamClient, createClient } from './SoroStreamClient.js';
-export type { SoroStreamClientOptions, SimulateOnlyResult, SoroStreamConfigUpdate, ConfigUpdatedEvent, CreateStreamsParams, } from './SoroStreamClient.js';
+export type { SoroStreamClientOptions, SimulateOnlyResult, SoroStreamConfigUpdate, ConfigUpdatedEvent, CreateStreamsParams, CreateClientOptions, } from './SoroStreamClient.js';
 export type { StorageAdapter, WebSocketFactory, FetchAdapter, SoroStreamAdapters, } from './adapters.js';
 export { createDefaultRpcTransport, createRetryingRpcTransport, createPooledRpcTransport, } from './transport.js';
 export type { RpcTransportAdapter, RpcTransportInitContext, RpcTransportGetEventsRequest, } from './transport.js';
@@ -79,4 +79,6 @@ export type { SimulationProfile, ProfileReport, ProfilerConfig } from './profile
 export { RateLimiter } from './rate-limiter.js';
 export { ReplayTransport, ReplayFixtureError, ReplayFixtureParseError } from './replayTransport.js';
 export type { FixtureEntry, FixtureFile, RecordTransportOptions, RecordingRpcTransport, ReplayingRpcTransport, ReplayOptions, } from './replayTransport.js';
+export { loadSorostreamConfig, mergeSorostreamConfig, } from './sorostream-config.js';
+export type { SorostreamConfig } from './sorostream-config.js';
 //# sourceMappingURL=index.d.ts.map
