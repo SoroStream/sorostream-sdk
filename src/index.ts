@@ -6,6 +6,7 @@ export type {
   SoroStreamConfigUpdate,
   ConfigUpdatedEvent,
   CreateStreamsParams,
+  CreateClientOptions,
 } from './SoroStreamClient.js';
 export type {
   StorageAdapter,

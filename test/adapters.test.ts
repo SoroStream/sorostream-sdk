@@ -31,11 +31,14 @@ function makeMemoryStorageAdapter(): StorageAdapter {
 }
 
 describe('createClient', () => {
-  it('returns a SoroStreamClient instance equivalent to `new SoroStreamClient(...)`', () => {
-    const client = createClient({
+  it('returns a SoroStreamClient instance equivalent to `new SoroStreamClient(...)`', async () => {
+    const client = await createClient({
       network: 'testnet',
       contractId: VALID_CONTRACT,
       walletAdapter: makeAdapter(),
+      // No config file on disk in test environment — skip the file search to
+      // keep the test fast and avoid spurious file-system hits.
+      skipConfigFile: true,
     });
     expect(client).toBeInstanceOf(SoroStreamClient);
   });
