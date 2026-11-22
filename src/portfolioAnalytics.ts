@@ -19,6 +19,15 @@ function isActiveNonExpired(s: Stream): boolean {
  * Aggregates portfolio-level statistics for all streams belonging to the
  * given address.
  *
+ * Paused streams count as active for `activeSentCount`, `activeReceivedCount`
+ * and `totalClaimable` (funds accrued before the pause remain claimable), but
+ * are excluded from `totalMonthlyOutflow`/`totalMonthlyInflow` because their
+ * flow rate is not currently accruing.
+ *
+ * Sent and received streams are aggregated independently and are not
+ * deduplicated: a self-stream (sender === recipient) returned by both
+ * fetchers contributes to both the sent and received totals.
+ *
  * @param address - The Stellar address to query.
  * @param getStreamsBySender - Async function returning all streams sent by `address`.
  * @param getStreamsByRecipient - Async function returning all streams received by `address`.
@@ -46,12 +55,14 @@ export async function getPortfolioStats(
   // Monthly outflow = sum over active sent streams of (flowRate * 30 days)
   let totalMonthlyOutflow = 0n;
   for (const s of activeSent) {
+    if (s.status === 'Paused') continue;
     totalMonthlyOutflow += safeClaimable(s.flowRate, BigInt(SECONDS_PER_MONTH));
   }
 
   // Monthly inflow = sum over active received streams of (flowRate * 30 days)
   let totalMonthlyInflow = 0n;
   for (const s of activeReceived) {
+    if (s.status === 'Paused') continue;
     totalMonthlyInflow += safeClaimable(s.flowRate, BigInt(SECONDS_PER_MONTH));
   }
 

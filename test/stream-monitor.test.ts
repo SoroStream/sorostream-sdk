@@ -38,3 +38,44 @@ describe('StreamMonitor low-balance debounce (#712)', () => {
     monitor.stop();
   });
 });
+
+describe('StreamMonitor.addStreams (#917)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('is idempotent when adding an already-monitored stream ID', async () => {
+    vi.useFakeTimers();
+    const stream = {
+      id: 'stream-1',
+      status: 'active',
+      endTime: Math.floor(Date.now() / 1_000) + 60,
+    } as Stream;
+    const getStream = vi.fn().mockResolvedValue(stream);
+    const monitor = new StreamMonitor(
+      ['stream-1'],
+      {
+        getStream,
+        getClaimable: vi.fn().mockResolvedValue(0n),
+      },
+      {
+        pollIntervalMs: 20,
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getStream).toHaveBeenCalledTimes(1);
+
+    getStream.mockClear();
+    monitor.addStreams(['stream-1']);
+
+    const internalStreamIds = (monitor as unknown as { streamIds: string[] }).streamIds;
+    expect(internalStreamIds).toEqual(['stream-1']);
+
+    await vi.advanceTimersByTimeAsync(20);
+    expect(getStream).toHaveBeenCalledTimes(1);
+    expect(getStream).toHaveBeenCalledWith('stream-1');
+
+    monitor.stop();
+  });
+});

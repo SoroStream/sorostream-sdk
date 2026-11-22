@@ -46,6 +46,15 @@ export class PluginRegistry implements IPluginRegistry {
     return this.topologicalSort();
   }
 
+  /**
+   * Removes a plugin from the registry, either by reference or by its
+   * registered name. Subsequent `runBefore`/`runAfter` dispatches rebuild
+   * their plugin list from the registry, so the removed plugin is skipped
+   * immediately.
+   *
+   * @param pluginOrName - The plugin instance or its registered name.
+   * @returns `true` if at least one plugin was removed, `false` otherwise.
+   */
   unregister(pluginOrName: SoroStreamPlugin | string): boolean {
     if (typeof pluginOrName !== 'string') {
       return this.entries.delete(pluginOrName);

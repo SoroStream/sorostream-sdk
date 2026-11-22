@@ -1,5 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
+import {
+  Keypair,
+  Account,
+  TransactionBuilder,
+  Operation,
+  Networks,
+  BASE_FEE,
+} from '@stellar/stellar-sdk';
 import { createFeeRetryMiddleware, FeeRetryError } from '../src/feeRetryMiddleware.js';
+import { renewTimeBounds } from '../src/feeBump.js';
 import type { MiddlewareContext } from '../src/types.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -177,6 +186,37 @@ describe('createFeeRetryMiddleware (issue #404)', () => {
     expect(caught!.name).toBe('FeeRetryError');
   });
 
+  it('enforces maxAttempts across alternating fee and network errors (issue #723)', async () => {
+    const onRetry = vi.fn();
+    const maxAttempts = 2;
+    const plugin = createFeeRetryMiddleware({
+      maxFeeStroops: 50_000,
+      bumpFactor: 2,
+      maxAttempts,
+      onRetry,
+    });
+    const ctx = makeCtx();
+    plugin.before!(ctx);
+
+    const feeErr = makeFeeError('tx_insufficient_fee');
+    const networkErr = new Error('ECONNRESET');
+
+    // Alternate fee-error / network-error for more calls than maxAttempts allows.
+    const errors = [feeErr, networkErr, feeErr, networkErr, feeErr, networkErr];
+    for (const err of errors) {
+      try {
+        await plugin.onError!(ctx, err);
+      } catch {
+        /* expected */
+      }
+    }
+
+    // The retry counter must be shared across failure types, so the configured
+    // maximum is never exceeded regardless of which error triggered each retry.
+    expect(onRetry.mock.calls.length).toBeLessThanOrEqual(maxAttempts);
+    expect(onRetry).toHaveBeenCalledTimes(maxAttempts);
+  });
+
   it('invokes onRetry callback with correct args', async () => {
     const onRetry = vi.fn();
     const plugin = createFeeRetryMiddleware({
@@ -311,5 +351,38 @@ describe('createFeeRetryMiddleware attempt count (issue #685)', () => {
 
     expect(onComplete).toHaveBeenCalledOnce();
     expect(onComplete).toHaveBeenCalledWith(0, false);
+  });
+});
+
+// ── Issue #894: renewTimeBounds always resets minTime to 0 ────────────────────
+
+describe('renewTimeBounds (issue #894)', () => {
+  it('resets minTime to 0 and sets maxTime to now + timeoutSeconds, discarding the original minTime', () => {
+    const source = Keypair.random();
+    const account = new Account(source.publicKey(), '1');
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    // Inner transaction with a non-zero minTime and a far-future maxTime.
+    const inner = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.TESTNET,
+      timebounds: { minTime: nowSeconds + 100, maxTime: nowSeconds + 10_000 },
+    })
+      .addOperation(Operation.bumpSequence({ bumpTo: '2' }))
+      .setTimeout(0)
+      .build();
+
+    expect(inner.timeBounds?.minTime).toBe(nowSeconds + 100);
+
+    const timeoutSeconds = 60;
+    const rebuilt = renewTimeBounds(inner, { timeoutSeconds });
+
+    // minTime is always reset to 0 rather than preserved from the original tx.
+    expect(rebuilt.timeBounds?.minTime).toBe(0);
+
+    // maxTime reflects the new timeout (now + timeoutSeconds), within a small tolerance.
+    const expectedMax = Math.floor(Date.now() / 1000) + timeoutSeconds;
+    expect(rebuilt.timeBounds?.maxTime).toBeGreaterThanOrEqual(expectedMax - 5);
+    expect(rebuilt.timeBounds?.maxTime).toBeLessThanOrEqual(expectedMax + 5);
   });
 });

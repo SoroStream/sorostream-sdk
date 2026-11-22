@@ -238,3 +238,34 @@ describe('StreamStateMachine class & transition guards (Issue #429)', () => {
     expect(StreamStateMachine.getValidActions('Completed')).toEqual([]);
   });
 });
+
+// ── Terminal states: no valid actions (Issue #891) ───────────────────────────
+
+describe('StreamStateMachine – terminal states have no valid actions (Issue #891)', () => {
+  const TERMINAL_STATES: Stream['status'][] = ['Cancelled', 'Completed'];
+  const ALL_ACTIONS = [
+    'withdraw',
+    'cancel',
+    'topUp',
+    'updateFlowRate',
+    'pause',
+    'resume',
+    'transfer',
+    'split',
+  ] as const;
+
+  for (const state of TERMINAL_STATES) {
+    it(`getValidActions('${state}') returns an empty array`, () => {
+      expect(StreamStateMachine.getValidActions(state)).toEqual([]);
+    });
+
+    for (const action of ALL_ACTIONS) {
+      it(`${state} → ${action}: canTransition is false and assertValidTransition throws`, () => {
+        expect(StreamStateMachine.canTransition(state, action)).toBe(false);
+        expect(() => StreamStateMachine.assertValidTransition(state, action)).toThrow(
+          InvalidStateTransitionError,
+        );
+      });
+    }
+  }
+});

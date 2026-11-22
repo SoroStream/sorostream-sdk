@@ -18,7 +18,6 @@ const rules = {
 };
 
 const recommendedRules: Linter.RulesRecord = {
-  '@sorostream/no-withdraw-without-claimable-check': 'warn',
   '@sorostream/require-claimable-before-withdraw': 'warn',
   '@sorostream/await-async-sdk-methods': 'warn',
   '@sorostream/no-hardcoded-contract-id': 'warn',

@@ -142,6 +142,9 @@ export function generateIntegrityManifest(
  * ```
  */
 export function verifyFileIntegrity(filePath: string, expectedSha256: string): boolean {
+  if (!isValidSha256(expectedSha256)) {
+    return false;
+  }
   try {
     const content = readFileSync(filePath);
     const actual = computeSha256(content);
@@ -149,6 +152,15 @@ export function verifyFileIntegrity(filePath: string, expectedSha256: string): b
   } catch {
     return false;
   }
+}
+
+/**
+ * Returns `true` when `hash` is a well-formed hex-encoded SHA-256 digest
+ * (64 hexadecimal characters). Empty or malformed hashes are rejected so that
+ * broken manifest entries are treated as invalid rather than skipped.
+ */
+function isValidSha256(hash: unknown): hash is string {
+  return typeof hash === 'string' && /^[0-9a-fA-F]{64}$/.test(hash);
 }
 
 /**
@@ -193,6 +205,13 @@ export function verifyManifest(
   const failures: string[] = [];
 
   for (const entry of manifest.files) {
+    // A malformed/empty hash is always a failure, regardless of file presence.
+    if (!isValidSha256(entry.sha256)) {
+      failures.push(entry.file);
+      continue;
+    }
+    // File existence/content is checked independently of the hash value, so a
+    // missing file always appears in failures.
     const full = join(distDirOrResolver, entry.file);
     if (!verifyFileIntegrity(full, entry.sha256)) {
       failures.push(entry.file);
@@ -209,6 +228,11 @@ async function verifyManifestFromResolver(
   const failures: string[] = [];
 
   for (const entry of manifest.files) {
+    // A malformed/empty hash is always a failure, regardless of fetch result.
+    if (!isValidSha256(entry.sha256)) {
+      failures.push(entry.file);
+      continue;
+    }
     try {
       const response = await resolveResource(entry.file);
       if (

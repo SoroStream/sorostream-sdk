@@ -22,6 +22,15 @@ deterministic insertion order of JavaScript's native `Map`:
 | **Miss** | New entry appended to the tail |
 | **Eviction** | When `size >= maxSize`, the head entry (least recently used) is removed before inserting the new entry |
 
+Every access updates recency: a cache **hit promotes the entry to the tail**,
+and **eviction always removes the head** (the least recently used entry).  As a
+result, a **hot key that is accessed frequently survives eviction pressure**
+even if it was inserted early, while cold keys inserted more recently are
+evicted first.  This is the behaviour required by issue
+[#721](https://github.com/SoroStream/sorostream-sdk/issues/721) and is covered
+by a regression test that keeps a hot key alive under eviction pressure that
+would have evicted it under pure insertion-order eviction.
+
 This gives **O(1)** amortised complexity for reads, writes, and eviction —
 `Map` iteration, deletion, and insertion are all O(1) in V8 and JavaScriptCore.
 

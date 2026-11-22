@@ -92,12 +92,50 @@ export class ScValCache {
 
     const scVal = nativeToScVal(value, { type });
     if (this.cache.size >= this.maxSize) {
-      // Evict oldest entry
+      // Evict least recently used entry (head of the map)
       const first = this.cache.keys().next().value;
       if (first !== undefined) this.cache.delete(first);
     }
     this.cache.set(key, scVal);
     return scVal;
+  }
+
+  /**
+   * Removes a single entry from the cache.  Returns `true` if the entry
+   * existed and was deleted, `false` if it was not cached.
+   *
+   * Use this after an account's state changes (e.g. a sequence-number bump or
+   * trustline change) to invalidate only the affected address without
+   * discarding the rest of the hot LRU contents.
+   *
+   * @example
+   * ```ts
+   * // Invalidate just the encoded ScVal for a single address.
+   * cache.delete(changedAddress, 'address');
+   * ```
+   */
+  delete(value: unknown, type: ScValType): boolean {
+    const key = `${type}:${String(value)}`;
+    return this.cache.delete(key);
+  }
+
+  /**
+   * Convenience helper that removes **all** cache entries whose key starts
+   * with `address:<addr>`.  Because the key format is `"address:<value>"` and
+   * address values are unique StrKeys, this is equivalent to calling
+   * `delete(addr, 'address')` but is more discoverable when the caller only
+   * knows the account address rather than the full `(value, type)` pair.
+   *
+   * Returns `true` if at least one entry was deleted.
+   *
+   * @example
+   * ```ts
+   * // After account state change:
+   * cache.deleteByAddress('GDDZFLD7...');
+   * ```
+   */
+  deleteByAddress(address: string): boolean {
+    return this.delete(address, 'address');
   }
 
   clear(): void {

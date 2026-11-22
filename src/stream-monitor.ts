@@ -112,7 +112,9 @@ export interface StreamMonitorConfig {
   /**
    * Called when the monitor encounters an unrecoverable RPC error for a
    * single stream. The monitor will continue running for other streams.
-   * This is an alternative to subscribing to `"monitorError"` events.
+   * Shorthand for `monitor.on("monitorError", onError)`: it is registered as a
+   * regular `"monitorError"` listener, so it fires *in addition to* (not
+   * instead of) any other `"monitorError"` listeners added via `monitor.on`.
    */
   onError?: (payload: StreamMonitorErrorPayload) => void;
 }
@@ -143,6 +145,12 @@ export interface StreamMonitorFetchers {
  * and fires threshold-based events.
  *
  * Obtain an instance via `client.createStreamMonitor(streamIds, config)`.
+ *
+ * Monitor events use a dedicated, per-instance listener registry (`on()` /
+ * `emit()`), separate from the SDK's `IEventBus` (`src/eventBus.ts`). Events
+ * emitted by a monitor are only delivered to `monitor.on(...)` subscribers —
+ * they are **not** forwarded to the client's configurable `eventBus`, and
+ * `createStreamMonitor` does not accept an existing `IEventBus`.
  */
 export class StreamMonitor {
   private readonly streamIds: string[];
@@ -209,6 +217,8 @@ export class StreamMonitor {
     }
     (set as Set<Listener<K>>).add(listener);
     return () => {
+      // Only remove this specific listener; other listeners for the same
+      // event must remain subscribed (issue #878).
       (set as Set<Listener<K>>).delete(listener);
     };
   }

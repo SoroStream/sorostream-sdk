@@ -22,8 +22,28 @@ export interface WaitForLedgerOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Fraction of `pollIntervalMs` used as the maximum random jitter applied to
+ * each polling delay in {@link waitForLedger}. The actual delay is
+ * `pollIntervalMs` plus a random offset in
+ * `[-POLL_JITTER_RATIO * pollIntervalMs, +POLL_JITTER_RATIO * pollIntervalMs]`,
+ * clamped to be non-negative. This keeps the jitter bounded (default 15%) so
+ * detection is not meaningfully delayed while de-synchronizing pollers.
+ */
+export const POLL_JITTER_RATIO = 0.15;
+
 function abortError(): DOMException {
   return new DOMException('waitForLedger aborted', 'AbortError');
+}
+
+/**
+ * Computes the next polling delay: `pollIntervalMs` plus bounded random jitter
+ * of up to {@link POLL_JITTER_RATIO} of the interval, clamped to `>= 0`.
+ */
+function jitteredDelay(pollIntervalMs: number): number {
+  const maxJitter = pollIntervalMs * POLL_JITTER_RATIO;
+  const offset = (Math.random() * 2 - 1) * maxJitter;
+  return Math.max(0, pollIntervalMs + offset);
 }
 
 function getLatestLedger(
@@ -128,7 +148,7 @@ export async function waitForLedger(
           signal?.removeEventListener('abort', onAbort);
           resolve();
         },
-        Math.min(pollIntervalMs, remaining),
+        Math.min(jitteredDelay(pollIntervalMs), remaining),
       );
       signal?.addEventListener('abort', onAbort, { once: true });
       if (signal?.aborted) onAbort();

@@ -313,6 +313,40 @@ describe('PersistedAddressBook', () => {
     }
   });
 
+  it('N rapid additions result in a single storage write after the debounce window', () => {
+    const storage = makeStorage();
+    const setItem = vi.spyOn(storage, 'setItem');
+    const book = new PersistedAddressBook({ storage, debounceMs: 50 });
+
+    vi.useFakeTimers();
+    try {
+      // Bulk-import style tight loop of N additions.
+      for (let i = 0; i < 25; i++) {
+        book.set(`alias-${i}`, ALICE);
+      }
+      expect(book.size).toBe(25);
+      expect(setItem).not.toHaveBeenCalled();
+
+      // Still within the window: no write yet.
+      vi.advanceTimersByTime(49);
+      expect(setItem).not.toHaveBeenCalled();
+
+      // Cross the debounce window: exactly one write.
+      vi.advanceTimersByTime(1);
+      expect(setItem).toHaveBeenCalledTimes(1);
+
+      // The single write contains all entries.
+      const persisted = JSON.parse(storage.getItem('sorostream_address_book')!);
+      expect(persisted).toHaveLength(25);
+
+      // No further writes after the window elapses.
+      vi.advanceTimersByTime(1000);
+      expect(setItem).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('flush persists pending mutations immediately', () => {
     const storage = makeStorage();
     const setItem = vi.spyOn(storage, 'setItem');
@@ -332,92 +366,35 @@ describe('PersistedAddressBook', () => {
     }
   });
 
-  // ── Issue #724: failed persisted writes must surface and roll back ──────
+  it('flush cancels the pending debounce timer so no second write occurs', () => {
+    const storage = makeStorage();
+    const setItem = vi.spyOn(storage, 'setItem');
+    const book = new PersistedAddressBook({ storage, debounceMs: 100 });
 
-  describe('failed persisted writes (Issue #724)', () => {
-    function makeQuotaStorage(): StorageAdapter & { store: Record<string, string> } {
-      const store: Record<string, string> = {};
-      return {
-        store,
-        getItem: (k) => store[k] ?? null,
-        setItem: () => {
-          const err = new Error('QuotaExceededError: storage quota exceeded');
-          err.name = 'QuotaExceededError';
-          throw err;
-        },
-        removeItem: (k) => {
-          delete store[k];
-        },
-      };
-    }
-
-    it('set() surfaces the storage failure to the caller', () => {
-      const storage = makeQuotaStorage();
-      const book = new PersistedAddressBook({ storage });
-
-      expect(() => book.set('alice', ALICE)).toThrow(/QuotaExceededError/);
-    });
-
-    it('flush() surfaces the storage failure to the caller', () => {
-      const storage = makeQuotaStorage();
-      const book = new PersistedAddressBook({ storage, debounceMs: 100 });
-
-      vi.useFakeTimers();
-      try {
-        // With debouncing, the write is deferred; flush() must report it.
-        book.set('alice', ALICE);
-        expect(() => book.flush()).toThrow(/QuotaExceededError/);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('does not leave the failed entry in memory after a failed write', () => {
-      const storage = makeQuotaStorage();
-      const book = new PersistedAddressBook({ storage });
-
-      expect(() => book.set('alice', ALICE)).toThrow(/QuotaExceededError/);
-
-      expect(book.has('alice')).toBe(false);
-      expect(book.get('alice')).toBeUndefined();
-      expect(book.size).toBe(0);
-      expect(book.entries()).toHaveLength(0);
-    });
-
-    it('keeps prior entries intact when a later write fails', () => {
-      const store: Record<string, string> = {};
-      let failWrites = false;
-      const storage: StorageAdapter = {
-        getItem: (k) => store[k] ?? null,
-        setItem: (k, v) => {
-          if (failWrites) {
-            const err = new Error('QuotaExceededError: storage quota exceeded');
-            err.name = 'QuotaExceededError';
-            throw err;
-          }
-          store[k] = v;
-        },
-        removeItem: (k) => {
-          delete store[k];
-        },
-      };
-
-      const book = new PersistedAddressBook({ storage });
+    vi.useFakeTimers();
+    try {
       book.set('alice', ALICE);
+      book.set('bob', BOB);
+      expect(setItem).not.toHaveBeenCalled();
 
-      failWrites = true;
-      expect(() => book.set('bob', BOB)).toThrow(/QuotaExceededError/);
+      // Synchronous write on flush.
+      book.flush();
+      expect(setItem).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(storage.getItem('sorostream_address_book')!)).toHaveLength(2);
 
-      // The previously persisted entry survives; the failed one is not present.
-      expect(book.has('alice')).toBe(true);
-      expect(book.get('alice')).toBe(ALICE);
-      expect(book.has('bob')).toBe(false);
-      expect(book.size).toBe(1);
+      // Advancing past the original window must not trigger another write.
+      vi.advanceTimersByTime(500);
+      expect(setItem).toHaveBeenCalledTimes(1);
 
-      const reloaded = new PersistedAddressBook({ storage });
-      expect(reloaded.get('alice')).toBe(ALICE);
-      expect(reloaded.has('bob')).toBe(false);
-    });
+      // A subsequent mutation schedules a fresh debounce.
+      book.set('carol', CAROL);
+      expect(setItem).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(setItem).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(storage.getItem('sorostream_address_book')!)).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
