@@ -140,6 +140,36 @@ export class MultiNetworkClient {
     return this.clients.has(network);
   }
 
+  /**
+   * Adds a network at runtime. The new network is included in all subsequent
+   * aggregate queries without recreating the client.
+   *
+   * @throws {MultiNetworkConfigError} if `config.network` is already configured.
+   */
+  addNetwork(config: NetworkConfig): void {
+    if (this.clients.has(config.network)) {
+      throw new MultiNetworkConfigError(
+        `Duplicate network configuration for "${config.network}". Each network must appear at most once.`,
+      );
+    }
+    this.clients.set(config.network, new SoroStreamClient(config));
+  }
+
+  /**
+   * Removes a network at runtime, destroying its underlying client. The
+   * network is excluded from all subsequent aggregate queries.
+   *
+   * @throws {MultiNetworkNotFoundError} if `network` is not configured.
+   */
+  removeNetwork(network: Network): void {
+    const client = this.clients.get(network);
+    if (!client) {
+      throw new MultiNetworkNotFoundError(network, this.networks);
+    }
+    client.destroy();
+    this.clients.delete(network);
+  }
+
   // ── Read operations ───────────────────────────────────────────────────────
 
   /**
@@ -195,6 +225,7 @@ export class MultiNetworkClient {
    * (the same ID may exist on multiple networks).
    */
   async findStreamAcrossNetworks(streamId: string): Promise<NetworkedStream[]> {
+    // Read the live map at call time so runtime add/remove is honored.
     const results = await Promise.allSettled(
       [...this.clients.entries()].map(async ([network, client]) => {
         const stream = await client.getStream(streamId);
@@ -232,15 +263,18 @@ export class MultiNetworkClient {
   private async _fanOut(
     fn: (client: SoroStreamClient) => Promise<Stream[]>,
   ): Promise<MultiNetworkStreams> {
+    // Snapshot the live map at call time so runtime add/remove is honored.
+    const entries = [...this.clients.entries()];
+
     const settled = await Promise.allSettled(
-      [...this.clients.entries()].map(async ([network, client]) => ({
+      entries.map(async ([network, client]) => ({
         network,
         streams: await fn(client),
       })),
     );
 
     const results = settled.map((r, i) => {
-      const network = [...this.clients.keys()][i]!;
+      const network = entries[i]![0];
       if (r.status === 'fulfilled') {
         return { network, streams: r.value.streams, error: null };
       }

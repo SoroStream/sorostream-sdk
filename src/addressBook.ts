@@ -272,9 +272,36 @@ export class PersistedAddressBook implements AddressBook {
     }
   }
 
+  /**
+   * Persists the current in-memory state. Any error thrown by the storage
+   * adapter (e.g. `QuotaExceededError`) propagates to the caller.
+   */
   private _flush(): void {
     if (!this.storage) return;
     this.storage.setItem(this.storageKey, JSON.stringify([...this._map.values()]));
+  }
+
+  /**
+   * Applies `mutate` to the in-memory map, then writes through to storage
+   * synchronously. If the write throws, the in-memory map is rolled back to
+   * its previous state and the error is rethrown so the caller observes the
+   * failure and the book stays consistent with persisted state.
+   */
+  private _mutateAndPersist(mutate: () => void): void {
+    const snapshot = new Map(this._map);
+    mutate();
+    try {
+      this._flush();
+    } catch (err) {
+      this._map.clear();
+      for (const [k, v] of snapshot) this._map.set(k, v);
+      throw err;
+    }
+    // Persisted successfully — cancel any pending debounced write.
+    if (this.flushTimer !== undefined) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = undefined;
+    }
   }
 
   private _scheduleFlush(): void {
@@ -286,7 +313,10 @@ export class PersistedAddressBook implements AddressBook {
     }, this.debounceMs);
   }
 
-  /** Immediately persists pending changes and cancels any scheduled write. */
+  /**
+   * Immediately persists pending changes and cancels any scheduled write.
+   * Errors from the storage adapter propagate to the caller.
+   */
   flush(): void {
     if (this.flushTimer !== undefined) {
       clearTimeout(this.flushTimer);
@@ -299,13 +329,16 @@ export class PersistedAddressBook implements AddressBook {
 
   set(alias: string, address: string, notes?: string): void {
     validateAddress(alias, address);
-    this._map.set(alias, { alias, address, notes });
-    this._scheduleFlush();
+    this._mutateAndPersist(() => {
+      this._map.set(alias, { alias, address, notes });
+    });
   }
 
   delete(alias: string): boolean {
-    const existed = this._map.delete(alias);
-    if (existed) this._scheduleFlush();
+    let existed = false;
+    this._mutateAndPersist(() => {
+      existed = this._map.delete(alias);
+    });
     return existed;
   }
 
@@ -333,16 +366,21 @@ export class PersistedAddressBook implements AddressBook {
   }
 
   clear(): void {
-    this._map.clear();
-    this._scheduleFlush();
+    this._mutateAndPersist(() => {
+      this._map.clear();
+    });
   }
 
   import(data: AddressBookEntry[] | Record<string, string>): void {
-    for (const { alias, address, notes } of normaliseImport(data)) {
+    const entries = normaliseImport(data);
+    for (const { alias, address } of entries) {
       validateAddress(alias, address);
-      this._map.set(alias, { alias, address, notes });
     }
-    this._scheduleFlush();
+    this._mutateAndPersist(() => {
+      for (const { alias, address, notes } of entries) {
+        this._map.set(alias, { alias, address, notes });
+      }
+    });
   }
 
   export(): Record<string, string> {
