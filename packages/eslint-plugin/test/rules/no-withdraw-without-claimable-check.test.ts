@@ -57,6 +57,19 @@ describe('no-withdraw-without-claimable-check', () => {
           }`,
           errors: [{ messageId: 'missingCheck' }],
         },
+        {
+          // Issue #913: each function pushes its own scope entry starting at
+          // `false`, so a getClaimable check in the outer function does not
+          // satisfy a withdraw inside a nested arrow function.
+          code: `async function run(client, id) {
+            await client.getClaimable(id);
+            const doWithdraw = async () => {
+              await client.withdraw(id);
+            };
+            await doWithdraw();
+          }`,
+          errors: [{ messageId: 'missingCheck' }],
+        },
       ],
     });
   });

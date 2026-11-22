@@ -388,3 +388,99 @@ export function matchError<
   }
   return undefined;
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+import { describe, it, expect, vi } from 'vitest';
+
+describe('matchError', () => {
+  it('dispatches each error category to its corresponding handler', () => {
+    const network = new SoroStreamRetryExhaustedError('retry exhausted', 3);
+    const contract = new TransactionFailedError('tx failed');
+    const validation = new InsufficientAmountError(0);
+    const auth = new NonceNotSupportedError();
+
+    const onNetwork = vi.fn(() => 'network');
+    const onContract = vi.fn(() => 'contract');
+    const onValidation = vi.fn(() => 'validation');
+    const onAuth = vi.fn(() => 'auth');
+    const otherwise = vi.fn(() => 'otherwise');
+
+    expect(matchError(network, { onNetwork, onContract, onValidation, onAuth, otherwise })).toBe(
+      'network',
+    );
+    expect(matchError(contract, { onNetwork, onContract, onValidation, onAuth, otherwise })).toBe(
+      'contract',
+    );
+    expect(matchError(validation, { onNetwork, onContract, onValidation, onAuth, otherwise })).toBe(
+      'validation',
+    );
+    expect(matchError(auth, { onNetwork, onContract, onValidation, onAuth, otherwise })).toBe(
+      'auth',
+    );
+
+    expect(onNetwork).toHaveBeenCalledTimes(1);
+    expect(onContract).toHaveBeenCalledTimes(1);
+    expect(onValidation).toHaveBeenCalledTimes(1);
+    expect(onAuth).toHaveBeenCalledTimes(1);
+    expect(otherwise).not.toHaveBeenCalled();
+  });
+
+  it('dispatches in fixed order onNetwork → onContract → onValidation → onAuth → otherwise', () => {
+    const err = new SoroStreamRetryExhaustedError('retry exhausted', 3);
+
+    const onNetwork = vi.fn(() => 'network');
+    const onContract = vi.fn(() => 'contract');
+    const onValidation = vi.fn(() => 'validation');
+    const onAuth = vi.fn(() => 'auth');
+    const otherwise = vi.fn(() => 'otherwise');
+
+    const result = matchError(err, { onNetwork, onContract, onValidation, onAuth, otherwise });
+
+    expect(result).toBe('network');
+    expect(onNetwork).toHaveBeenCalledTimes(1);
+    expect(onNetwork).toHaveBeenCalledWith(err);
+    expect(onContract).not.toHaveBeenCalled();
+    expect(onValidation).not.toHaveBeenCalled();
+    expect(onAuth).not.toHaveBeenCalled();
+    expect(otherwise).not.toHaveBeenCalled();
+  });
+
+  it('falls back to otherwise when no category matches', () => {
+    const err = new Error('plain error');
+    const otherwise = vi.fn(() => 'otherwise');
+
+    expect(matchError(err, { otherwise })).toBe('otherwise');
+    expect(otherwise).toHaveBeenCalledWith(err);
+  });
+
+  it('returns undefined when no handler matches and otherwise is omitted', () => {
+    const err = new Error('plain error');
+
+    expect(matchError(err, {})).toBeUndefined();
+    expect(
+      matchError(err, {
+        onNetwork: () => 'network',
+        onContract: () => 'contract',
+        onValidation: () => 'validation',
+        onAuth: () => 'auth',
+      }),
+    ).toBeUndefined();
+  });
+
+  it('supports the documented early-exit example with omitted handlers', () => {
+    const onNetwork = vi.fn(() => 'network');
+    const onValidation = vi.fn(() => 'validation');
+
+    const network = new SoroStreamRetryExhaustedError('retry exhausted', 3);
+    const validation = new InsufficientAmountError(0);
+    const unmatched = new TransactionFailedError('tx failed');
+
+    expect(matchError(network, { onNetwork, onValidation })).toBe('network');
+    expect(matchError(validation, { onNetwork, onValidation })).toBe('validation');
+    expect(matchError(unmatched, { onNetwork, onValidation })).toBeUndefined();
+
+    expect(onNetwork).toHaveBeenCalledTimes(1);
+    expect(onValidation).toHaveBeenCalledTimes(1);
+  });
+});

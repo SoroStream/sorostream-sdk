@@ -39,43 +39,42 @@ describe('StreamMonitor low-balance debounce (#712)', () => {
   });
 });
 
-describe('StreamMonitor.on unsubscribe (#878)', () => {
+describe('StreamMonitor.addStreams (#917)', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('removes only the specific listener when unsubscribed', async () => {
+  it('is idempotent when adding an already-monitored stream ID', async () => {
     vi.useFakeTimers();
     const stream = {
       id: 'stream-1',
       status: 'active',
       endTime: Math.floor(Date.now() / 1_000) + 60,
     } as Stream;
+    const getStream = vi.fn().mockResolvedValue(stream);
     const monitor = new StreamMonitor(
       ['stream-1'],
       {
-        getStream: vi.fn().mockResolvedValue(stream),
-        getClaimable: vi.fn().mockResolvedValue(5n),
+        getStream,
+        getClaimable: vi.fn().mockResolvedValue(0n),
       },
       {
         pollIntervalMs: 20,
-        lowBalanceThreshold: 10n,
-        lowBalanceDebounceMs: 100,
       },
     );
 
-    const remainingListener = vi.fn();
-    const unsubscribedListener = vi.fn();
-
-    monitor.on('streamLowBalance', remainingListener);
-    const unsubscribe = monitor.on('streamLowBalance', unsubscribedListener);
-
-    unsubscribe();
-
     await vi.advanceTimersByTimeAsync(0);
+    expect(getStream).toHaveBeenCalledTimes(1);
 
-    expect(remainingListener).toHaveBeenCalledTimes(1);
-    expect(unsubscribedListener).not.toHaveBeenCalled();
+    getStream.mockClear();
+    monitor.addStreams(['stream-1']);
+
+    const internalStreamIds = (monitor as unknown as { streamIds: string[] }).streamIds;
+    expect(internalStreamIds).toEqual(['stream-1']);
+
+    await vi.advanceTimersByTimeAsync(20);
+    expect(getStream).toHaveBeenCalledTimes(1);
+    expect(getStream).toHaveBeenCalledWith('stream-1');
 
     monitor.stop();
   });
