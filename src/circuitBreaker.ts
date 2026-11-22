@@ -12,6 +12,25 @@ export interface CircuitBreakerOptions {
    * Defaults to `cooldownMs`.
    */
   halfOpenProbeIntervalMs?: number;
+  /**
+   * When `true`, **any** single probe failure while the breaker is `HALF_OPEN`
+   * immediately transitions it back to `OPEN` — the `threshold` counter is
+   * bypassed entirely for half-open probes.
+   *
+   * The default (`false`) preserves the existing behaviour: a failed probe
+   * increments `failureCount` (which carries over from the closed-state
+   * failures that originally opened the circuit), and the breaker re-opens
+   * only once `failureCount >= threshold`.  Because `failureCount` is already
+   * at or above `threshold` when the breaker enters `HALF_OPEN` from a normal
+   * open transition, the first probe failure typically re-opens immediately
+   * under the default behaviour as well; this option makes the intent explicit
+   * and guarantees the behaviour regardless of how the breaker was opened.
+   *
+   * Set this to `true` when a single failed probe is conclusive enough to
+   * declare the endpoint still unhealthy (e.g. health-check pings rather than
+   * real traffic).
+   */
+  immediateOpenOnHalfOpenFailure?: boolean;
 }
 
 const DEFAULT_THRESHOLD = 3;
@@ -26,12 +45,14 @@ export class CircuitBreaker {
   private readonly threshold: number;
   private readonly cooldownMs: number;
   private readonly halfOpenProbeIntervalMs: number;
+  private readonly immediateOpenOnHalfOpenFailure: boolean;
   private manuallyPaused = false;
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.threshold = options.threshold ?? DEFAULT_THRESHOLD;
     this.cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
     this.halfOpenProbeIntervalMs = options.halfOpenProbeIntervalMs ?? this.cooldownMs;
+    this.immediateOpenOnHalfOpenFailure = options.immediateOpenOnHalfOpenFailure ?? false;
   }
 
   async call<T>(fn: () => Promise<T>): Promise<T> {
@@ -65,10 +86,17 @@ export class CircuitBreaker {
       }
       return result;
     } catch (err) {
-      this.failureCount++;
       this.lastFailureTime = Date.now();
-      if (this.failureCount >= this.threshold) {
+      if (this.state === 'HALF_OPEN' && this.immediateOpenOnHalfOpenFailure) {
+        // A single failed probe is treated as conclusive: re-open immediately
+        // without waiting to accumulate threshold-many failures (issue #701).
+        this.failureCount = this.threshold;
         this.state = 'OPEN';
+      } else {
+        this.failureCount++;
+        if (this.failureCount >= this.threshold) {
+          this.state = 'OPEN';
+        }
       }
       throw err;
     }

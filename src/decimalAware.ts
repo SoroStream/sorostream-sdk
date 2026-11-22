@@ -23,13 +23,27 @@ export interface TokenMetadataProvider {
   getTokenMetadata(tokenAddress: string): Promise<TokenMetadata>;
 }
 
-// ── Negative-lookup cache (issue #684) ────────────────────────────────────────
+// ── Negative-lookup cache (issues #684, #XXX) ────────────────────────────────
+//
+// SCOPING NOTE (issue #XXX):
+// The cache is keyed by `networkPassphrase + '\0' + tokenAddress` rather than
+// by token address alone.  A failed decimals lookup on testnet therefore never
+// poisons the same token address on mainnet (or any other network), and two
+// client instances pointed at different networks within the same process are
+// fully isolated from each other.
+//
+// Callers that do not supply a network passphrase receive the sentinel key
+// `'default\0<tokenAddress>'`, which preserves backward-compatible behaviour
+// for single-network process deployments.
 
 /**
  * Default TTL for caching failed/absent decimal lookups (5 minutes in ms).
  * After this window the SDK will retry the RPC call once.
  */
 const DEFAULT_NEGATIVE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** Sentinel network key used when no passphrase is supplied. */
+export const DEFAULT_NETWORK_KEY = 'default';
 
 interface NegativeEntry {
   /** The error (or `null` for a missing-decimals result) that was cached. */
@@ -40,13 +54,25 @@ interface NegativeEntry {
 
 /**
  * Per-process in-memory store for negative decimal lookups.
- * Keyed by token address; cleared automatically when entries expire.
+ * Keyed by `networkKey + '\0' + tokenAddress`; cleared automatically when
+ * entries expire.
  */
 const negativeLookupCache = new Map<string, NegativeEntry>();
+
+/** Builds the composite cache key from a network identifier and token address. */
+function negativeCacheKey(networkKey: string, tokenAddress: string): string {
+  return `${networkKey}\0${tokenAddress}`;
+}
 
 /**
  * Records a failed decimals lookup so subsequent calls skip the RPC until TTL
  * expires.
+ *
+ * @param tokenAddress - SAC token contract address.
+ * @param error        - The error thrown by the metadata provider.
+ * @param ttlMs        - Cache entry lifetime (default: 5 min).
+ * @param networkKey   - Network passphrase (or any unique per-network string).
+ *                       Defaults to `'default'` for backward compatibility.
  *
  * @internal
  */
@@ -54,24 +80,33 @@ export function _cacheNegativeLookup(
   tokenAddress: string,
   error: unknown,
   ttlMs = DEFAULT_NEGATIVE_CACHE_TTL_MS,
+  networkKey = DEFAULT_NETWORK_KEY,
 ): void {
-  negativeLookupCache.set(tokenAddress, {
+  negativeLookupCache.set(negativeCacheKey(networkKey, tokenAddress), {
     error,
     expiresAt: Date.now() + ttlMs,
   });
 }
 
 /**
- * Returns the cached negative entry for `tokenAddress` if it is still within
- * its TTL, or `undefined` if there is no valid entry.
+ * Returns the cached negative entry for `tokenAddress` on `networkKey` if it
+ * is still within its TTL, or `undefined` if there is no valid entry.
+ *
+ * @param tokenAddress - SAC token contract address.
+ * @param networkKey   - Network passphrase (or any unique per-network string).
+ *                       Defaults to `'default'` for backward compatibility.
  *
  * @internal
  */
-export function _getNegativeCacheEntry(tokenAddress: string): NegativeEntry | undefined {
-  const entry = negativeLookupCache.get(tokenAddress);
+export function _getNegativeCacheEntry(
+  tokenAddress: string,
+  networkKey = DEFAULT_NETWORK_KEY,
+): NegativeEntry | undefined {
+  const key = negativeCacheKey(networkKey, tokenAddress);
+  const entry = negativeLookupCache.get(key);
   if (!entry) return undefined;
   if (Date.now() >= entry.expiresAt) {
-    negativeLookupCache.delete(tokenAddress);
+    negativeLookupCache.delete(key);
     return undefined;
   }
   return entry;
@@ -137,14 +172,26 @@ export function fromStroopsForToken(units: bigint, decimals: number): string {
  * milliseconds so that repeated calls do not re-trigger the RPC fallback
  * (issue #684).
  *
- * @param tokenAddress     - SAC token contract address.
- * @param metadataProvider - Any object that implements `getTokenMetadata`.
+ * ### Cross-network isolation (issue #XXX)
+ * The negative-lookup cache is scoped by `networkKey` so that a failed lookup
+ * on testnet cannot poison the same token address on mainnet.  Pass the
+ * Stellar network passphrase (e.g. `Networks.TESTNET`) or any other
+ * per-network string as `networkKey`.  When omitted, entries are stored under
+ * the sentinel key `'default'`, preserving backward-compatible behaviour for
+ * single-network deployments.
+ *
+ * @param tokenAddress       - SAC token contract address.
+ * @param metadataProvider   - Any object that implements `getTokenMetadata`.
  * @param negativeCacheTtlMs - TTL for caching failed lookups (default: 5 min).
+ * @param networkKey         - Network passphrase or unique per-network string
+ *                             used to scope the negative-lookup cache.
+ *                             Defaults to `'default'`.
  * @returns The number of decimal places for this token.
  *
  * @example
  * ```ts
- * const decimals = await getTokenDecimals(eurcAddress, client);
+ * import { Networks } from '@stellar/stellar-sdk';
+ * const decimals = await getTokenDecimals(eurcAddress, client, 300_000, Networks.PUBLIC);
  * const units = toStroopsForToken("50.00", decimals);
  * ```
  */
@@ -152,10 +199,11 @@ export async function getTokenDecimals(
   tokenAddress: string,
   metadataProvider: TokenMetadataProvider,
   negativeCacheTtlMs = DEFAULT_NEGATIVE_CACHE_TTL_MS,
+  networkKey = DEFAULT_NETWORK_KEY,
 ): Promise<number> {
   // Check the negative cache first — avoids a redundant RPC call for tokens
   // that have previously failed to resolve.
-  const cached = _getNegativeCacheEntry(tokenAddress);
+  const cached = _getNegativeCacheEntry(tokenAddress, networkKey);
   if (cached) {
     throw cached.error;
   }
@@ -165,7 +213,7 @@ export async function getTokenDecimals(
     return metadata.decimals;
   } catch (err) {
     // Cache the failure so subsequent calls skip the RPC for this TTL window.
-    _cacheNegativeLookup(tokenAddress, err, negativeCacheTtlMs);
+    _cacheNegativeLookup(tokenAddress, err, negativeCacheTtlMs, networkKey);
     throw err;
   }
 }
