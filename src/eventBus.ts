@@ -29,7 +29,11 @@ export class InMemoryEventBus implements IEventBus {
     const handlers = this.handlers.get(event);
     if (!handlers) return;
     for (const handler of handlers) {
-      handler(data);
+      try {
+        handler(data);
+      } catch {
+        continue;
+      }
     }
   }
 
