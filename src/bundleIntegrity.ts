@@ -17,7 +17,7 @@
  * ```
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -96,8 +96,24 @@ export function generateIntegrityManifest(
   version: string,
 ): IntegrityManifest {
   const files: IntegrityEntry[] = [];
+  // Track real (resolved) directory paths to detect and break symlink cycles.
+  const visitedRealPaths = new Set<string>();
 
   function walk(dir: string): void {
+    let realDir: string;
+    try {
+      realDir = realpathSync(dir);
+    } catch {
+      // If we cannot resolve the real path (e.g. a dangling symlink), skip it.
+      return;
+    }
+    if (visitedRealPaths.has(realDir)) {
+      // Cycle detected — this real path was already visited. Skip it to avoid
+      // infinite recursion (stack overflow) caused by symlinked directories.
+      return;
+    }
+    visitedRealPaths.add(realDir);
+
     const entries = readdirSync(dir);
     for (const entry of entries) {
       const full = join(dir, entry);

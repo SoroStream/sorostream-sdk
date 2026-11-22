@@ -429,3 +429,87 @@ describe('#709 Simulator storage TTL', () => {
     expect(() => sim.setStorageTtl('stream-1', -1)).toThrow('expiresAt must be >= 0');
   });
 });
+
+// ── #709 (follow-up): simulateWithdraw rejects amount <= 0 ──────────────────
+
+describe('#709 simulateWithdraw rejects non-positive amount', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+
+  function makeActiveStream(id = 'stream-positive'): Stream {
+    const t = now();
+    return {
+      id,
+      sender: 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H',
+      recipient: 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H',
+      token: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+      deposit: 10_000_000n,
+      flowRate: 100n,
+      startTime: t - 200,
+      endTime: t + 3600,
+      lastWithdrawTime: t - 200,
+      status: 'Active',
+      autoRenew: false,
+    } as Stream;
+  }
+
+  it('rejects amount = 0 with insufficientClaimable failure and clear error message', () => {
+    const sim = new StreamSimulator();
+    const stream = makeActiveStream();
+
+    const result = sim.simulateWithdraw(stream, 0n);
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe('insufficientClaimable');
+    expect(result.amount).toBe(0n);
+    expect(result.error).toContain('greater than zero');
+    expect(result.error).toContain('0');
+  });
+
+  it('rejects a negative amount with insufficientClaimable failure', () => {
+    const sim = new StreamSimulator();
+    const stream = makeActiveStream();
+
+    const result = sim.simulateWithdraw(stream, -1n);
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe('insufficientClaimable');
+    expect(result.amount).toBe(0n);
+    expect(result.error).toContain('greater than zero');
+    expect(result.error).toContain('-1');
+  });
+
+  it('rejects a large negative amount that would trivially pass the claimable check', () => {
+    const sim = new StreamSimulator();
+    const stream = makeActiveStream();
+
+    // Any negative number satisfies (target <= claimable) without the guard,
+    // so this test specifically verifies the guard fires before that check.
+    const result = sim.simulateWithdraw(stream, -999_999_999n);
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe('insufficientClaimable');
+    expect(result.error).toContain('greater than zero');
+  });
+
+  it('still accepts amount = 1n (the minimum valid positive amount)', () => {
+    const sim = new StreamSimulator();
+    const stream = makeActiveStream();
+
+    // Claimable after 200 s at 100 stroop/s = 20_000n, so 1n is well within range
+    const result = sim.simulateWithdraw(stream, 1n);
+
+    expect(result.success).toBe(true);
+    expect(result.amount).toBe(1n);
+  });
+
+  it('omitting amount still defaults to full claimable (no regression)', () => {
+    const sim = new StreamSimulator();
+    const stream = makeActiveStream();
+
+    const result = sim.simulateWithdraw(stream);
+
+    expect(result.success).toBe(true);
+    expect(result.amount).toBe(result.claimable);
+    expect(result.claimable).toBeGreaterThan(0n);
+  });
+});
