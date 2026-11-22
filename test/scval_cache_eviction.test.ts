@@ -164,6 +164,37 @@ describe('ScValCache eviction order past DEFAULT_MAX_SIZE (issue #729)', () => {
     expect(cache.size).toBe(DEFAULT_MAX_SIZE);
   });
 
+  it('hot key survives eviction pressure that would evict it under pure insertion-order eviction (issue #721)', () => {
+    const maxSize = 4;
+    const cache = new ScValCache(maxSize);
+
+    // Fill the cache; 'hot' is inserted first, so insertion-order eviction
+    // would evict it as soon as any new key arrives.
+    cache.get('hot', 'symbol');
+    cache.get('cold1', 'symbol');
+    cache.get('cold2', 'symbol');
+    cache.get('cold3', 'symbol');
+    expect(cache.size).toBe(maxSize);
+
+    const hotInstance = cache.get('hot', 'symbol');
+
+    // Repeatedly touch the hot key while inserting new cold keys.
+    for (let i = 0; i < 10; i++) {
+      const hotNow = cache.get('hot', 'symbol');
+      expect(hotNow).toBe(hotInstance);
+      cache.get(`new${i}`, 'symbol');
+      expect(cache.size).toBeLessThanOrEqual(maxSize);
+    }
+
+    // The hot key must still be cached (same instance) after all the pressure.
+    expect(cache.get('hot', 'symbol')).toBe(hotInstance);
+
+    // The originally-inserted cold keys must have been evicted instead.
+    const cold1Refetched = cache.get('cold1', 'symbol');
+    expect(cold1Refetched).not.toBe(hotInstance);
+    expect(cache.size).toBeLessThanOrEqual(maxSize);
+  });
+
   it('eviction applies to the address type when populated with real Stellar addresses', () => {
     // Use a small max-size so the test is fast and deterministic.
     const maxSize = 2;

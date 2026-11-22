@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { SoroStreamClient } from '../src/SoroStreamClient.js';
+import { ReadConsistency } from '../src/readConsistency.js';
 import { Account, Keypair, Networks, TransactionBuilder } from '@stellar/stellar-sdk';
 import type { WalletAdapter } from '../src/types.js';
 
@@ -171,5 +172,60 @@ describe('#564 read-consistency guarantee after writes', () => {
     const stream = await client.getStream('1');
     expect(server.simulateTransaction.mock.calls.length).toBe(callsBefore);
     expect(stream).toEqual({ id: '1', stale: true });
+  });
+});
+
+describe('#722 waitForLedger polling jitter', () => {
+  it('varies consecutive poll intervals within bounded jitter', async () => {
+    vi.useFakeTimers();
+    try {
+      const pollIntervalMs = 1000;
+      const jitterRatio = 0.2;
+      const minInterval = pollIntervalMs * (1 - jitterRatio);
+      const maxInterval = pollIntervalMs * (1 + jitterRatio);
+
+      const targetLedger = 5;
+      let currentLedger = 0;
+      const getLatestLedger = vi.fn().mockImplementation(async () => {
+        currentLedger += 1;
+        return { sequence: currentLedger };
+      });
+
+      const consistency = new ReadConsistency({
+        pollIntervalMs,
+        timeoutMs: 60_000,
+        jitterRatio,
+      });
+
+      const delays: number[] = [];
+      const originalSetTimeout = globalThis.setTimeout;
+      const setTimeoutSpy = vi
+        .spyOn(globalThis, 'setTimeout')
+        .mockImplementation(((fn: (...args: any[]) => void, delay?: number, ...args: any[]) => {
+          if (typeof delay === 'number' && delay > 0) {
+            delays.push(delay);
+          }
+          return originalSetTimeout(fn, 0, ...args);
+        }) as typeof setTimeout);
+
+      try {
+        await consistency.waitForLedger(targetLedger, { getLatestLedger } as any);
+      } finally {
+        setTimeoutSpy.mockRestore();
+      }
+
+      expect(getLatestLedger).toHaveBeenCalled();
+      expect(delays.length).toBeGreaterThanOrEqual(3);
+
+      for (const delay of delays) {
+        expect(delay).toBeGreaterThanOrEqual(Math.floor(minInterval));
+        expect(delay).toBeLessThanOrEqual(Math.ceil(maxInterval));
+      }
+
+      const distinct = new Set(delays);
+      expect(distinct.size).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
