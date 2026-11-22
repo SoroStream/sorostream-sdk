@@ -15,14 +15,18 @@ function isMethodCall(node: Rule.Node, methodName: string): boolean {
  * the same function scope. Calling `withdraw` blind risks a wasteful
  * zero-amount transaction — checking `getClaimable` first lets the caller
  * skip the call entirely when nothing is claimable.
+ *
+ * @deprecated Use `require-claimable-before-withdraw` instead, which provides
+ * the same check with an auto-fixer.
  */
 const rule: Rule.RuleModule = {
   meta: {
     type: 'problem',
+    deprecated: true,
     docs: {
       description:
         'Disallow calling `withdraw` without a preceding `getClaimable` check in the same scope',
-      recommended: true,
+      recommended: false,
       url: 'https://github.com/SoroStream/sorostream-sdk/blob/main/packages/eslint-plugin/README.md#no-withdraw-without-claimable-check',
     },
     schema: [],

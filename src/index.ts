@@ -126,11 +126,12 @@ export { serializeStream, deserializeStream, buildUnsignedXdr } from './serializ
 export type { SerializedStream } from './serialization.js';
 export { ScValCache, cachedScVal, cachedBool, cachedScValBase64 } from './scValCache.js';
 export type { BuildUnsignedXdrParams } from './types.js';
-export { getTransactionHistory, getAddressActivity } from './horizon.js';
+export { getTransactionHistory, getAddressActivity, resolveHorizonUrl } from './horizon.js';
 export type {
   StreamTransaction,
   TransactionHistoryPage,
   TransactionHistoryOptions,
+  HorizonUrlOverrides,
 } from './horizon.js';
 export { CircuitBreaker } from './circuitBreaker.js';
 export { withRetry, RetryBackoff, isTransientRpcError, computeBackoffDelay } from './retry.js';
@@ -187,8 +188,9 @@ export {
   decodeI128,
   decodeBytes,
   decodeString,
+  requireAddressWithExistenceCheck,
 } from './contractEncoders.js';
-export type { ContractCallEncoder } from './contractEncoders.js';
+export type { ContractCallEncoder, AddressExistenceCheckOptions } from './contractEncoders.js';
 export { createSimplePriceFeed } from './priceFeed.js';
 export type { SimplePriceFeedOptions } from './priceFeed.js';
 export { encodeMemo, encodeMemoHash, decodeMemo } from './memo.js';
@@ -221,6 +223,7 @@ export {
   MetadataTooLargeError,
   BatchOperationLimitExceededError,
   FeeBumpExpiredError,
+  RateLimitExceededError,
 } from './errors.js';
 export type { XdrValidationErrorCode } from './errors.js';
 export { assertEnvelopeUnmutated } from './xdrValidation.js';
@@ -427,7 +430,11 @@ export {
   verifyFileIntegrity,
   verifyManifest,
 } from './bundleIntegrity.js';
-export type { IntegrityEntry, IntegrityManifest } from './bundleIntegrity.js';
+export type {
+  IntegrityEntry,
+  IntegrityManifest,
+  ManifestResourceResolver,
+} from './bundleIntegrity.js';
 
 // ── Issue #758: Gas/fee profiler ─────────────────────────────────────────────
 export { GasProfiler } from './profiler.js';
@@ -451,13 +458,15 @@ export type {
   ReplayOptions,
 } from './replayTransport.js';
 
-// ── Issue #762: Project-level config file support ───────────────────────────
-// `loadSorostreamConfig` reads a `sorostream.config.*` file from the project
-// root and `mergeSorostreamConfig` applies it as defaults over runtime options.
-// Both are also invoked automatically by `createClient` before constructing
-// the client, so a config file actually takes effect without manual wiring.
+// ── Issue #755: Address book ─────────────────────────────────────────────────
 export {
-  loadSorostreamConfig,
-  mergeSorostreamConfig,
-} from './sorostream-config.js';
-export type { SorostreamConfig } from './sorostream-config.js';
+  InMemoryAddressBook,
+  PersistedAddressBook,
+  AddressBookValidationError,
+  AddressBookNotFoundError,
+} from './addressBook.js';
+export type {
+  AddressBook,
+  AddressBookEntry,
+  PersistedAddressBookOptions,
+} from './addressBook.js';

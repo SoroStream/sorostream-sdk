@@ -1,7 +1,7 @@
 import { Address, Contract, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { ContractVersion, CreateStreamParams, SplitStreamParams } from './types.js';
 import { isValidStellarAddress, parseStreamId } from './utils.js';
-import { InvalidAddressError, MetadataTooLargeError } from './errors.js';
+import { AccountNotFoundError, InvalidAddressError, MetadataTooLargeError } from './errors.js';
 import { cachedScVal, cachedBool } from './scValCache.js';
 
 // Issue #458: sanitise caller-supplied strings at the boundary before they
@@ -12,6 +12,62 @@ export function requireAddress(address: string): string {
   if (!isValidStellarAddress(address)) {
     throw new InvalidAddressError(address);
   }
+  return address;
+}
+
+/**
+ * Options for the opt-in on-chain existence check (Issue #458).
+ */
+export interface AddressExistenceCheckOptions {
+  /**
+   * Base URL of the Horizon server to query.
+   * e.g. `"https://horizon-testnet.stellar.org"`.
+   */
+  horizonUrl: string;
+}
+
+/**
+ * Validates `address` format (same as {@link requireAddress}), then
+ * additionally verifies the account exists on Horizon before returning.
+ *
+ * This is opt-in: callers who want to pay the extra round-trip latency in
+ * exchange for failing fast and cheaply (before spending a transaction fee)
+ * call this function; callers that don't opt in continue to use the
+ * synchronous {@link requireAddress}.
+ *
+ * @throws {InvalidAddressError}   if the address is malformed.
+ * @throws {AccountNotFoundError}  if the address is well-formed but does not
+ *   exist on-chain at the given Horizon endpoint.
+ */
+export async function requireAddressWithExistenceCheck(
+  address: string,
+  options: AddressExistenceCheckOptions,
+): Promise<string> {
+  // Format check first — cheap, synchronous, no network cost.
+  requireAddress(address);
+
+  const url = `${options.horizonUrl.replace(/\/+$/, '')}/accounts/${address}`;
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    // Network failure (DNS, TLS, etc.) — surface as AccountNotFoundError so
+    // callers have a single error type to handle for the existence path.
+    throw new AccountNotFoundError(address);
+  }
+
+  if (res.status === 404) {
+    throw new AccountNotFoundError(address);
+  }
+
+  // Any other non-OK status is an unexpected server error; propagate as-is
+  // rather than silently treating it as "not found".
+  if (!res.ok) {
+    throw new Error(
+      `Horizon returned HTTP ${res.status} while checking account ${address}`,
+    );
+  }
+
   return address;
 }
 
