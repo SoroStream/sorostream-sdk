@@ -92,7 +92,7 @@ export class ScValCache {
 
     const scVal = nativeToScVal(value, { type });
     if (this.cache.size >= this.maxSize) {
-      // Evict oldest entry
+      // Evict least recently used entry (head of the map)
       const first = this.cache.keys().next().value;
       if (first !== undefined) this.cache.delete(first);
     }

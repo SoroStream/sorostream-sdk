@@ -217,6 +217,8 @@ export class StreamMonitor {
     }
     (set as Set<Listener<K>>).add(listener);
     return () => {
+      // Only remove this specific listener; other listeners for the same
+      // event must remain subscribed (issue #878).
       (set as Set<Listener<K>>).delete(listener);
     };
   }
