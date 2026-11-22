@@ -246,3 +246,92 @@ describe('getTokenDecimals negative-lookup cache (issue #684)', () => {
     expect(providerB.getTokenMetadata).toHaveBeenCalledOnce();
   });
 });
+
+// ── Issue #990: high-level helpers propagate a cached negative lookup ─────────
+
+describe('convertToTokenUnits / formatTokenAmount cached negative lookup (issue #990)', () => {
+  const FAILING_TOKEN = 'CFAILING00000000000000000000000000000000000000000000000001';
+  const OTHER_TOKEN = 'CWORKING00000000000000000000000000000000000000000000000001';
+  const lookupError = new Error('token metadata unavailable');
+
+  function failingProvider(): TokenMetadataProvider {
+    return { getTokenMetadata: vi.fn().mockRejectedValue(lookupError) };
+  }
+
+  it('convertToTokenUnits rethrows the cached error on repeated calls without a new lookup', async () => {
+    const provider = failingProvider();
+
+    await expect(convertToTokenUnits('10', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+    await expect(convertToTokenUnits('10', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+    await expect(convertToTokenUnits('25.5', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+
+    expect(provider.getTokenMetadata).toHaveBeenCalledOnce();
+  });
+
+  it('formatTokenAmount rethrows the cached error on repeated calls without a new lookup', async () => {
+    const provider = failingProvider();
+
+    await expect(formatTokenAmount(1_000_000n, FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+    await expect(formatTokenAmount(1_000_000n, FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+    await expect(formatTokenAmount(5n, FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+
+    expect(provider.getTokenMetadata).toHaveBeenCalledOnce();
+  });
+
+  it('the cached error is shared between convertToTokenUnits and formatTokenAmount', async () => {
+    const provider = failingProvider();
+
+    await expect(convertToTokenUnits('1', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+    // The first helper populated the negative cache; the second must not look up again.
+    await expect(formatTokenAmount(1n, FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+
+    expect(provider.getTokenMetadata).toHaveBeenCalledOnce();
+    expect(_getNegativeCacheEntry(FAILING_TOKEN)?.error).toBe(lookupError);
+  });
+
+  it('rethrows the very same error instance rather than a wrapped copy', async () => {
+    const provider = failingProvider();
+
+    const first = await convertToTokenUnits('1', FAILING_TOKEN, provider).catch((e) => e);
+    const second = await convertToTokenUnits('1', FAILING_TOKEN, provider).catch((e) => e);
+
+    expect(first).toBe(lookupError);
+    expect(second).toBe(first);
+  });
+
+  it('does not let a cached failure for one token affect another token', async () => {
+    const provider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockImplementation(async (address: string) => {
+        if (address === FAILING_TOKEN) throw lookupError;
+        return { name: 'OK', symbol: 'OK', decimals: 6 };
+      }),
+    };
+
+    await expect(convertToTokenUnits('1', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+    await expect(convertToTokenUnits('1', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+
+    expect(await convertToTokenUnits('1', OTHER_TOKEN, provider)).toBe(1_000_000n);
+    expect(await formatTokenAmount(1_000_000n, OTHER_TOKEN, provider)).toBe('1.000000');
+    // FAILING_TOKEN once, OTHER_TOKEN once per helper call (successes are not cached negatively).
+    expect(provider.getTokenMetadata).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries the lookup once the negative-cache entry has expired', async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = failingProvider();
+
+      await expect(convertToTokenUnits('1', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+      await expect(formatTokenAmount(1n, FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+      expect(provider.getTokenMetadata).toHaveBeenCalledOnce();
+
+      // Default negative-cache TTL is 5 minutes; move just past it.
+      vi.advanceTimersByTime(5 * 60 * 1000 + 1);
+
+      await expect(convertToTokenUnits('1', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+      expect(provider.getTokenMetadata).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
