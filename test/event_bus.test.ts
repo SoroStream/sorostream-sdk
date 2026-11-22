@@ -54,6 +54,29 @@ describe('InMemoryEventBus', () => {
     expect(b).toHaveBeenCalledTimes(1);
   });
 
+  it('continues delivering to later handlers when an earlier handler throws', () => {
+    const bus = new InMemoryEventBus();
+    const later = vi.fn();
+    const throwing = vi.fn(() => {
+      throw new Error('handler failed');
+    });
+    bus.on('stream.created', throwing);
+    bus.on('stream.created', later);
+
+    expect(() => bus.emit('stream.created', { streamId: '1' })).not.toThrow();
+    expect(throwing).toHaveBeenCalledTimes(1);
+    expect(later).toHaveBeenCalledWith({ streamId: '1' });
+  });
+
+  it('isolates a throwing handler without propagating to the caller', () => {
+    const bus = new InMemoryEventBus();
+    bus.on('stream.created', () => {
+      throw new Error('bad handler');
+    });
+
+    expect(() => bus.emit('stream.created', {})).not.toThrow();
+  });
+
   it('does not call handlers registered for a different event', () => {
     const bus = new InMemoryEventBus();
     const handler = vi.fn();

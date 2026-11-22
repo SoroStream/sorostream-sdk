@@ -27,10 +27,13 @@ program
       .choices([...OUTPUT_FORMATS])
       .default('json'),
   )
-  .requiredOption(
-    '-s, --secret <key>',
-    'Stellar secret key (or set SOROSTREAM_SECRET env var)',
-    process.env.SOROSTREAM_SECRET,
+  .addOption(
+    new Option(
+      '-s, --secret <key>',
+      'Stellar secret key — PREFER the SOROSTREAM_SECRET env var instead; ' +
+        'passing a secret as a CLI argument exposes it in shell history and ' +
+        'to other local users via /proc/<pid>/cmdline',
+    ).default(process.env.SOROSTREAM_SECRET, 'SOROSTREAM_SECRET env var'),
   );
 
 // --- stream create ---------------------------------------------------------
@@ -127,5 +130,29 @@ program
       outputDir: opts.outputDir as string | undefined,
     });
   });
+
+// Warn when the secret key was passed as a CLI argument rather than read
+// from the SOROSTREAM_SECRET environment variable.  CLI arguments are
+// visible in shell history (e.g. ~/.bash_history) and to any local user
+// via /proc/<pid>/cmdline, making them a poor transport for secrets.
+program.hook('preAction', () => {
+  const opts = program.opts<{ secret?: string }>();
+  if (opts.secret && opts.secret !== process.env.SOROSTREAM_SECRET) {
+    process.stderr.write(
+      '[sorostream] WARNING: --secret was supplied on the command line.\n' +
+        '  This exposes your Stellar secret key in shell history and to\n' +
+        '  other local users via /proc/<pid>/cmdline.\n' +
+        '  Use the SOROSTREAM_SECRET environment variable instead:\n' +
+        '    export SOROSTREAM_SECRET=S...\n',
+    );
+  }
+  if (!opts.secret) {
+    process.stderr.write(
+      '[sorostream] ERROR: a Stellar secret key is required.\n' +
+        '  Set the SOROSTREAM_SECRET environment variable or pass --secret.\n',
+    );
+    process.exit(1);
+  }
+});
 
 program.parse();

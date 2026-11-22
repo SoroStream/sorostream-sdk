@@ -270,6 +270,7 @@ import { checkPeerDependencies } from './peerDependencies.js';
 import { PluginRegistry } from './pluginRegistry.js';
 import { getPortfolioStats } from './portfolioAnalytics.js';
 import { scheduleFeeBumpMonitor } from './feeBump.js';
+import { loadSorostreamConfig, mergeSorostreamConfig } from './sorostream-config.js';
 
 const RPC_URLS: Record<Network, string> = {
   mainnet: 'https://soroban.stellar.org',
@@ -951,13 +952,19 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
       }
     }
 
-    // Issue #260: Initialize offline write queue if enabled
+    // Issue #260 / #681: Initialize offline write queue if enabled
     if (options.offlineQueue) {
+      const offlineStorage =
+        options.adapters?.storage !== undefined
+          ? options.adapters.storage
+          : getDefaultStorageAdapter();
       this.offlineQueue = new OfflineWriteQueue(
         {
           enabled: true,
           maxQueueSize: options.maxQueueSize ?? DEFAULT_QUEUE_OPTIONS.maxQueueSize,
           healthCheckIntervalMs: DEFAULT_QUEUE_OPTIONS.healthCheckIntervalMs,
+          storage: offlineStorage,
+          storageKey: `sorostream:offline_queue:${this.network}:${options.contractId}`,
         },
         this.eventBus,
       );
@@ -7185,30 +7192,72 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
 }
 
 /**
- * Factory function for constructing a {@link SoroStreamClient}. Equivalent to
- * `new SoroStreamClient(options)` — provided so environments without a
- * default `localStorage`/`WebSocket`/`fetch` (e.g. React Native) can supply
- * overrides via `adapters` without reaching for the class constructor.
+ * Additional options accepted only by {@link createClient} (not by the
+ * `SoroStreamClient` constructor directly).
+ */
+export interface CreateClientOptions extends SoroStreamClientOptions {
+  /**
+   * Directory to search for a `sorostream.config.*` file.
+   * Defaults to `process.cwd()` — the project root.
+   *
+   * Override in tests to point at a fixture directory:
+   * ```ts
+   * const client = await createClient({ contractId: "...", configFileCwd: __dirname });
+   * ```
+   *
+   * Issue #762.
+   */
+  configFileCwd?: string;
+
+  /**
+   * When `true`, skip loading a project-level `sorostream.config.*` file
+   * entirely and use `options` as-is.
+   *
+   * Useful when you want the factory's async signature but have no config
+   * file on disk (e.g. serverless environments, unit tests).
+   *
+   * Issue #762.
+   */
+  skipConfigFile?: boolean;
+}
+
+/**
+ * Async factory function for constructing a {@link SoroStreamClient}.
  *
- * Issue #199.
+ * Unlike `new SoroStreamClient(options)`, this factory first attempts to
+ * load a project-level `sorostream.config.*` file from `process.cwd()` (or
+ * `options.configFileCwd`). Values from the config file are used as defaults;
+ * anything you pass in `options` takes precedence.
+ *
+ * A missing config file is silently ignored — no error is thrown.
+ *
+ * Issue #762.
  *
  * @example
  * ```ts
  * import { createClient } from "@sorostream/sdk";
  * import { reactNativeAdapters } from "@sorostream/sdk-react-native";
  *
- * const client = createClient({
- *   network: "testnet",
- *   contractId: "...",
+ * // sorostream.config.ts in project root sets `network` and `rpcUrl`.
+ * const client = await createClient({
+ *   contractId: "C...",
  *   walletAdapter,
  *   adapters: reactNativeAdapters,
  * });
  * ```
  */
-export function createClient<TEventData = Record<string, unknown>>(
-  options: SoroStreamClientOptions,
-): SoroStreamClient<TEventData> {
-  return new SoroStreamClient<TEventData>(options);
+export async function createClient<TEventData = Record<string, unknown>>(
+  options: CreateClientOptions,
+): Promise<SoroStreamClient<TEventData>> {
+  const { configFileCwd, skipConfigFile, ...clientOptions } = options;
+
+  if (!skipConfigFile) {
+    const fileConfig = await loadSorostreamConfig(configFileCwd);
+    const merged = mergeSorostreamConfig(fileConfig, clientOptions);
+    return new SoroStreamClient<TEventData>(merged);
+  }
+
+  return new SoroStreamClient<TEventData>(clientOptions);
 }
 
 // Re-export for convenience

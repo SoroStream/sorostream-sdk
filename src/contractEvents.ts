@@ -273,7 +273,13 @@ function toBigInt(v: unknown): bigint {
     if (!Number.isSafeInteger(v)) return safeBigInt(v);
     return BigInt(v);
   }
-  if (typeof v === 'string') return BigInt(v);
+  if (typeof v === 'string') {
+    try {
+      return BigInt(v);
+    } catch {
+      return 0n;
+    }
+  }
   return 0n;
 }
 

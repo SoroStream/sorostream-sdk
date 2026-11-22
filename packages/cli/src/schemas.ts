@@ -9,6 +9,12 @@
 // ships compiled `dist/` output and the pre-generated `schemas/` files, not
 // the TypeScript source). Consumers of the SDK should import the static
 // schema files from `@sorostream/sdk/schemas/*` instead of running this.
+//
+// Issue #754: This file is intentionally NOT registered as a bin entry in
+// packages/cli/package.json so that it does not appear in the published
+// CLI binary's --help output. Repo maintainers invoke it via the
+// `generate-schemas` npm script, which uses the `build:maintainer` target
+// to compile this file before running it.
 import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';

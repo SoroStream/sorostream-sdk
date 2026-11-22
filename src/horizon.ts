@@ -15,6 +15,14 @@ const HORIZON_URLS: Record<Network, string> = {
 };
 
 /**
+ * Per-network Horizon base URL overrides (issue #692).
+ *
+ * Allows pointing the SDK at a self-hosted or regional Horizon instance
+ * without monkey-patching the default {@link HORIZON_URLS} map.
+ */
+export type HorizonUrlOverrides = Partial<Record<Network, string>>;
+
+/**
  * A single stream-related transaction from Horizon.
  */
 export interface StreamTransaction {
@@ -88,11 +96,47 @@ export function assertValidHorizonUrl(horizonUrl: string): string {
 }
 
 /**
+ * Resolves the Horizon base URL for a network, applying any configured
+ * overrides on top of the built-in defaults (issue #692).
+ *
+ * Each override is validated with {@link assertValidHorizonUrl}; a malformed
+ * override throws a `TypeError` naming the offending network.
+ *
+ * @param network - The Stellar network to resolve a URL for
+ * @param overrides - Optional per-network Horizon URL overrides
+ * @returns The validated, normalized Horizon base URL
+ *
+ * @example
+ * ```ts
+ * const url = resolveHorizonUrl("testnet", {
+ *   testnet: "https://horizon.internal.example.com",
+ * });
+ * ```
+ */
+export function resolveHorizonUrl(
+  network: Network,
+  overrides?: HorizonUrlOverrides,
+): string {
+  const override = overrides?.[network];
+  if (override === undefined) {
+    return HORIZON_URLS[network];
+  }
+
+  try {
+    return assertValidHorizonUrl(override);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new TypeError(`Invalid Horizon URL override for network "${network}": ${reason}`);
+  }
+}
+
+/**
  * Fetches transaction history for a specific stream ID.
  *
  * @param streamId - The stream ID to query
  * @param network - The Stellar network to query
  * @param options - Pagination and filter options
+ * @param overrides - Optional per-network Horizon URL overrides (issue #692)
  * @returns Paginated transaction history
  *
  * @example
@@ -111,11 +155,12 @@ export async function getTransactionHistory(
   streamId: string,
   network: Network,
   options: TransactionHistoryOptions = {},
+  overrides?: HorizonUrlOverrides,
 ): Promise<TransactionHistoryPage> {
   const { limit = 10, cursor, contractId } = options;
   const horizonUrl =
     options.horizonUrl === undefined
-      ? HORIZON_URLS[network]
+      ? resolveHorizonUrl(network, overrides)
       : assertValidHorizonUrl(options.horizonUrl);
 
   // Issue #458: sanitise the caller-supplied contract ID before it is
@@ -193,6 +238,7 @@ export async function getTransactionHistory(
  * @param address - The Stellar address to query
  * @param network - The Stellar network to query
  * @param options - Pagination and filter options
+ * @param overrides - Optional per-network Horizon URL overrides (issue #692)
  * @returns Paginated transaction history
  *
  * @example
@@ -207,11 +253,12 @@ export async function getAddressActivity(
   address: string,
   network: Network,
   options: TransactionHistoryOptions = {},
+  overrides?: HorizonUrlOverrides,
 ): Promise<TransactionHistoryPage> {
   const { limit = 10, cursor, contractId } = options;
   const horizonUrl =
     options.horizonUrl === undefined
-      ? HORIZON_URLS[network]
+      ? resolveHorizonUrl(network, overrides)
       : assertValidHorizonUrl(options.horizonUrl);
 
   // Issue #458: sanitise caller-supplied addresses before they are

@@ -60,6 +60,27 @@ describe('WriteRateLimiter (#542) - Queue Capacity Behavior', () => {
     await expect(pending).resolves.toBeUndefined();
   });
 
+  it('exposes a positive suggestedRetryAfterMs derived from maxPerSecond', async () => {
+    // maxPerSecond: 10 → interval = 100ms
+    limiter.acquire('write'); // free
+    limiter.acquire('write'); // queued (slot 1/2)
+    const pending = limiter.acquire('write'); // queued (slot 2/2)
+
+    try {
+      await limiter.acquire('write');
+      expect.unreachable('expected acquire() to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(RateLimitExceededError);
+      const rle = error as RateLimitExceededError;
+      // The hint must be a positive number; for maxPerSecond=10 it should be 100ms.
+      expect(rle.suggestedRetryAfterMs).toBeGreaterThan(0);
+      expect(rle.suggestedRetryAfterMs).toBe(100);
+    }
+
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(pending).resolves.toBeUndefined();
+  });
+
   it('should allow operations up to queue capacity without rejection', async () => {
     const promise1 = limiter.acquire('write'); // free
     const promise2 = limiter.acquire('write'); // queued (slot 1/2), within capacity

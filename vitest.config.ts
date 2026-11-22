@@ -4,6 +4,14 @@ import { resolve } from 'path';
 export default defineConfig({
   resolve: {
     alias: {
+      // Subpath entry points must be listed before the bare `'@sorostream/sdk'`
+      // alias: @rollup/plugin-alias matches string entries by prefix
+      // (`'@sorostream/sdk'` would otherwise capture `'@sorostream/sdk/sandbox'`
+      // too), and the first matching entry wins. Resolving these to source lets
+      // tests import the public subpath specifiers (`@sorostream/sdk/sandbox`,
+      // `@sorostream/sdk/graphql`) without a build step.
+      '@sorostream/sdk/sandbox': resolve('./src/sandbox.ts'),
+      '@sorostream/sdk/graphql': resolve('./src/graphql.ts'),
       // Resolve the workspace package to its TypeScript source so tests that
       // import from '@sorostream/sdk' work without a build step.
       '@sorostream/sdk': resolve('./src/index.ts'),
