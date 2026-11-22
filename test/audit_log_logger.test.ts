@@ -5,6 +5,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SoroStreamClient } from '../src/SoroStreamClient.js';
 import type { WalletAdapter, AuditLogger, AuditLogEntry } from '../src/types.js';
 import type { StorageAdapter } from '../src/adapters.js';
+import { createLogger, SanitizingLogger } from '../src/logger.js';
+import type { Logger } from '../src/logger.js';
 
 const VALID_CONTRACT = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
 const SENDER_PK = 'GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF';
@@ -223,5 +225,71 @@ describe('Issue #389 — auditLogger (caller-supplied logger)', () => {
     });
 
     expect(loggedEntries[0]!.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
+});
+
+describe('Issue #892 — createLogger moduleLevels delegate verbosity', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('constructs the delegate at the most verbose module level so overrides are not dropped', () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+
+    const logger = createLogger({
+      minLevel: 'error',
+      moduleLevels: { foo: 'debug' },
+      sanitize: false,
+    });
+
+    logger.child('foo').debug('module-level debug message');
+
+    expect(debugSpy).toHaveBeenCalled();
+    expect(debugSpy.mock.calls.some((call) => call.some((arg) => String(arg).includes('module-level debug message')))).toBe(true);
+  });
+
+  it('still filters out debug for modules without an override', () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+
+    const logger = createLogger({
+      minLevel: 'error',
+      moduleLevels: { foo: 'debug' },
+      sanitize: false,
+    });
+
+    logger.child('bar').debug('should be filtered');
+
+    expect(debugSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('Issue #893 — SanitizingLogger.child redacts namespaced children', () => {
+  const FAKE_SECRET = 'S' + 'A'.repeat(55);
+
+  function makeSpyLogger(): Logger {
+    return {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn(),
+    } as unknown as Logger;
+  }
+
+  it('wraps the delegate child logger so redaction applies to namespaced children', () => {
+    const childSpy = makeSpyLogger();
+    const delegate = makeSpyLogger();
+    (delegate.child as ReturnType<typeof vi.fn>).mockReturnValue(childSpy);
+
+    const sanitizing = new SanitizingLogger(delegate);
+    const child = sanitizing.child('ns');
+
+    child.info(`secret is ${FAKE_SECRET}`);
+
+    expect(delegate.child).toHaveBeenCalledWith('ns');
+    expect(childSpy.info).toHaveBeenCalledTimes(1);
+    const logged = String((childSpy.info as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
+    expect(logged).not.toContain(FAKE_SECRET);
+    expect(logged).toContain('[REDACTED]');
   });
 });
