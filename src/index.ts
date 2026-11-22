@@ -186,8 +186,9 @@ export {
   decodeI128,
   decodeBytes,
   decodeString,
+  requireAddressWithExistenceCheck,
 } from './contractEncoders.js';
-export type { ContractCallEncoder } from './contractEncoders.js';
+export type { ContractCallEncoder, AddressExistenceCheckOptions } from './contractEncoders.js';
 export { createSimplePriceFeed } from './priceFeed.js';
 export type { SimplePriceFeedOptions } from './priceFeed.js';
 export { encodeMemo, encodeMemoHash, decodeMemo } from './memo.js';
@@ -220,6 +221,7 @@ export {
   MetadataTooLargeError,
   BatchOperationLimitExceededError,
   FeeBumpExpiredError,
+  RateLimitExceededError,
 } from './errors.js';
 export type { XdrValidationErrorCode } from './errors.js';
 export { assertEnvelopeUnmutated } from './xdrValidation.js';
@@ -450,12 +452,15 @@ export type {
   ReplayOptions,
 } from './replayTransport.js';
 
-// ── Issue #396 / #756: Decimal-aware stroop conversion utilities ────────────
+// ── Issue #755: Address book ─────────────────────────────────────────────────
 export {
-  toStroopsForToken,
-  fromStroopsForToken,
-  getTokenDecimals,
-  convertToTokenUnits,
-  formatTokenAmount,
-} from './decimalAware.js';
-export type { TokenMetadataProvider } from './decimalAware.js';
+  InMemoryAddressBook,
+  PersistedAddressBook,
+  AddressBookValidationError,
+  AddressBookNotFoundError,
+} from './addressBook.js';
+export type {
+  AddressBook,
+  AddressBookEntry,
+  PersistedAddressBookOptions,
+} from './addressBook.js';

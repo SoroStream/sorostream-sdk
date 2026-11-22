@@ -109,8 +109,11 @@ export class WriteRateLimiter {
 
     // Check if waiting queue is full
     if (this.queueSize > 0 && this.waiting >= this.queueSize) {
-      // Throw an error so the async function returns a rejecting promise
-      throw new RateLimitExceededError(this.waiting, this.queueSize);
+      // suggestedRetryAfterMs is one full interval (the minimum time before
+      // the head of the queue drains), giving callers a concrete backoff hint
+      // instead of forcing them to parse the message string.
+      const suggestedRetryAfterMs = Math.ceil(1000 / this.maxPerSecond);
+      throw new RateLimitExceededError(this.waiting, this.queueSize, suggestedRetryAfterMs);
     }
 
     // Increment waiting count

@@ -56,10 +56,10 @@
       "import": "./dist/graphql.mjs",
       "require": "./dist/graphql.js"
     },
-    "./decimal-aware": {
-      "types": "./dist/decimalAware.d.ts",
-      "import": "./dist/decimalAware.mjs",
-      "require": "./dist/decimalAware.js"
+    "./address-book": {
+      "types": "./dist/address-book.d.ts",
+      "import": "./dist/address-book.mjs",
+      "require": "./dist/address-book.js"
     },
     "./schemas/*": "./schemas/*"
   },
@@ -68,7 +68,7 @@
     "maxCompatibleVersion": "1.99.99"
   },
   "scripts": {
-    "build": "tsup src/index.ts src/wallets.ts src/mock.ts src/testing.ts src/simulator.ts src/core.ts src/batch.ts src/graphql.ts src/decimalAware.ts --format cjs,esm --dts --clean && npm run build:browser && npm run validate-exports",
+    "build": "tsup src/index.ts src/wallets.ts src/mock.ts src/testing.ts src/simulator.ts src/core.ts src/batch.ts src/graphql.ts src/address-book.ts --format cjs,esm --dts --clean && npm run build:browser && npm run validate-exports",
     "build:browser": "tsup --config tsup.browser.config.ts",
     "postbuild": "npm run generate-integrity",
     "generate-integrity": "node scripts/generate-integrity-manifest.js",
