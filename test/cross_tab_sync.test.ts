@@ -200,6 +200,47 @@ describe('CrossTabSync (unit)', () => {
     relayB.destroy();
   });
 
+  it('emits a remote event locally without re-posting it to the channel (no echo)', async () => {
+    const onMessageA = vi.fn();
+    const onMessageB = vi.fn();
+    const relayA = new CrossTabSync({
+      channelName: 'shared',
+      enabled: true,
+      onMessage: onMessageA,
+      broadcastChannelFactory: (name) => new FakeBroadcastChannel(name),
+    });
+    const relayB = new CrossTabSync({
+      channelName: 'shared',
+      enabled: true,
+      onMessage: onMessageB,
+      broadcastChannelFactory: (name) => new FakeBroadcastChannel(name),
+    });
+    const channelA = FakeBroadcastChannel.instances[0]!;
+    const channelB = FakeBroadcastChannel.instances[1]!;
+
+    relayA.broadcast('cacheInvalidated', { reason: 'manual' });
+
+    // B received and emitted the event locally...
+    expect(onMessageB).toHaveBeenCalledTimes(1);
+    expect(onMessageB).toHaveBeenCalledWith('cacheInvalidated', { reason: 'manual' });
+    // ...A only posted its own broadcast, and B never re-posted the echo.
+    expect(channelA.posted).toHaveLength(1);
+    expect(channelB.posted).toHaveLength(0);
+
+    // Let several macrotask turns pass: an echo loop would keep posting.
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(channelA.posted).toHaveLength(1);
+    expect(channelB.posted).toHaveLength(0);
+    expect(onMessageB).toHaveBeenCalledTimes(1);
+    expect(onMessageA).not.toHaveBeenCalled();
+
+    relayA.destroy();
+    relayB.destroy();
+  });
+
   it('does not re-broadcast events re-emitted from a remote tab (no ping-pong)', () => {
     const innerBus = new InMemoryEventBus();
     const received: unknown[] = [];
