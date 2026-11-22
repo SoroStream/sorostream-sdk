@@ -313,6 +313,40 @@ describe('PersistedAddressBook', () => {
     }
   });
 
+  it('N rapid additions result in a single storage write after the debounce window', () => {
+    const storage = makeStorage();
+    const setItem = vi.spyOn(storage, 'setItem');
+    const book = new PersistedAddressBook({ storage, debounceMs: 50 });
+
+    vi.useFakeTimers();
+    try {
+      // Bulk-import style tight loop of N additions.
+      for (let i = 0; i < 25; i++) {
+        book.set(`alias-${i}`, ALICE);
+      }
+      expect(book.size).toBe(25);
+      expect(setItem).not.toHaveBeenCalled();
+
+      // Still within the window: no write yet.
+      vi.advanceTimersByTime(49);
+      expect(setItem).not.toHaveBeenCalled();
+
+      // Cross the debounce window: exactly one write.
+      vi.advanceTimersByTime(1);
+      expect(setItem).toHaveBeenCalledTimes(1);
+
+      // The single write contains all entries.
+      const persisted = JSON.parse(storage.getItem('sorostream_address_book')!);
+      expect(persisted).toHaveLength(25);
+
+      // No further writes after the window elapses.
+      vi.advanceTimersByTime(1000);
+      expect(setItem).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('flush persists pending mutations immediately', () => {
     const storage = makeStorage();
     const setItem = vi.spyOn(storage, 'setItem');
@@ -327,6 +361,37 @@ describe('PersistedAddressBook', () => {
       expect(JSON.parse(storage.getItem('sorostream_address_book')!)).toHaveLength(1);
       vi.advanceTimersByTime(100);
       expect(setItem).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flush cancels the pending debounce timer so no second write occurs', () => {
+    const storage = makeStorage();
+    const setItem = vi.spyOn(storage, 'setItem');
+    const book = new PersistedAddressBook({ storage, debounceMs: 100 });
+
+    vi.useFakeTimers();
+    try {
+      book.set('alice', ALICE);
+      book.set('bob', BOB);
+      expect(setItem).not.toHaveBeenCalled();
+
+      // Synchronous write on flush.
+      book.flush();
+      expect(setItem).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(storage.getItem('sorostream_address_book')!)).toHaveLength(2);
+
+      // Advancing past the original window must not trigger another write.
+      vi.advanceTimersByTime(500);
+      expect(setItem).toHaveBeenCalledTimes(1);
+
+      // A subsequent mutation schedules a fresh debounce.
+      book.set('carol', CAROL);
+      expect(setItem).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(setItem).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(storage.getItem('sorostream_address_book')!)).toHaveLength(3);
     } finally {
       vi.useRealTimers();
     }
