@@ -277,6 +277,75 @@ describe('MultiNetworkClient.getStreamsByRecipientAllNetworks', () => {
   });
 });
 
+// ── Runtime network changes ───────────────────────────────────────────────
+
+describe('MultiNetworkClient – runtime network changes', () => {
+  it('includes a network added after construction in the next aggregate query', async () => {
+    const [testnetConfig] = makeConfigs();
+    const multi = new MultiNetworkClient([testnetConfig]);
+
+    const testnetClient = multi.getClient('testnet');
+    vi.spyOn((testnetClient as any).contract, 'call').mockImplementation(() => ({
+      build: () => ({}),
+    }));
+    vi.spyOn(testnetClient as any, 'simulateOp').mockResolvedValue(
+      makeStreamsScVal([makeStream('1', VALID_ACCOUNT)]),
+    );
+
+    // Add mainnet after construction via the runtime configuration API.
+    const mainnetConfig = makeConfigs()[1];
+    multi.addNetwork(mainnetConfig);
+    expect(multi.hasNetwork('mainnet')).toBe(true);
+
+    const mainnetClient = multi.getClient('mainnet');
+    vi.spyOn((mainnetClient as any).contract, 'call').mockImplementation(() => ({
+      build: () => ({}),
+    }));
+    vi.spyOn(mainnetClient as any, 'simulateOp').mockResolvedValue(
+      makeStreamsScVal([makeStream('2', VALID_ACCOUNT)]),
+    );
+
+    const { results, allStreams } = await multi.getStreamsByRecipientAllNetworks(RECIPIENT);
+
+    expect(results).toHaveLength(2);
+    expect(results.map((r) => r.network).sort()).toEqual(['mainnet', 'testnet']);
+    expect(allStreams).toHaveLength(2);
+    expect(allStreams.map((s) => s.id).sort()).toEqual(['1', '2']);
+    multi.destroy();
+  });
+
+  it('excludes a network removed after construction from the next aggregate query', async () => {
+    const multi = new MultiNetworkClient(makeConfigs());
+
+    const testnetClient = multi.getClient('testnet');
+    vi.spyOn((testnetClient as any).contract, 'call').mockImplementation(() => ({
+      build: () => ({}),
+    }));
+    vi.spyOn(testnetClient as any, 'simulateOp').mockResolvedValue(
+      makeStreamsScVal([makeStream('1', VALID_ACCOUNT)]),
+    );
+
+    const mainnetClient = multi.getClient('mainnet');
+    vi.spyOn((mainnetClient as any).contract, 'call').mockImplementation(() => ({
+      build: () => ({}),
+    }));
+    vi.spyOn(mainnetClient as any, 'simulateOp').mockResolvedValue(
+      makeStreamsScVal([makeStream('2', VALID_ACCOUNT)]),
+    );
+
+    multi.removeNetwork('mainnet');
+    expect(multi.hasNetwork('mainnet')).toBe(false);
+
+    const { results, allStreams } = await multi.getStreamsByRecipientAllNetworks(RECIPIENT);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].network).toBe('testnet');
+    expect(allStreams).toHaveLength(1);
+    expect(allStreams[0].id).toBe('1');
+    multi.destroy();
+  });
+});
+
 // ── getStreamsBySenderAllNetworks ────────────────────────────────────────
 
 describe('MultiNetworkClient.getStreamsBySenderAllNetworks', () => {

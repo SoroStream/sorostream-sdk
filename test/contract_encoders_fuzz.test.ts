@@ -5,7 +5,8 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as fc from 'fast-check';
-import { Keypair, StrKey } from '@stellar/stellar-sdk';
+import { Keypair, StrKey, xdr } from '@stellar/stellar-sdk';
+import type { rpc } from '@stellar/stellar-sdk';
 import {
   encodeAddress,
   encodeI128,
@@ -16,6 +17,7 @@ import {
   decodeBytes,
   decodeString,
 } from '../src/contractEncoders.js';
+import { parseContractEvent } from '../src/contractEvents.js';
 
 const SEED = Number(process.env.FC_SEED ?? 588);
 const I128_MIN = -(2n ** 127n);
@@ -74,5 +76,67 @@ describe('contractEncoders round-trip (#588)', () => {
         expect(decodeString(encodeString(value))).toBe(value);
       }),
     );
+  });
+});
+
+describe('parseContractEvent defensive scValToNative handling (#873)', () => {
+  // A ScVal that scValToNative cannot decode: a symbol whose bytes are not
+  // valid UTF-8. Decoding it throws, exercising the try/catch fallbacks.
+  const malformedScVal = () =>
+    xdr.ScVal.scvSymbol(Buffer.from([0xff, 0xfe, 0xfd]));
+
+  const validSymbol = (s: string) => xdr.ScVal.scvSymbol(s);
+
+  const makeEvent = (topics: xdr.ScVal[], value: xdr.ScVal): rpc.Api.EventResponse =>
+    ({
+      type: 'contract',
+      contractId: StrKey.encodeContract(Buffer.alloc(32)),
+      topic: topics,
+      value,
+      ledger: 1,
+      ledgerClosedAt: '2024-01-01T00:00:00Z',
+      txHash: 'a'.repeat(64),
+      transactionIndex: 0,
+      operationIndex: 0,
+      inSuccessfulContractCall: true,
+    }) as unknown as rpc.Api.EventResponse;
+
+  it('falls back when topic[0] cannot be decoded', () => {
+    const event = makeEvent([malformedScVal(), validSymbol('transfer')], validSymbol('ok'));
+    const payload = parseContractEvent(event);
+    expect(payload).toBeDefined();
+    expect(payload.rawType).toBeNull();
+    expect(payload.streamId).toBe('0');
+    expect(payload.rawData).toEqual({});
+  });
+
+  it('falls back when topic[1] cannot be decoded', () => {
+    const event = makeEvent([validSymbol('transfer'), malformedScVal()], validSymbol('ok'));
+    const payload = parseContractEvent(event);
+    expect(payload).toBeDefined();
+    expect(payload.rawType).toBeNull();
+    expect(payload.streamId).toBe('0');
+    expect(payload.rawData).toEqual({});
+  });
+
+  it('falls back when the value cannot be decoded', () => {
+    const event = makeEvent([validSymbol('transfer'), validSymbol('from')], malformedScVal());
+    const payload = parseContractEvent(event);
+    expect(payload).toBeDefined();
+    expect(payload.rawType).toBeNull();
+    expect(payload.streamId).toBe('0');
+    expect(payload.rawData).toEqual({});
+  });
+
+  it('falls back when all scVals cannot be decoded', () => {
+    const event = makeEvent(
+      [malformedScVal(), malformedScVal()],
+      malformedScVal(),
+    );
+    const payload = parseContractEvent(event);
+    expect(payload).toBeDefined();
+    expect(payload.rawType).toBeNull();
+    expect(payload.streamId).toBe('0');
+    expect(payload.rawData).toEqual({});
   });
 });

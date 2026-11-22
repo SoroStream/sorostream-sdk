@@ -331,6 +331,94 @@ describe('PersistedAddressBook', () => {
       vi.useRealTimers();
     }
   });
+
+  // ── Issue #724: failed persisted writes must surface and roll back ──────
+
+  describe('failed persisted writes (Issue #724)', () => {
+    function makeQuotaStorage(): StorageAdapter & { store: Record<string, string> } {
+      const store: Record<string, string> = {};
+      return {
+        store,
+        getItem: (k) => store[k] ?? null,
+        setItem: () => {
+          const err = new Error('QuotaExceededError: storage quota exceeded');
+          err.name = 'QuotaExceededError';
+          throw err;
+        },
+        removeItem: (k) => {
+          delete store[k];
+        },
+      };
+    }
+
+    it('set() surfaces the storage failure to the caller', () => {
+      const storage = makeQuotaStorage();
+      const book = new PersistedAddressBook({ storage });
+
+      expect(() => book.set('alice', ALICE)).toThrow(/QuotaExceededError/);
+    });
+
+    it('flush() surfaces the storage failure to the caller', () => {
+      const storage = makeQuotaStorage();
+      const book = new PersistedAddressBook({ storage, debounceMs: 100 });
+
+      vi.useFakeTimers();
+      try {
+        // With debouncing, the write is deferred; flush() must report it.
+        book.set('alice', ALICE);
+        expect(() => book.flush()).toThrow(/QuotaExceededError/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not leave the failed entry in memory after a failed write', () => {
+      const storage = makeQuotaStorage();
+      const book = new PersistedAddressBook({ storage });
+
+      expect(() => book.set('alice', ALICE)).toThrow(/QuotaExceededError/);
+
+      expect(book.has('alice')).toBe(false);
+      expect(book.get('alice')).toBeUndefined();
+      expect(book.size).toBe(0);
+      expect(book.entries()).toHaveLength(0);
+    });
+
+    it('keeps prior entries intact when a later write fails', () => {
+      const store: Record<string, string> = {};
+      let failWrites = false;
+      const storage: StorageAdapter = {
+        getItem: (k) => store[k] ?? null,
+        setItem: (k, v) => {
+          if (failWrites) {
+            const err = new Error('QuotaExceededError: storage quota exceeded');
+            err.name = 'QuotaExceededError';
+            throw err;
+          }
+          store[k] = v;
+        },
+        removeItem: (k) => {
+          delete store[k];
+        },
+      };
+
+      const book = new PersistedAddressBook({ storage });
+      book.set('alice', ALICE);
+
+      failWrites = true;
+      expect(() => book.set('bob', BOB)).toThrow(/QuotaExceededError/);
+
+      // The previously persisted entry survives; the failed one is not present.
+      expect(book.has('alice')).toBe(true);
+      expect(book.get('alice')).toBe(ALICE);
+      expect(book.has('bob')).toBe(false);
+      expect(book.size).toBe(1);
+
+      const reloaded = new PersistedAddressBook({ storage });
+      expect(reloaded.get('alice')).toBe(ALICE);
+      expect(reloaded.has('bob')).toBe(false);
+    });
+  });
 });
 
 // ── Error types ───────────────────────────────────────────────────────────
