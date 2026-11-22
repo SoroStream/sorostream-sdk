@@ -27,6 +27,20 @@ import type { SoroStreamPlugin, MiddlewareContext } from './types.js';
 /** Soroban RPC result codes that indicate an insufficient fee. */
 const FEE_ERROR_CODES = new Set(['tx_insufficient_fee', 'op_insufficient_fee', 'insufficient_fee']);
 
+/** Error codes that indicate a transient network failure worth retrying. */
+const TRANSIENT_ERROR_CODES = new Set([
+  'econnreset',
+  'econnrefused',
+  'etimedout',
+  'enotfound',
+  'eai_again',
+  'epipe',
+  'timeout',
+  'network_error',
+  'service_unavailable',
+  'internal_error',
+]);
+
 /** Default multiplier applied to the fee on each retry (50% bump). */
 const DEFAULT_BUMP_FACTOR = 1.5;
 
@@ -142,6 +156,51 @@ function isFeeError(error: unknown): boolean {
 }
 
 /**
+ * Returns `true` when the thrown error looks like a transient network failure
+ * (connection reset/refused, timeout, DNS failure, 5xx, etc.) that is worth
+ * retrying. These retries share the same counter as fee-error retries so the
+ * configured maximum is enforced across the whole retry sequence.
+ */
+function isTransientNetworkError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const err = error as Record<string, unknown>;
+
+  // Check standard `code` / `name` properties (Node.js / fetch errors)
+  const code =
+    (typeof err['code'] === 'string' ? err['code'] : undefined) ??
+    (typeof err['name'] === 'string' ? err['name'] : undefined);
+
+  if (code && TRANSIENT_ERROR_CODES.has(code.toLowerCase())) return true;
+
+  // Check HTTP status codes surfaced on the error object
+  const status = err['status'] ?? err['statusCode'];
+  if (typeof status === 'number' && status >= 500 && status < 600) return true;
+
+  // Check error message text
+  const message =
+    err instanceof Error ? err.message : typeof err['message'] === 'string' ? err['message'] : '';
+
+  if (typeof message === 'string') {
+    const lower = message.toLowerCase();
+    if (
+      lower.includes('econnreset') ||
+      lower.includes('econnrefused') ||
+      lower.includes('etimedout') ||
+      lower.includes('enotfound') ||
+      lower.includes('network error') ||
+      lower.includes('socket hang up') ||
+      lower.includes('fetch failed') ||
+      lower.includes('timeout')
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Extracts the base fee hint from the error object, if the RPC returns the
  * minimum required fee alongside the rejection. Falls back to `undefined`.
  */
@@ -239,18 +298,33 @@ export function createFeeRetryMiddleware(
     },
 
     async onError(ctx: MiddlewareContext, error: unknown): Promise<void> {
-      if (!isFeeError(error)) {
-        // Not a fee error — let it propagate unchanged
+      const feeError = isFeeError(error);
+      const transientError = !feeError && isTransientNetworkError(error);
+
+      if (!feeError && !transientError) {
+        // Not a retryable error — let it propagate unchanged
         throw error;
       }
 
       const state = getState(ctx);
 
+      // Enforce the configured maximum across the whole retry sequence,
+      // regardless of which failure type triggered each retry.
       if (state.attempts >= maxAttempts) {
-        // Exhausted retries — report and re-throw
+        // Exhausted retries — report and re-throw the original error
         onComplete?.(state.attempts, false);
         throw error;
       }
+
+      if (transientError) {
+        // Transient network failure — consume a retry from the shared counter
+        // but do not bump the fee.
+        state.attempts += 1;
+        onRetry?.(state.attempts, state.currentFee);
+        throw error;
+      }
+
+      // ── Fee error handling ──────────────────────────────────────────────
 
       // Determine starting fee for the first retry
       if (state.currentFee === 0) {

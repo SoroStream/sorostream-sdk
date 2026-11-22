@@ -129,6 +129,13 @@ const RPC_URLS: Record<Network, string> = {
   futurenet: 'https://rpc-futurenet.stellar.org',
 };
 
+/**
+ * Default base fee multiplier applied when the active network does not
+ * report one (or the lookup fails).  A multiplier of `1` leaves the
+ * simulated `minResourceFee` unchanged.
+ */
+const DEFAULT_BASE_FEE_MULTIPLIER = 1;
+
 export interface SimulationProfile {
   operationType: string;
   params: Record<string, unknown>;
@@ -164,14 +171,65 @@ export interface ProfilerConfig {
 export class GasProfiler {
   private readonly server: rpc.Server;
   private readonly contract: Contract;
+  private readonly network: Network;
   private readonly networkPassphrase: string;
   private readonly publicKey: string;
 
   constructor(config: ProfilerConfig) {
     this.server = new rpc.Server(config.rpcUrl ?? RPC_URLS[config.network], { allowHttp: false });
     this.contract = new Contract(config.contractId);
+    this.network = config.network;
     this.networkPassphrase = NETWORK_PASSPHRASES[config.network];
     this.publicKey = config.publicKey;
+  }
+
+  /**
+   * Resolve the active network's current base fee multiplier.
+   *
+   * The multiplier reflects network congestion: a value of `1` means the
+   * default fee applies, while values `> 1` indicate elevated fees.  When the
+   * network does not expose a multiplier (or the lookup fails) we fall back to
+   * {@link DEFAULT_BASE_FEE_MULTIPLIER} so estimates remain unchanged.
+   */
+  private async getBaseFeeMultiplier(): Promise<number> {
+    try {
+      // `getFeeStats` is not part of the typed interface in SDK v13;
+      // access it defensively via `any` for backwards compatibility.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const server = this.server as any;
+      if (typeof server.getFeeStats !== 'function') {
+        return DEFAULT_BASE_FEE_MULTIPLIER;
+      }
+      const stats = await server.getFeeStats();
+      const multiplier = stats?.baseFeeMultiplier ?? stats?.base_fee_multiplier;
+      const parsed = Number(multiplier);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return DEFAULT_BASE_FEE_MULTIPLIER;
+      }
+      return parsed;
+    } catch {
+      return DEFAULT_BASE_FEE_MULTIPLIER;
+    }
+  }
+
+  /**
+   * Apply the network's base fee multiplier to a resource fee expressed in
+   * stroops, returning the adjusted fee as a string of stroops.
+   */
+  private applyBaseFeeMultiplier(minFee: string, multiplier: number): string {
+    if (multiplier === DEFAULT_BASE_FEE_MULTIPLIER) {
+      return minFee;
+    }
+    const base = BigInt(minFee);
+    if (base === 0n) {
+      return minFee;
+    }
+    // Scale by the multiplier using integer arithmetic where possible to
+    // avoid floating-point drift for whole-number multipliers.
+    if (Number.isInteger(multiplier)) {
+      return (base * BigInt(multiplier)).toString();
+    }
+    return BigInt(Math.ceil(Number(base) * multiplier)).toString();
   }
 
   async profileCreateStream(params: {
@@ -388,7 +446,9 @@ export class GasProfiler {
 
       const ledgerReads = readOnlyKeys.length + readWriteKeys.length;
       const ledgerWrites = readWriteKeys.length;
-      const minFee = cost.minFee ?? success.minResourceFee ?? '0';
+      const rawMinFee: string = cost.minFee ?? success.minResourceFee ?? '0';
+      const baseFeeMultiplier = await this.getBaseFeeMultiplier();
+      const minFee = this.applyBaseFeeMultiplier(rawMinFee, baseFeeMultiplier);
       const cpuInstructions = cost.cpuInsns ?? '0';
 
       return {

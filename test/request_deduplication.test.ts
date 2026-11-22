@@ -107,6 +107,33 @@ describe('RequestDeduplicator (#426)', () => {
     });
   });
 
+  it('joins a caller arriving in the same microtask turn as the first call', async () => {
+    const dedup = new RequestDeduplicator();
+    let calls = 0;
+    const factory = async (): Promise<number> => {
+      calls++;
+      await new Promise((r) => setTimeout(r, 5));
+      return 42;
+    };
+
+    // Both calls are issued synchronously, before any await yields control.
+    const first = dedup.dedupe('k', factory);
+    const second = dedup.dedupe('k', factory);
+
+    // The entry is registered synchronously, so the second caller joins it.
+    expect(dedup.has('k')).toBe(true);
+
+    const results = await Promise.all([first, second]);
+
+    expect(calls).toBe(1);
+    expect(results).toEqual([42, 42]);
+    expect(dedup.stats()).toMatchObject({ requests: 2, started: 1, deduplicated: 1, inFlight: 0 });
+
+    // The entry is removed after settlement per documented behavior.
+    expect(dedup.has('k')).toBe(false);
+    expect(dedup.size).toBe(0);
+  });
+
   it('does not share requests across different keys', async () => {
     const dedup = new RequestDeduplicator();
     let calls = 0;

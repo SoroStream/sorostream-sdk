@@ -177,6 +177,37 @@ describe('createFeeRetryMiddleware (issue #404)', () => {
     expect(caught!.name).toBe('FeeRetryError');
   });
 
+  it('enforces maxAttempts across alternating fee and network errors (issue #723)', async () => {
+    const onRetry = vi.fn();
+    const maxAttempts = 2;
+    const plugin = createFeeRetryMiddleware({
+      maxFeeStroops: 50_000,
+      bumpFactor: 2,
+      maxAttempts,
+      onRetry,
+    });
+    const ctx = makeCtx();
+    plugin.before!(ctx);
+
+    const feeErr = makeFeeError('tx_insufficient_fee');
+    const networkErr = new Error('ECONNRESET');
+
+    // Alternate fee-error / network-error for more calls than maxAttempts allows.
+    const errors = [feeErr, networkErr, feeErr, networkErr, feeErr, networkErr];
+    for (const err of errors) {
+      try {
+        await plugin.onError!(ctx, err);
+      } catch {
+        /* expected */
+      }
+    }
+
+    // The retry counter must be shared across failure types, so the configured
+    // maximum is never exceeded regardless of which error triggered each retry.
+    expect(onRetry.mock.calls.length).toBeLessThanOrEqual(maxAttempts);
+    expect(onRetry).toHaveBeenCalledTimes(maxAttempts);
+  });
+
   it('invokes onRetry callback with correct args', async () => {
     const onRetry = vi.fn();
     const plugin = createFeeRetryMiddleware({
