@@ -79,20 +79,20 @@ describe('ScValCache eviction order past DEFAULT_MAX_SIZE (issue #729)', () => {
     expect(cache.size).toBe(maxSize);
 
     // Access 'sym0' again to promote it to MRU (most-recently-used)
-    const sym0Instance = cache.get('sym0', 'symbol');
+    cache.get('sym0', 'symbol');
 
     // Now sym1 is the oldest (LRU). Inserting a new entry should evict sym1.
     cache.get('sym4', 'symbol');
     expect(cache.size).toBe(maxSize);
 
-    // sym0 was just accessed, so it must still be cached (same instance)
-    const sym0After = cache.get('sym0', 'symbol');
-    expect(sym0After).toBe(sym0Instance);
+    // sym0 was just accessed, so it must still be cached.
+    expect(cache.has('sym0', 'symbol')).toBe(true);
 
-    // sym1 was LRU and must have been evicted — its re-fetch creates a new
-    // instance with no reference equality to sym0.
-    const sym1After = cache.get('sym1', 'symbol');
-    expect(sym1After).not.toBe(sym0Instance);
+    // sym1 was LRU and must have been evicted; the rest survive.
+    expect(cache.has('sym1', 'symbol')).toBe(false);
+    expect(cache.has('sym2', 'symbol')).toBe(true);
+    expect(cache.has('sym3', 'symbol')).toBe(true);
+    expect(cache.has('sym4', 'symbol')).toBe(true);
 
     // Verify the cache still doesn't grow past maxSize
     expect(cache.size).toBeLessThanOrEqual(maxSize);
@@ -134,7 +134,7 @@ describe('ScValCache eviction order past DEFAULT_MAX_SIZE (issue #729)', () => {
 
     // Access key0 to make it MRU; then drive past DEFAULT_MAX_SIZE keeping it alive.
     cache.get('key0', 'string');
-    const key0Before = cache.get('key0', 'string');
+    cache.get('key0', 'string');
 
     // Add only a few extra entries to trigger eviction of the oldest keys
     // (key1, key2, ...) but key0 was just refreshed so it should survive.
@@ -143,8 +143,9 @@ describe('ScValCache eviction order past DEFAULT_MAX_SIZE (issue #729)', () => {
     }
 
     // key0 must still be cached — we just refreshed it
-    const key0After = cache.get('key0', 'string');
-    expect(key0After).toBe(key0Before);
+    expect(cache.has('key0', 'string')).toBe(true);
+    // ...while the oldest un-refreshed keys were evicted instead.
+    expect(cache.has('key1', 'string')).toBe(false);
 
     // Size invariant maintained
     expect(cache.size).toBeLessThanOrEqual(DEFAULT_MAX_SIZE);
@@ -176,22 +177,21 @@ describe('ScValCache eviction order past DEFAULT_MAX_SIZE (issue #729)', () => {
     cache.get('cold3', 'symbol');
     expect(cache.size).toBe(maxSize);
 
-    const hotInstance = cache.get('hot', 'symbol');
+    cache.get('hot', 'symbol');
 
     // Repeatedly touch the hot key while inserting new cold keys.
     for (let i = 0; i < 10; i++) {
-      const hotNow = cache.get('hot', 'symbol');
-      expect(hotNow).toBe(hotInstance);
+      cache.get('hot', 'symbol');
+      expect(cache.has('hot', 'symbol')).toBe(true);
       cache.get(`new${i}`, 'symbol');
       expect(cache.size).toBeLessThanOrEqual(maxSize);
     }
 
-    // The hot key must still be cached (same instance) after all the pressure.
-    expect(cache.get('hot', 'symbol')).toBe(hotInstance);
+    // The hot key must still be cached after all the pressure.
+    expect(cache.has('hot', 'symbol')).toBe(true);
 
     // The originally-inserted cold keys must have been evicted instead.
-    const cold1Refetched = cache.get('cold1', 'symbol');
-    expect(cold1Refetched).not.toBe(hotInstance);
+    expect(cache.has('cold1', 'symbol')).toBe(false);
     expect(cache.size).toBeLessThanOrEqual(maxSize);
   });
 
@@ -214,7 +214,8 @@ describe('ScValCache eviction order past DEFAULT_MAX_SIZE (issue #729)', () => {
     cache.get(addr3, 'address');
     expect(cache.size).toBe(maxSize);
 
-    // addr1 was evicted; fetching it again creates a new instance
+    // addr1 was evicted; fetching it again recomputes it
+    expect(cache.has(addr1, 'address')).toBe(false);
     const addr1Refetched = cache.get(addr1, 'address');
     expect(addr1Refetched).toBeDefined();
     expect(addr1Refetched.toXDR().length).toBeGreaterThan(0);
