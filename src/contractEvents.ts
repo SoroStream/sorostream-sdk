@@ -12,7 +12,7 @@
  * Issue #269.
  */
 
-import { scValToNative, xdr } from '@stellar/stellar-sdk';
+import { nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { rpc } from '@stellar/stellar-sdk';
 import { safeBigInt, safeIdString } from './utils.js';
 
@@ -296,6 +296,54 @@ function dataRecord(raw: rpc.Api.EventResponse): Record<string, unknown> {
     return {};
   }
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+function makeEvent(
+  topic: xdr.ScVal[],
+  value: xdr.ScVal,
+): rpc.Api.EventResponse {
+  return {
+    type: 'contract',
+    topic,
+    value,
+    txHash: 'deadbeef',
+    ledger: 42,
+    ledgerClosedAt: '2024-01-01T00:00:00Z',
+    contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+    id: '1-1',
+    pagingToken: '1-1',
+    inSuccessfulContractCall: true,
+  } as unknown as rpc.Api.EventResponse;
+}
+
+describe('parseContractEvent', () => {
+  it('returns UnknownEventPayload for an unrecognised topic[0] type', () => {
+    const raw = makeEvent(
+      [nativeToScVal('SomeUnknownEvent', { type: 'symbol' })],
+      nativeToScVal({ foo: 'bar' }),
+    );
+
+    const payload = parseContractEvent(raw);
+
+    expect(payload.type).toBe('UnknownEvent');
+    if (payload.type !== 'UnknownEvent') throw new Error('unreachable');
+    expect(payload.rawType).toBe('SomeUnknownEvent');
+    expect(payload.rawData).toEqual({ foo: 'bar' });
+    expect(payload.txHash).toBe('deadbeef');
+    expect(payload.ledger).toBe(42);
+  });
+
+  it('returns UnknownEventPayload with rawType null when topics are empty', () => {
+    const raw = makeEvent([], nativeToScVal({ foo: 'bar' }));
+
+    const payload = parseContractEvent(raw);
+
+    expect(payload.type).toBe('UnknownEvent');
+    if (payload.type !== 'UnknownEvent') throw new Error('unreachable');
+    expect(payload.rawType).toBeNull();
+  });
+});
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
