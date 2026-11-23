@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { LocalStorageStreamCache } from '../src/streamStateCache.js';
+import { LocalStorageStreamCache, DEFAULT_MAX_AGE_MS } from '../src/streamStateCache.js';
 import { RequestDeduplicator } from '../src/requestDeduplicator.js';
 import { ConnectionPool } from '../src/connectionPool.js';
 import { ReplayTransport, ReplayFixtureError } from '../src/replayTransport.js';
@@ -236,5 +236,58 @@ describe('#720 replay fixture parameter matching', () => {
   it('throws when no recorded or unparameterised entry matches', async () => {
     const transport = ReplayTransport.replay(fixture());
     await expect(transport.getAccount('GZZZ')).rejects.toBeInstanceOf(ReplayFixtureError);
+  });
+});
+
+// ── contractId key scoping ───────────────────────────────────────────────────
+
+describe('LocalStorageStreamCache contractId key scoping', () => {
+  it('two caches with the same network but different contractIds do not share entries', () => {
+    const adapter = memoryAdapter();
+    const cacheA = new LocalStorageStreamCache(adapter, DEFAULT_MAX_AGE_MS, 'CONTRACT-A');
+    const cacheB = new LocalStorageStreamCache(adapter, DEFAULT_MAX_AGE_MS, 'CONTRACT-B');
+
+    cacheA.set('testnet', stream('s1'));
+
+    // contractB must not find the entry written by contractA.
+    expect(cacheB.get('testnet', 's1')).toBeUndefined();
+    // contractA still finds its own entry.
+    expect(cacheA.get('testnet', 's1')?.id).toBe('s1');
+  });
+
+  it('two caches on different networks with the same contractId do not share entries', () => {
+    const adapter = memoryAdapter();
+    const cacheTestnet = new LocalStorageStreamCache(adapter, DEFAULT_MAX_AGE_MS, 'CONTRACT-X');
+    const cacheMainnet = new LocalStorageStreamCache(adapter, DEFAULT_MAX_AGE_MS, 'CONTRACT-X');
+
+    cacheTestnet.set('testnet', stream('s2'));
+
+    expect(cacheMainnet.get('mainnet', 's2')).toBeUndefined();
+    expect(cacheTestnet.get('testnet', 's2')?.id).toBe('s2');
+  });
+
+  it('delete() only removes the entry for its own contractId', () => {
+    const adapter = memoryAdapter();
+    const cacheA = new LocalStorageStreamCache(adapter, DEFAULT_MAX_AGE_MS, 'CONTRACT-A');
+    const cacheB = new LocalStorageStreamCache(adapter, DEFAULT_MAX_AGE_MS, 'CONTRACT-B');
+
+    cacheA.set('testnet', stream('s3'));
+    cacheB.set('testnet', stream('s3'));
+
+    cacheA.delete('testnet', 's3');
+
+    expect(cacheA.get('testnet', 's3')).toBeUndefined();
+    expect(cacheB.get('testnet', 's3')?.id).toBe('s3');
+  });
+
+  it('a cache without contractId remains backward-compatible with the old key format', () => {
+    const adapter = memoryAdapter();
+    const legacy = new LocalStorageStreamCache(adapter);
+    legacy.set('testnet', stream('s4'));
+    expect(legacy.get('testnet', 's4')?.id).toBe('s4');
+
+    // A scoped cache must not find the legacy entry.
+    const scoped = new LocalStorageStreamCache(adapter, DEFAULT_MAX_AGE_MS, 'C');
+    expect(scoped.get('testnet', 's4')).toBeUndefined();
   });
 });

@@ -14,6 +14,7 @@ import {
   formatTokenAmount,
   _clearNegativeLookupCache,
   _getNegativeCacheEntry,
+  DEFAULT_NETWORK_KEY,
 } from '../src/decimalAware.js';
 import type { TokenMetadataProvider } from '../src/decimalAware.js';
 
@@ -244,5 +245,87 @@ describe('getTokenDecimals negative-lookup cache (issue #684)', () => {
     // TOKEN_B has a valid lookup — should not be affected by TOKEN_A's cache entry
     expect(await getTokenDecimals(TOKEN_B, providerB)).toBe(6);
     expect(providerB.getTokenMetadata).toHaveBeenCalledOnce();
+  });
+});
+
+// ── Cross-network negative-cache isolation (issue #XXX) ───────────────────────
+
+describe('negativeLookupCache cross-network isolation', () => {
+  const TOKEN = 'CTOKENX0000000000000000000000000000000000000000000000000001';
+  const TESTNET = 'Test SDF Network ; September 2015';
+  const MAINNET = 'Public Global Stellar Network ; September 2015';
+  const rpcError = new Error('contract not found');
+
+  it('a failure on testnet does not block lookup on mainnet for the same token', async () => {
+    const failingProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
+    const successProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockResolvedValue({ name: 'TKN', symbol: 'TKN', decimals: 6 }),
+    };
+
+    // Cache a failure under TESTNET scope.
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, TESTNET)).rejects.toBe(rpcError);
+
+    // The mainnet scope must be unaffected — provider is called and returns 6.
+    const decimals = await getTokenDecimals(TOKEN, successProvider, 60_000, MAINNET);
+    expect(decimals).toBe(6);
+    expect(successProvider.getTokenMetadata).toHaveBeenCalledOnce();
+  });
+
+  it('the same token address is served from cache independently per network', async () => {
+    const failingProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
+
+    // Poison under TESTNET.
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, TESTNET)).rejects.toBe(rpcError);
+
+    // Second call on TESTNET hits the cache (provider called only once so far).
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, TESTNET)).rejects.toBe(rpcError);
+    expect(failingProvider.getTokenMetadata).toHaveBeenCalledOnce();
+
+    // MAINNET scope starts clean — provider is called again.
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, MAINNET)).rejects.toBe(rpcError);
+    expect(failingProvider.getTokenMetadata).toHaveBeenCalledTimes(2);
+
+    // Second call on MAINNET hits the mainnet cache slot.
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, MAINNET)).rejects.toBe(rpcError);
+    expect(failingProvider.getTokenMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it('no-networkKey calls fall through to the default scope without cross-contamination', async () => {
+    const failingProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
+    const successProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockResolvedValue({ name: 'TKN', symbol: 'TKN', decimals: 7 }),
+    };
+
+    // Poison under the default scope (no networkKey passed).
+    await expect(getTokenDecimals(TOKEN, failingProvider)).rejects.toBe(rpcError);
+
+    // An explicit MAINNET key is a different scope; the success provider is reached.
+    const decimals = await getTokenDecimals(TOKEN, successProvider, 60_000, MAINNET);
+    expect(decimals).toBe(7);
+
+    // The cache entry stored without a key uses DEFAULT_NETWORK_KEY sentinel.
+    expect(_getNegativeCacheEntry(TOKEN, DEFAULT_NETWORK_KEY)).toBeDefined();
+    expect(_getNegativeCacheEntry(TOKEN, MAINNET)).toBeUndefined();
+  });
+
+  it('_getNegativeCacheEntry is scoped by networkKey', async () => {
+    const failingProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
+
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, TESTNET)).rejects.toBe(rpcError);
+
+    // Entry exists under TESTNET key.
+    expect(_getNegativeCacheEntry(TOKEN, TESTNET)).toBeDefined();
+    // No entry under MAINNET key.
+    expect(_getNegativeCacheEntry(TOKEN, MAINNET)).toBeUndefined();
+    // No entry under the default key.
+    expect(_getNegativeCacheEntry(TOKEN)).toBeUndefined();
   });
 });

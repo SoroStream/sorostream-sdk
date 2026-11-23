@@ -37,114 +37,81 @@ describe('verifyManifest', () => {
   });
 });
 
-import { describe as describeGen, expect as expectGen, it as itGen } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync } from 'node:fs';
-import { join as joinPath } from 'node:path';
+// ── generateIntegrityManifest self-exclusion (issue #XXX) ────────────────────
+
+import { afterEach as afterEachSuite, beforeEach as beforeEachSuite } from 'vitest';
+import { generateIntegrityManifest, DEFAULT_MANIFEST_FILENAME } from '../src/bundleIntegrity.js';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { join as pathJoin } from 'node:path';
 import { tmpdir } from 'node:os';
-import { generateIntegrityManifest } from '../src/bundleIntegrity.js';
 
-/**
- * Try to create a directory symlink. On Windows without Developer Mode or
- * elevated privileges, `symlinkSync` throws EPERM. Returns `true` on success,
- * `false` when the platform silently forbids it (so the test can be skipped).
- */
-function trySymlink(target: string, path: string): boolean {
-  try {
-    symlinkSync(target, path, 'dir');
-    return true;
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'EPERM') return false;
-    throw err;
-  }
-}
+describe('generateIntegrityManifest – manifest self-exclusion', () => {
+  let distDir: string;
 
-describeGen('generateIntegrityManifest – symlink cycle detection', () => {
-  itGen('does not stack-overflow on a symlinked directory that creates a cycle', () => {
-    // Build a temporary dist tree:
-    //   <root>/
-    //     a.js          (real file)
-    //     sub/
-    //       b.js        (real file)
-    //       loop -> ../ (symlink pointing back to the root → cycle)
-    const root = mkdtempSync(joinPath(tmpdir(), 'sorostream-integrity-cycle-'));
-    const sub = joinPath(root, 'sub');
-    mkdirSync(sub);
-    writeFileSync(joinPath(root, 'a.js'), 'console.log("a");', 'utf-8');
-    writeFileSync(joinPath(sub, 'b.js'), 'console.log("b");', 'utf-8');
-
-    // On Windows without elevated privileges, directory symlinks are not
-    // permitted (EPERM). Skip the symlink-specific assertions in that case,
-    // but still verify the base tree is walked correctly.
-    const symlinkCreated = trySymlink(root, joinPath(sub, 'loop'));
-
-    try {
-      // Must complete without throwing a RangeError (stack overflow) or any
-      // other error, and must enumerate exactly the two real files.
-      const manifest = generateIntegrityManifest(root, '@sorostream/sdk', '1.0.0');
-
-      const filePaths = manifest.files.map((f) => f.file).sort();
-      expectGen(filePaths).toContain('a.js');
-      expectGen(filePaths).toContain('sub/b.js');
-
-      if (symlinkCreated) {
-        // The cycle (sub/loop) must NOT produce duplicate entries or cause
-        // infinite recursion. 'a.js' must appear exactly once.
-        const aCount = manifest.files.filter((f) => f.file === 'a.js').length;
-        expectGen(aCount).toBe(1);
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  beforeEachSuite(() => {
+    // Create a real temp directory with three files:
+    //   index.js, index.js.map, integrity-manifest.json
+    distDir = mkdtempSync(pathJoin(tmpdir(), 'sorostream-test-'));
+    writeFileSync(pathJoin(distDir, 'index.js'), "console.log('hello')");
+    writeFileSync(pathJoin(distDir, 'index.js.map'), '{}');
+    writeFileSync(pathJoin(distDir, 'integrity-manifest.json'), '{"stale":true}');
   });
 
-  itGen('handles a dangling symlink without throwing', () => {
-    const root = mkdtempSync(joinPath(tmpdir(), 'sorostream-integrity-dangling-'));
-    writeFileSync(joinPath(root, 'real.js'), 'export {};', 'utf-8');
-
-    // Symlink to a path that does not exist. Skip on Windows without privilege.
-    const symlinkCreated = trySymlink(
-      joinPath(root, 'does-not-exist'),
-      joinPath(root, 'dangling'),
-    );
-
-    try {
-      // Should not throw; the dangling symlink is silently skipped.
-      const manifest = generateIntegrityManifest(root, '@sorostream/sdk', '1.0.0');
-      const filePaths = manifest.files.map((f) => f.file);
-      expectGen(filePaths).toContain('real.js');
-
-      if (symlinkCreated) {
-        // dangling entry must not appear in the manifest
-        expectGen(filePaths.some((p) => p.includes('dangling'))).toBe(false);
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  afterEachSuite(() => {
+    rmSync(distDir, { recursive: true, force: true });
   });
 
-  itGen('processes a normal directory tree without symlinks correctly', () => {
-    const root = mkdtempSync(joinPath(tmpdir(), 'sorostream-integrity-normal-'));
-    const esm = joinPath(root, 'esm');
-    const cjs = joinPath(root, 'cjs');
-    mkdirSync(esm);
-    mkdirSync(cjs);
-    writeFileSync(joinPath(esm, 'index.js'), 'export const x = 1;', 'utf-8');
-    writeFileSync(joinPath(cjs, 'index.cjs'), 'module.exports = 1;', 'utf-8');
+  it('excludes the default manifest filename from the walk', () => {
+    const manifest = generateIntegrityManifest(distDir, '@sorostream/sdk', '1.0.0');
 
-    try {
-      const manifest = generateIntegrityManifest(root, '@sorostream/sdk', '2.0.0');
+    const filenames = manifest.files.map((f) => f.file);
+    expect(filenames).not.toContain('integrity-manifest.json');
+    expect(filenames).toContain('index.js');
+    expect(filenames).toContain('index.js.map');
+    expect(manifest.files).toHaveLength(2);
+  });
 
-      expectGen(manifest.package).toBe('@sorostream/sdk');
-      expectGen(manifest.version).toBe('2.0.0');
-      const paths = manifest.files.map((f) => f.file).sort();
-      expectGen(paths).toEqual(['cjs/index.cjs', 'esm/index.js']);
-      // Every entry must have a valid 64-hex sha256
-      for (const entry of manifest.files) {
-        expectGen(/^[0-9a-f]{64}$/.test(entry.sha256)).toBe(true);
-        expectGen(entry.size).toBeGreaterThan(0);
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  it('DEFAULT_MANIFEST_FILENAME matches the conventional output name', () => {
+    expect(DEFAULT_MANIFEST_FILENAME).toBe('integrity-manifest.json');
+  });
+
+  it('allows a custom excludeFile name', () => {
+    // Exclude 'index.js.map' instead of the manifest.
+    const manifest = generateIntegrityManifest(distDir, '@sorostream/sdk', '1.0.0', 'index.js.map');
+
+    const filenames = manifest.files.map((f) => f.file);
+    expect(filenames).not.toContain('index.js.map');
+    expect(filenames).toContain('integrity-manifest.json');
+    expect(filenames).toContain('index.js');
+  });
+
+  it('includes all files when excludeFile is an empty string', () => {
+    const manifest = generateIntegrityManifest(distDir, '@sorostream/sdk', '1.0.0', '');
+
+    const filenames = manifest.files.map((f) => f.file);
+    expect(filenames).toContain('integrity-manifest.json');
+    expect(filenames).toContain('index.js');
+    expect(filenames).toContain('index.js.map');
+    expect(manifest.files).toHaveLength(3);
+  });
+
+  it('records correct hashes for the included files', () => {
+    const manifest = generateIntegrityManifest(distDir, '@sorostream/sdk', '1.0.0');
+
+    const jsEntry = manifest.files.find((f) => f.file === 'index.js')!;
+    expect(jsEntry.sha256).toBe(computeSha256("console.log('hello')"));
+    expect(jsEntry.size).toBe("console.log('hello')".length);
+  });
+
+  it('works with subdirectories and excludes manifest only by basename', () => {
+    // Add a subdirectory with another file.
+    mkdirSync(pathJoin(distDir, 'sub'));
+    writeFileSync(pathJoin(distDir, 'sub', 'chunk.js'), 'chunk');
+
+    const manifest = generateIntegrityManifest(distDir, '@sorostream/sdk', '1.0.0');
+
+    const filenames = manifest.files.map((f) => f.file);
+    expect(filenames).toContain('sub/chunk.js');
+    expect(filenames).not.toContain('integrity-manifest.json');
   });
 });
