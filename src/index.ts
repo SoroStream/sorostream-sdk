@@ -202,6 +202,7 @@ export {
   StreamAlreadyLockedError,
   TransactionFailedError,
   InvalidAddressError,
+  InvalidI128Error,
   AccountNotFoundError,
   InsufficientBalanceError,
   ZeroDurationError,

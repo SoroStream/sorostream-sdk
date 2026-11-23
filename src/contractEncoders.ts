@@ -1,7 +1,12 @@
 import { Address, Contract, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { ContractVersion, CreateStreamParams, SplitStreamParams } from './types.js';
 import { isValidStellarAddress, parseStreamId } from './utils.js';
-import { AccountNotFoundError, InvalidAddressError, MetadataTooLargeError } from './errors.js';
+import {
+  AccountNotFoundError,
+  InvalidAddressError,
+  InvalidI128Error,
+  MetadataTooLargeError,
+} from './errors.js';
 import { cachedScVal, cachedBool } from './scValCache.js';
 
 // Issue #458: sanitise caller-supplied strings at the boundary before they
@@ -286,10 +291,10 @@ export function encodeAddress(address: string): xdr.ScVal {
   return nativeToScVal(requireAddress(address), { type: 'address' });
 }
 
-/** Encodes a signed 128-bit integer as an `ScVal`. Throws `RangeError` outside the i128 range. */
+/** Encodes a signed 128-bit integer as an `ScVal`. Throws `InvalidI128Error` outside the i128 range. */
 export function encodeI128(value: bigint): xdr.ScVal {
   if (value < I128_MIN || value > I128_MAX) {
-    throw new RangeError(`Value ${value} is outside the i128 range`);
+    throw new InvalidI128Error(value);
   }
   return nativeToScVal(value, { type: 'i128' });
 }
