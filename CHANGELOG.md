@@ -7,10 +7,14 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 ## [Unreleased]
 
 ### Added
+- Add `RateLimiter.cancelPending(reason?)` and `RateLimiterCancelledError`, which reject tasks still queued in a `RateLimiter` instead of leaving their promises unsettled (#947)
 - Add streaming deserialization entry point `deserializeStreamRecords(payload)`, a generator that walks a top-level stream-history JSON array and yields records incrementally without buffering the parsed payload, for callers that only need the first N records; the existing whole-payload helpers are unchanged (#708)
 - Add token-type-conditional template parameters via `ConditionalParam`/`resolveConditionalParam` and the new `templates.minAmountStream`, resolving decimals-aware parameters at instantiation time so one template can produce different values for different token types (#710)
 
 ### Fixed
+- Fix `StreamSimulator.advance` suppressing the expiry callback of a renewed stream (same ID, extended `endTime`) because fired expiries were keyed by stream ID alone (#948)
+- Fix `createFederationPlugin`'s `resolveFresh` joining an in-flight non-fresh `resolve()` and so returning a possibly cached result (#956)
+- Fix `bigIntScalarConfig.serialize`/`parseValue` throwing an opaque `RangeError` for a non-integer number instead of a descriptive `TypeError` (#957)
 - Fix `toStroopsForToken` truncating to the token's native precision instead of rounding excess fractional digits up (#717)
 - Fix `nativeToStream` referencing an undefined `stream` variable in dead code left over from a merge, which made every stream read throw `ReferenceError` (#611)
 - Fix `createStream` validating the token contract (an RPC round-trip) before cheap offline checks like `durationSeconds`, so malformed input unnecessarily waited on a network call before failing (#542)

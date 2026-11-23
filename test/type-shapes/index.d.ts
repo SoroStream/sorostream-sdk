@@ -76,7 +76,7 @@ export { computeSha256, generateIntegrityManifest, verifyFileIntegrity, verifyMa
 export type { IntegrityEntry, IntegrityManifest } from './bundleIntegrity.js';
 export { GasProfiler } from './profiler.js';
 export type { SimulationProfile, ProfileReport, ProfilerConfig } from './profiler.js';
-export { RateLimiter } from './rate-limiter.js';
+export { RateLimiter, RateLimiterCancelledError } from './rate-limiter.js';
 export { ReplayTransport, ReplayFixtureError, ReplayFixtureParseError } from './replayTransport.js';
 export type { FixtureEntry, FixtureFile, RecordTransportOptions, RecordingRpcTransport, ReplayingRpcTransport, ReplayOptions, } from './replayTransport.js';
 export { loadSorostreamConfig, mergeSorostreamConfig, } from './sorostream-config.js';

@@ -55,7 +55,11 @@ export class StreamSimulator {
   private clockOffsetSeconds = 0;
   private currentLedgerSeq = 0;
   private expiryCallbacks = new Map<string, StreamExpiryCallback>();
-  private firedExpiry = new Set<string>();
+  /**
+   * `endTime`s whose expiry has already fired, per stream ID. Keyed by both so
+   * a renewed stream (same ID, later `endTime`) can fire again (issue #948).
+   */
+  private firedExpiry = new Map<string, Set<number>>();
   private storageTtl = new Map<string, number>();
   private storageTtlLedger = new Map<string, number>();
 
@@ -84,7 +88,7 @@ export class StreamSimulator {
   /**
    * Advances the simulated clock by `seconds`. Any stream in `streams` whose
    * `endTime` is newly crossed fires its registered expiry callback exactly
-   * once. Optionally also advances ledger count (defaults to seconds / 5 if ledgers omitted and seconds > 0).
+   * once per distinct `endTime`. Optionally also advances ledger count (defaults to seconds / 5 if ledgers omitted and seconds > 0).
    */
   advance(seconds: number, streams: Stream[] = [], ledgers?: number): void {
     if (seconds < 0) throw new Error('seconds must be >= 0');
@@ -95,14 +99,23 @@ export class StreamSimulator {
     }
     const now = this.now();
     for (const stream of streams) {
-      if (!this.firedExpiry.has(stream.id) && now >= stream.endTime) {
-        this.firedExpiry.add(stream.id);
-        this.expiryCallbacks.get(stream.id)?.(stream);
+      if (now < stream.endTime) continue;
+      let fired = this.firedExpiry.get(stream.id);
+      if (fired?.has(stream.endTime)) continue;
+      if (!fired) {
+        fired = new Set<number>();
+        this.firedExpiry.set(stream.id, fired);
       }
+      fired.add(stream.endTime);
+      this.expiryCallbacks.get(stream.id)?.(stream);
     }
   }
 
-  /** Registers a callback fired the first time `advance` crosses the stream's `endTime`. */
+  /**
+   * Registers a callback fired the first time `advance` crosses the stream's `endTime`.
+   * If the stream is later renewed (same ID, extended `endTime`), the callback
+   * fires again when the new `endTime` is crossed.
+   */
   onExpire(streamId: string, callback: StreamExpiryCallback): void {
     this.expiryCallbacks.set(streamId, callback);
   }
