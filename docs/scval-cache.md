@@ -4,10 +4,14 @@
 
 ## Overview
 
-`ScValCache` (in `src/scValCache.ts`) reduces allocation pressure on hot paths
-by caching the `xdr.ScVal` objects produced by `nativeToScVal`.  Because these
-objects are immutable XDR structures, the same instance can be safely reused
-across multiple calls.
+`ScValCache` (in `src/scValCache.ts`) speeds up hot paths by caching the result
+of `nativeToScVal` (for an `address`, that is StrKey decoding and checksum
+validation).  `xdr.ScVal` objects are ordinary **mutable** JS objects, so the
+cache does not share them: each entry stores the value's serialized XDR (a
+base64 string) and every `get` returns a **fresh, independent** `xdr.ScVal`
+decoded from it.  A caller can mutate what it receives without affecting the
+cache or any other caller (issue #985).  Use `cache.has(value, type)` to check
+whether an entry is currently cached without touching its LRU position.
 
 ---
 

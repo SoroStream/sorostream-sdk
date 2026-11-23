@@ -171,13 +171,33 @@ export class StreamSimulator {
   /**
    * True when the stream's recorded storage TTL has passed — either the
    * timestamp-based TTL at the given simulated time, or the ledger-based TTL
-   * at the simulator's current ledger sequence.
+   * at the given (or current) ledger sequence.
+   *
+   * ### Parameter symmetry with {@link simulateWithdraw}
+   *
+   * `simulateWithdraw` accepts an `opts.ledger` override for the ledger-based
+   * TTL check so callers can run a point-in-time check without mutating the
+   * simulator's state. `isStorageExpired` now accepts the same optional
+   * `ledger` parameter for the same reason (issue #907).
+   *
+   * @param streamId - ID of the stream whose storage TTL is being checked.
+   * @param at - Unix timestamp (seconds) to test the timestamp-based TTL against.
+   *   Defaults to the simulator's current simulated time (`this.now()`).
+   * @param ledger - Ledger sequence to test the ledger-based TTL against.
+   *   Defaults to the simulator's current ledger sequence (`this.currentLedgerSeq`).
+   *   Pass an explicit value for atomic, point-in-time checks that must not
+   *   depend on the simulator's current state — mirrors `opts.ledger` in
+   *   {@link simulateWithdraw}.
    */
-  isStorageExpired(streamId: string, at: number = this.now()): boolean {
+  isStorageExpired(
+    streamId: string,
+    at: number = this.now(),
+    ledger: number = this.currentLedgerSeq,
+  ): boolean {
     const expiresAt = this.storageTtl.get(streamId);
     if (expiresAt !== undefined && at >= expiresAt) return true;
     const expiresAtLedger = this.storageTtlLedger.get(streamId);
-    return expiresAtLedger !== undefined && this.currentLedgerSeq >= expiresAtLedger;
+    return expiresAtLedger !== undefined && ledger >= expiresAtLedger;
   }
 
   /**
@@ -237,6 +257,12 @@ export class StreamSimulator {
     }
 
     const target = amount ?? claimable;
+    if (amount !== undefined && amount <= 0n) {
+      return fail(
+        'insufficientClaimable',
+        `Requested withdraw amount must be greater than zero; got ${amount}.`,
+      );
+    }
     if (target > claimable) {
       return fail(
         'insufficientClaimable',

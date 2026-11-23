@@ -476,3 +476,86 @@ describe('SoroStreamClient read deduplication (#426)', () => {
     expect((client as never as { requestDedup: { size: number } }).requestDedup.size).toBe(0);
   });
 });
+
+// ── #435 / clear() + same-key dedupe() interleaving ─────────────────────────
+
+describe('RequestDeduplicator clear() + fresh dedupe() interleaving', () => {
+  it('a fresh dedupe() after clear() is not removed by the old entry settling', async () => {
+    const dedup = new RequestDeduplicator();
+
+    // Track call count so we can confirm two distinct requests run.
+    let calls = 0;
+
+    // Manually-controlled first request so we can interleave clear() + dedupe().
+    let resolveFirst!: (v: number) => void;
+    const firstFactory = () =>
+      new Promise<number>((resolve) => {
+        calls++;
+        resolveFirst = resolve;
+      });
+
+    // Start the first in-flight entry.
+    const first = dedup.dedupe('k', firstFactory);
+    expect(dedup.has('k')).toBe(true);
+
+    // clear() detaches tracking; the first entry's settle-cleanup will find
+    // this.inFlight.get('k') !== entry and must NOT delete the new entry.
+    dedup.clear();
+    expect(dedup.has('k')).toBe(false);
+
+    // A fresh dedupe() registers a brand-new entry for the same key.
+    let resolveSecond!: (v: number) => void;
+    const secondFactory = () =>
+      new Promise<number>((resolve) => {
+        calls++;
+        resolveSecond = resolve;
+      });
+    const second = dedup.dedupe('k', secondFactory);
+    expect(dedup.has('k')).toBe(true);
+
+    // Settle the first request — its cleanup must leave the new entry intact.
+    resolveFirst(1);
+    await first;
+
+    // The new entry must still be tracked after the old one's finally() ran.
+    expect(dedup.has('k')).toBe(true);
+
+    // Settle the second request and confirm both callers receive their own values.
+    resolveSecond(2);
+    expect(await second).toBe(2);
+    expect(dedup.has('k')).toBe(false);
+
+    expect(calls).toBe(2);
+    expect(dedup.stats().started).toBe(2);
+    expect(dedup.stats().deduplicated).toBe(0);
+  });
+
+  it('a joiner arriving after clear() does not share the pre-clear entry', async () => {
+    const dedup = new RequestDeduplicator();
+    let calls = 0;
+
+    let resolveFirst!: (v: string) => void;
+    const first = dedup.dedupe('key', () =>
+      new Promise<string>((r) => {
+        calls++;
+        resolveFirst = r;
+      }),
+    );
+
+    dedup.clear();
+
+    // This new call must start its own request, not join the cleared one.
+    const second = dedup.dedupe('key', () => {
+      calls++;
+      return Promise.resolve('fresh');
+    });
+
+    resolveFirst('old');
+    const [v1, v2] = await Promise.all([first, second]);
+
+    expect(v1).toBe('old');
+    expect(v2).toBe('fresh');
+    expect(calls).toBe(2);
+    expect(dedup.stats().deduplicated).toBe(0);
+  });
+});

@@ -91,6 +91,18 @@ export class InvalidAddressError extends SoroStreamError {
   }
 }
 
+/**
+ * Thrown by `encodeI128` when a value falls outside the signed 128-bit range.
+ * Typed (rather than a bare `RangeError`) so callers can `instanceof`-check
+ * it the same way as {@link InvalidAddressError}. (Issue #977)
+ */
+export class InvalidI128Error extends SoroStreamError {
+  constructor(value: bigint) {
+    super(`Value ${value} is outside the i128 range`);
+    this.name = 'InvalidI128Error';
+  }
+}
+
 export class AccountNotFoundError extends SoroStreamError {
   constructor(address: string) {
     super(`Account not found on-chain: ${address}`);

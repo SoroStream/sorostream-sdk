@@ -37,6 +37,7 @@
  */
 
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import type { Network } from './types.js';
 
 // ── Config type ───────────────────────────────────────────────────────────────
@@ -166,6 +167,13 @@ export async function loadSorostreamConfig(cwd?: string): Promise<SorostreamConf
 
   for (const fileName of CONFIG_FILE_NAMES) {
     const filePath = path.join(root, fileName);
+
+    // Check whether the file exists before attempting to import it.
+    // This lets us distinguish "file not found" (silent, expected) from
+    // "file exists but failed to parse/execute" (issue #907 — should warn so
+    // the developer knows their config was skipped, not silently ignored).
+    const fileExists = existsSync(filePath);
+
     try {
       // Dynamic import works for both CJS (require-compatible) and ESM.
       // The file:// prefix is required on Windows for absolute paths.
@@ -183,8 +191,27 @@ export async function loadSorostreamConfig(cwd?: string): Promise<SorostreamConf
       if (config && typeof config === 'object') {
         return config;
       }
-    } catch {
-      // Module not found or failed to load — silently try the next candidate.
+    } catch (err) {
+      if (fileExists) {
+        // The config file exists but failed to load (e.g. SyntaxError, runtime
+        // error). Warn so the developer knows it was skipped, then rethrow so
+        // the caller can decide how to handle the broken config (issue #907).
+        const message =
+          err instanceof Error ? err.message : String(err);
+        const wrappedError = new Error(
+          `Failed to load sorostream config file "${filePath}": ${message}`,
+        );
+        if (err instanceof Error && err.stack) {
+          wrappedError.stack = wrappedError.message + '\nCaused by: ' + err.stack;
+        }
+        // Emit a warning so it surfaces even when the error is not rethrown by
+        // the caller, while still allowing them to catch and handle it.
+        if (typeof process !== 'undefined' && typeof process.emitWarning === 'function') {
+          process.emitWarning(wrappedError.message, { type: 'SorostreamConfigError' });
+        }
+        throw wrappedError;
+      }
+      // File does not exist — silently try the next candidate.
       continue;
     }
   }
@@ -227,9 +254,22 @@ export function mergeSorostreamConfig<
 
   return {
     // Apply file-config defaults only when the runtime option is absent.
+    //
+    // `network`, `rpcUrl`, and `txTimeoutMs` only fall back to file config
+    // when the runtime option is `undefined` (i.e. the caller omitted it
+    // entirely). An explicit empty string `''` or `0` is treated as a
+    // deliberate caller choice and is NOT overridden.
     ...(fileConfig.network !== undefined && runtimeOptions.network === undefined
       ? { network: fileConfig.network }
       : {}),
+    // `contractId` additionally treats an empty string `''` as "not set",
+    // because a blank contract address is never a valid Stellar address and
+    // most callers set it via an environment variable that may evaluate to
+    // `''` when the variable is unset (e.g. `contractId: process.env.ID`).
+    // The other fields — `network`, `rpcUrl`, and `txTimeoutMs` — accept only
+    // `undefined` as "absent" because an empty/zero value there can be a
+    // meaningful (if unusual) runtime choice (e.g. `rpcUrl: ''` might be
+    // intentional when a custom transport adapter is wired in separately).
     ...(fileConfig.contractId !== undefined &&
     (runtimeOptions.contractId === undefined || runtimeOptions.contractId === '')
       ? { contractId: fileConfig.contractId }

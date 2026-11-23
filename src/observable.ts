@@ -422,6 +422,31 @@ export interface ShareLatestOptions {
  * This is what makes `observeStream()` safe to call from many components: one
  * poll loop feeds every subscriber, and it is torn down as soon as the last
  * one unsubscribes.
+ *
+ * ### Reset-on-refcount-zero behaviour
+ * When the subscriber count drops to zero the internal state is reset
+ * **immediately and synchronously**: the upstream producer is torn down,
+ * `hasValue` is cleared, and the cached `latest` value is discarded.  A new
+ * subscriber arriving after that point starts the producer fresh and receives
+ * no replay — it must wait for the first emission from the new producer run.
+ *
+ * **This matters for `observeStream()` consumers.** Every observable returned
+ * by `observeStream()` is built on `shareLatest`, so the following patterns
+ * will lose the previously replayed value:
+ *
+ * - **React StrictMode double-invoke** — React unmounts and immediately
+ *   remounts every component in development mode.  Between the unmount and
+ *   the remount the refcount hits zero, the producer tears down, and the next
+ *   mount must wait for the first poll before rendering data.
+ *
+ * - **Fast route changes** — navigating away from a view and back within a
+ *   single event-loop tick causes the same transient zero-refcount teardown.
+ *
+ * To preserve the last value across a brief zero-refcount gap, wrap the
+ * observable at the call site with a small replay buffer (e.g. using
+ * `shareReplay(1)` from RxJS, or by keeping a stable subscription alive in a
+ * top-level service / React context) so that the refcount never actually
+ * reaches zero during the remount window.
  */
 export function shareLatest<T>(
   producer: SubscribeFn<T>,
