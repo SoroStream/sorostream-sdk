@@ -561,14 +561,16 @@ export class MockSoroStreamClient {
       throw new Error('Ratio numerator must be less than denominator');
     }
 
-    // Cancel the original stream
-    this.streams.set(params.streamId, { ...stream, status: 'Cancelled' });
-
     const now = nowSec();
     const remainingDuration = stream.endTime - Math.max(now, stream.lastWithdrawTime);
+    // Splitting a stream that is already at or past its end time has nothing
+    // to divide; reject it before the original stream is touched. (Issue #979)
+    if (remainingDuration <= 0) {
+      throw new Error('Cannot split a stream with no remaining duration');
+    }
     const remainingBalance = safeClaimable(
       stream.flowRate,
-      BigInt(Math.max(0, remainingDuration)),
+      BigInt(remainingDuration),
       stream.deposit,
     );
 
@@ -580,8 +582,13 @@ export class MockSoroStreamClient {
     const amountA = (remainingBalance * ratioA) / totalRatio;
     const amountB = (remainingBalance * ratioB) / totalRatio;
 
-    const flowRateA = (amountA / BigInt(Math.max(1, remainingDuration))) as PositiveFlowRate;
-    const flowRateB = (amountB / BigInt(Math.max(1, remainingDuration))) as PositiveFlowRate;
+    // asPositiveFlowRate enforces the PositiveFlowRate invariant at runtime
+    // rather than an unchecked cast; it throws before any state is mutated.
+    const flowRateA = asPositiveFlowRate(amountA / BigInt(remainingDuration));
+    const flowRateB = asPositiveFlowRate(amountB / BigInt(remainingDuration));
+
+    // Cancel the original stream (only after all validation has passed)
+    this.streams.set(params.streamId, { ...stream, status: 'Cancelled' });
 
     const idA = String(nextId++);
     const idB = String(nextId++);
