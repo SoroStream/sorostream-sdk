@@ -129,3 +129,41 @@ describe('StreamMonitor low-balance debounce reset on recovery (#876)', () => {
     monitor.stop();
   });
 });
+
+describe('StreamMonitor streamExpired emission (#877)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('emits streamExpired exactly once across many poll cycles after endTime', async () => {
+    vi.useFakeTimers();
+    const endTime = Math.floor(Date.now() / 1_000) - 10;
+    const stream = {
+      id: 'stream-1',
+      status: 'Completed',
+      endTime,
+    } as Stream;
+    const getStream = vi.fn().mockResolvedValue(stream);
+    const monitor = new StreamMonitor(
+      ['stream-1'],
+      {
+        getStream,
+        getClaimable: vi.fn().mockResolvedValue(0n),
+      },
+      {
+        pollIntervalMs: 1_000,
+      },
+    );
+    const expired: Array<{ streamId: string; endTime: number }> = [];
+    monitor.on('streamExpired', (payload) => expired.push(payload));
+
+    // Initial poll plus five subsequent interval cycles.
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1_000 * 5);
+    expect(getStream.mock.calls.length).toBeGreaterThan(1);
+
+    expect(expired).toEqual([{ streamId: 'stream-1', endTime }]);
+
+    monitor.stop();
+  });
+});
