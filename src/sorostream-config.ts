@@ -254,9 +254,22 @@ export function mergeSorostreamConfig<
 
   return {
     // Apply file-config defaults only when the runtime option is absent.
+    //
+    // `network`, `rpcUrl`, and `txTimeoutMs` only fall back to file config
+    // when the runtime option is `undefined` (i.e. the caller omitted it
+    // entirely). An explicit empty string `''` or `0` is treated as a
+    // deliberate caller choice and is NOT overridden.
     ...(fileConfig.network !== undefined && runtimeOptions.network === undefined
       ? { network: fileConfig.network }
       : {}),
+    // `contractId` additionally treats an empty string `''` as "not set",
+    // because a blank contract address is never a valid Stellar address and
+    // most callers set it via an environment variable that may evaluate to
+    // `''` when the variable is unset (e.g. `contractId: process.env.ID`).
+    // The other fields — `network`, `rpcUrl`, and `txTimeoutMs` — accept only
+    // `undefined` as "absent" because an empty/zero value there can be a
+    // meaningful (if unusual) runtime choice (e.g. `rpcUrl: ''` might be
+    // intentional when a custom transport adapter is wired in separately).
     ...(fileConfig.contractId !== undefined &&
     (runtimeOptions.contractId === undefined || runtimeOptions.contractId === '')
       ? { contractId: fileConfig.contractId }

@@ -244,6 +244,12 @@ export class StreamSimulator {
     }
 
     const target = amount ?? claimable;
+    if (amount !== undefined && amount <= 0n) {
+      return fail(
+        'insufficientClaimable',
+        `Requested withdraw amount must be greater than zero; got ${amount}.`,
+      );
+    }
     if (target > claimable) {
       return fail(
         'insufficientClaimable',
