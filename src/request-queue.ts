@@ -136,8 +136,11 @@ export class PriorityRequestQueue {
   /** Next submission sequence number to assign (issue #970). */
   private nextSeq = 0;
 
-  /** Recent task durations (ms) for wait-time estimation, capped at 20. */
-  private readonly recentDurations: number[] = [];
+  /**
+   * Recent task durations (ms) for wait-time estimation, tracked per lane and
+   * capped at 20 samples each (issue #971).
+   */
+  private readonly recentDurations = new Map<string, number[]>();
   private readonly MAX_DURATION_SAMPLES = 20;
 
   /** Callback fired when a request is held in queue. */
@@ -201,7 +204,7 @@ export class PriorityRequestQueue {
       laneQueue.push(item);
 
       // Fire the delayed callback.
-      const estimatedWaitMs = this.estimateWait(queueDepth);
+      const estimatedWaitMs = this.estimateWait(lane, queueDepth);
       this.onDelayed?.({ lane, estimatedWaitMs, queueDepth });
     });
   }
@@ -255,12 +258,12 @@ export class PriorityRequestQueue {
     const start = Date.now();
     return (task() as Promise<T>).then(
       (result) => {
-        this.recordDuration(Date.now() - start);
+        this.recordDuration(lane, Date.now() - start);
         this.release(lane);
         return result;
       },
       (error: unknown) => {
-        this.recordDuration(Date.now() - start);
+        this.recordDuration(lane, Date.now() - start);
         this.release(lane);
         throw error;
       },
@@ -326,16 +329,29 @@ export class PriorityRequestQueue {
     return best;
   }
 
-  private recordDuration(ms: number): void {
-    this.recentDurations.push(ms);
-    if (this.recentDurations.length > this.MAX_DURATION_SAMPLES) {
-      this.recentDurations.shift();
+  private recordDuration(lane: string, ms: number): void {
+    let samples = this.recentDurations.get(lane);
+    if (!samples) {
+      samples = [];
+      this.recentDurations.set(lane, samples);
+    }
+    samples.push(ms);
+    if (samples.length > this.MAX_DURATION_SAMPLES) {
+      samples.shift();
     }
   }
 
-  private estimateWait(queueDepth: number): number {
-    if (this.recentDurations.length === 0) return 0;
-    const avg = this.recentDurations.reduce((a, b) => a + b, 0) / this.recentDurations.length;
+  /**
+   * Estimates the wait for a request in `lane`. Uses that lane's own duration
+   * history (issue #971) so a fast "read" lane is not skewed by a slow "write"
+   * lane. Falls back to the average across all lanes when the lane has no
+   * history yet, and returns 0 when there is no history at all.
+   */
+  private estimateWait(lane: string, queueDepth: number): number {
+    let samples = this.recentDurations.get(lane) ?? [];
+    if (samples.length === 0) samples = [...this.recentDurations.values()].flat();
+    if (samples.length === 0) return 0;
+    const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
     // Estimate: how many "rounds" of maxConcurrent tasks before this one runs.
     const rounds = Math.ceil((queueDepth + 1) / this.maxConcurrent);
     return Math.round(avg * rounds);
