@@ -73,7 +73,19 @@ export function resolveConditionalParam<T>(
     value &&
     typeof value === 'object' &&
     !Array.isArray(value) &&
-    typeof (value as { byteLength?: unknown }).byteLength !== 'number'
+    !(
+      // Distinguish ArrayBuffer / TypedArray / Buffer-like objects from a
+      // ConditionalBranchMap. We check the constructor name rather than the
+      // presence of a numeric `byteLength` property, because a branch map may
+      // legitimately be keyed 'byteLength' with a numeric value (since
+      // TemplateTokenType is an open string type), which would cause the old
+      // heuristic to misidentify the map as buffer-like and return it
+      // unresolved (issue #907).
+      typeof ArrayBuffer !== 'undefined' &&
+      (value instanceof ArrayBuffer ||
+        (typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer) ||
+        ArrayBuffer.isView(value as object))
+    )
   ) {
     const branches = value as ConditionalBranchMap<T>;
     if (ctx.tokenType in branches && branches[ctx.tokenType] !== undefined) {
