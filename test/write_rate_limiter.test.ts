@@ -110,3 +110,34 @@ describe('WriteRateLimiter (#542) - Queue Capacity Behavior', () => {
     await expect(limiter.acquire('write')).resolves.toBeUndefined();
   });
 });
+
+describe('WriteRateLimiter (#973) - burst: 0 behaves identically to the default burst: 1', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('produces the same per-operation timing for burst: 0 and the default burst', async () => {
+    vi.useFakeTimers();
+
+    const runSequence = async (burst: number | undefined): Promise<number[]> => {
+      const limiter = new WriteRateLimiter({ maxPerSecond: 10, burst, queueSize: 0 });
+      const start = Date.now();
+      const completedAt: number[] = [];
+      const operations = [0, 1, 2].map(() =>
+        limiter.acquire('write').then(() => {
+          completedAt.push(Date.now() - start);
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      await Promise.all(operations);
+      return completedAt;
+    };
+
+    const withBurstZero = await runSequence(0);
+    const withDefaultBurst = await runSequence(undefined);
+
+    expect(withBurstZero).toEqual(withDefaultBurst);
+    // Sanity check: the first operation is free and the rest are spaced by the 100ms interval.
+    expect(withDefaultBurst).toEqual([0, 100, 200]);
+  });
+});

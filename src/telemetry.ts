@@ -55,7 +55,6 @@ export class Telemetry {
   readonly enabled: boolean;
   private readonly eventFilter?: TelemetryEventFilter;
   private readonly beaconUrl?: string;
-  private visibilityHandler: (() => void) | null = null;
   private unloadHandler: (() => void) | null = null;
   private disposed = false;
 
@@ -135,20 +134,16 @@ export class Telemetry {
   }
 
   /**
-   * Registers best-effort unload listeners so a partially-filled batch is
-   * flushed when the page is hidden or closed instead of being dropped when
-   * the flush timer never fires (issue #702).
+   * Registers a best-effort `beforeunload` listener so a partially-filled
+   * batch is flushed when the page actually closes instead of being dropped
+   * when the flush timer never fires (issue #702). The listener is not tied to
+   * `visibilitychange`, so ordinary tab switching does not trigger a premature
+   * flush (issue #975).
    *
    * Listeners are attached only when telemetry is enabled and the host
    * environment exposes a DOM.
    */
   private registerUnloadHandlers(): void {
-    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-      this.visibilityHandler = () => {
-        if (document.visibilityState === 'hidden') this.flushOnUnload();
-      };
-      document.addEventListener('visibilitychange', this.visibilityHandler);
-    }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       this.unloadHandler = () => this.flushOnUnload();
       window.addEventListener('beforeunload', this.unloadHandler);
@@ -196,22 +191,18 @@ export class Telemetry {
     }
   }
 
-  /** Detaches the unload listeners and cancels the pending flush timer. */
+  /**
+   * Detaches the unload listeners, then flushes any queued spans so they are
+   * not silently dropped (#974). `flush()` also cancels the pending flush timer.
+   */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    if (this.visibilityHandler && typeof document !== 'undefined') {
-      document.removeEventListener('visibilitychange', this.visibilityHandler);
-    }
     if (this.unloadHandler && typeof window !== 'undefined') {
       window.removeEventListener('beforeunload', this.unloadHandler);
     }
-    this.visibilityHandler = null;
     this.unloadHandler = null;
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
+    this.flush();
   }
 
   setAttributes(span: Span | null, attributes: Attributes): void {
