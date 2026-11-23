@@ -196,7 +196,10 @@ export class Telemetry {
     }
   }
 
-  /** Detaches the unload listeners and cancels the pending flush timer. */
+  /**
+   * Detaches the unload listeners, then flushes any queued spans so they are
+   * not silently dropped (#974). `flush()` also cancels the pending flush timer.
+   */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -208,10 +211,7 @@ export class Telemetry {
     }
     this.visibilityHandler = null;
     this.unloadHandler = null;
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
+    this.flush();
   }
 
   setAttributes(span: Span | null, attributes: Attributes): void {
