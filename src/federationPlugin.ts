@@ -147,6 +147,12 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): F
   const inflight = new Map<string, Promise<string | null>>();
 
   /**
+   * In-flight cache-bypassing lookups started by `resolveFresh`. Kept apart from
+   * `inflight` so a fresh request never joins a cache-respecting one (issue #956).
+   */
+  const inflightFresh = new Map<string, Promise<string | null>>();
+
+  /**
    * Returns the cached stellar address for `federationAddress` if the entry
    * is still within TTL, otherwise `undefined`.
    */
@@ -176,7 +182,8 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): F
    * Returns `null` when resolution fails and `throwOnFailure` is `false`.
    */
   function resolve(federationAddress: string): Promise<string | null> {
-    const pending = inflight.get(federationAddress);
+    // A fresh lookup is at least as current as a cached one, so joining it is safe.
+    const pending = inflightFresh.get(federationAddress) ?? inflight.get(federationAddress);
     if (pending) return pending;
     const p = resolveUncached(federationAddress).finally(() => inflight.delete(federationAddress));
     inflight.set(federationAddress, p);
@@ -228,12 +235,14 @@ export function createFederationPlugin(options: FederationPluginOptions = {}): F
     },
 
     resolveFresh(federationAddress: string): Promise<string | null> {
-      const pending = inflight.get(federationAddress);
+      // Only join another fresh lookup. Joining a plain resolve() that is already
+      // in flight would hand back a result that may have come from the cache.
+      const pending = inflightFresh.get(federationAddress);
       if (pending) return pending;
       const request = resolveUncached(federationAddress, true).finally(() =>
-        inflight.delete(federationAddress),
+        inflightFresh.delete(federationAddress),
       );
-      inflight.set(federationAddress, request);
+      inflightFresh.set(federationAddress, request);
       return request;
     },
 

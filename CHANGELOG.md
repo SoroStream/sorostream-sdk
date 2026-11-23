@@ -7,6 +7,7 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 ## [Unreleased]
 
 ### Added
+- Add `RateLimiter.cancelPending(reason?)` and `RateLimiterCancelledError`, which reject tasks still queued in a `RateLimiter` instead of leaving their promises unsettled (#947)
 - Add streaming deserialization entry point `deserializeStreamRecords(payload)`, a generator that walks a top-level stream-history JSON array and yields records incrementally without buffering the parsed payload, for callers that only need the first N records; the existing whole-payload helpers are unchanged (#708)
 - Add token-type-conditional template parameters via `ConditionalParam`/`resolveConditionalParam` and the new `templates.minAmountStream`, resolving decimals-aware parameters at instantiation time so one template can produce different values for different token types (#710)
 
