@@ -231,6 +231,12 @@ export interface WebhookConfig {
   /** Overrides the global `fetch` used to deliver the webhook (issue #199). */
   fetch?: FetchAdapter;
   /**
+   * HMAC-SHA256 secret for signing payloads (issue #965). When provided, each
+   * request includes an `X-SoroStream-Signature` header containing the hex-encoded
+   * HMAC of the serialised request body, matching `WebhookEmitterConfig.secret`.
+   */
+  secret?: string;
+  /**
    * Called when a delivery has failed after all retries are exhausted
    * (issue #964). Errors thrown by the callback are swallowed so they cannot
    * break event forwarding.

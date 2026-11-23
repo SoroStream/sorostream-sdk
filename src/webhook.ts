@@ -87,6 +87,21 @@ export class WebhookForwarder {
   private async forward(event: StreamEvent): Promise<void> {
     const maxRetries = this.config.retries ?? 3;
     const delay = this.config.retryDelayMs ?? 1000;
+    const body = JSON.stringify({
+      event: event.type,
+      stream_id: event.streamId,
+      tx_hash: event.txHash,
+      ledger: event.ledger,
+      timestamp: new Date(event.timestamp).toISOString(),
+      data: event.data,
+    });
+
+    // Sign the exact serialised body for parity with WebhookEmitter (issue #965)
+    const extraHeaders: Record<string, string> = { ...this.config.headers };
+    if (this.config.secret) {
+      extraHeaders['X-SoroStream-Signature'] = await hmacSign(this.config.secret, body);
+    }
+
     let lastStatus: number | undefined;
     let lastError: unknown;
 
@@ -96,16 +111,9 @@ export class WebhookForwarder {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...this.config.headers,
+            ...extraHeaders,
           },
-          body: JSON.stringify({
-            event: event.type,
-            stream_id: event.streamId,
-            tx_hash: event.txHash,
-            ledger: event.ledger,
-            timestamp: new Date(event.timestamp).toISOString(),
-            data: event.data,
-          }),
+          body,
         });
 
         if (response.ok) return;
