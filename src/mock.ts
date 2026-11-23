@@ -157,7 +157,6 @@ export class MockSoroStreamClient {
         minResourceFee: 100,
       } as any;
     }
-    if (params.amount <= 0n) throw new Error('Amount must be > 0');
     if (params.durationSeconds <= 0) throw new Error('Duration must be > 0');
     const mockNow = nowSec();
     const startTimeParam =
