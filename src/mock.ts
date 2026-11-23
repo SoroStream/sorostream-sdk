@@ -907,6 +907,14 @@ export class MockSoroStreamClient {
 
   // ── Issue #73: Stream snapshot export / import ───────────────────────────
 
+  /**
+   * Mock implementation of stream snapshot export.
+   *
+   * `vestingProjection` and `history` are always empty placeholders in the mock.
+   * They are not populated even though the mock tracks withdrawals and emits
+   * lifecycle events. A real client may fill these fields, so consumer tests
+   * should not assert on their contents against the mock.
+   */
   async exportStream(streamId: string, cliffSeconds = 0): Promise<StreamSnapshot> {
     const stream = await this.getStream(streamId);
     const claimable = await this.getClaimable(streamId);
