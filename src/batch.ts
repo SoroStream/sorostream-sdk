@@ -8,6 +8,17 @@
  * `@sorostream/sdk` or `@sorostream/sdk/core`) — this entry point covers the
  * standalone helpers and result/option types around them.
  *
+ * ### Why `ConnectionPool` is also exported here
+ *
+ * It is not a batching helper. No bulk or batch operation depends on it: the
+ * pool manages RPC connections and event pollers for event-stream
+ * subscriptions (see `useConnectionPooling` / `poolSize` on the client). It has
+ * been re-exported from this entry point since the sub-path entry points were
+ * introduced (#206), and is kept so that existing
+ * `import { ConnectionPool } from '@sorostream/sdk/batch'` code keeps working.
+ * New code should import it from `@sorostream/sdk/core` (or the package root);
+ * the same class is exported from all three.
+ *
  * @example
  * ```ts
  * import { parseCsvStreamRows, batchSize } from "@sorostream/sdk/batch";

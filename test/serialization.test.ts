@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { serializeStream, deserializeStream } from '../src/serialization.js';
+import { serializeStreamToJSON, deserializeStreamFromJSON } from '../src/utils.js';
 import type { Stream } from '../src/types.js';
 
 describe('Stream serialization (issue #210)', () => {
@@ -199,5 +200,92 @@ describe('Stream serialization (issue #210)', () => {
     expect(JSON.stringify(roundTrip, (_, v) => (typeof v === 'bigint' ? v.toString() : v))).toBe(
       JSON.stringify(stream, (_, v) => (typeof v === 'bigint' ? v.toString() : v)),
     );
+  });
+});
+
+describe('Stream serialization keeps optional tag and namespace (issue #987)', () => {
+  const base: Stream = {
+    id: '7',
+    sender: 'GSENDER',
+    recipient: 'GRECIPIENT',
+    token: 'GTOKEN',
+    deposit: 5000n,
+    flowRate: 50n,
+    startTime: 1000,
+    endTime: 2000,
+    lastWithdrawTime: 1000,
+    status: 'Active',
+    autoRenew: false,
+  };
+
+  it('preserves tag across a serializeStream/deserializeStream round-trip', () => {
+    const original: Stream = { ...base, tag: 'project-alpha' };
+
+    const serialized = serializeStream(original);
+    expect(serialized.tag).toBe('project-alpha');
+
+    const restored = deserializeStream(serialized);
+    expect(restored.tag).toBe('project-alpha');
+    expect(restored).toEqual(original);
+  });
+
+  it('preserves namespace across a round-trip', () => {
+    const original: Stream = { ...base, namespace: 'tenant-a' };
+
+    const serialized = serializeStream(original);
+    expect(serialized.namespace).toBe('tenant-a');
+    expect(deserializeStream(serialized)).toEqual(original);
+  });
+
+  it('preserves tag and namespace together with every other optional field', () => {
+    const original: Stream = {
+      ...base,
+      status: 'Paused',
+      pausedAt: 1500,
+      lockUntil: 1200,
+      namespace: 'tenant-a',
+      tag: 'payroll',
+    };
+
+    expect(deserializeStream(serializeStream(original))).toEqual(original);
+  });
+
+  it('keeps an empty-string tag instead of treating it as absent', () => {
+    const restored = deserializeStream(serializeStream({ ...base, tag: '' }));
+    expect(restored.tag).toBe('');
+  });
+
+  it('omits the tag and namespace keys entirely when the stream has none', () => {
+    const serialized = serializeStream(base);
+    expect('tag' in serialized).toBe(false);
+    expect('namespace' in serialized).toBe(false);
+
+    const restored = deserializeStream(serialized);
+    expect('tag' in restored).toBe(false);
+    expect('namespace' in restored).toBe(false);
+  });
+
+  it('keeps tag and namespace through structuredClone', () => {
+    const serialized = serializeStream({ ...base, tag: 'project-alpha', namespace: 'tenant-a' });
+    const cloned = structuredClone(serialized);
+
+    const restored = deserializeStream(cloned);
+    expect(restored.tag).toBe('project-alpha');
+    expect(restored.namespace).toBe('tenant-a');
+  });
+
+  it('keeps tag and namespace through the JSON helpers too', () => {
+    const original: Stream = { ...base, tag: 'project-alpha', namespace: 'tenant-a' };
+
+    const restored = deserializeStreamFromJSON(serializeStreamToJSON(original));
+    expect(restored.tag).toBe('project-alpha');
+    expect(restored.namespace).toBe('tenant-a');
+    expect(restored).toEqual(original);
+  });
+
+  it('the JSON helpers also leave out tag and namespace when absent', () => {
+    const restored = deserializeStreamFromJSON(serializeStreamToJSON(base));
+    expect('tag' in restored).toBe(false);
+    expect('namespace' in restored).toBe(false);
   });
 });
