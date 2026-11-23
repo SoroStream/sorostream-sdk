@@ -246,6 +246,16 @@ class V1Encoder implements ContractCallEncoder {
   }
 }
 
+/**
+ * Encoder for contract version `'v2'`.
+ *
+ * Intentionally inherits every method from {@link V1Encoder}: the v2 wire
+ * format is currently identical to v1, so `createContractEncoder('v2', ...)`
+ * produces byte-identical calls to `'v1'`. This is a placeholder for future
+ * v2-specific encoding; any method overridden here must change the encoded
+ * XDR, so update this comment and the `'v2'` snapshot tests if that happens.
+ * (Issue #976)
+ */
 class V2Encoder extends V1Encoder {
   constructor(contract: Contract) {
     super(contract);
