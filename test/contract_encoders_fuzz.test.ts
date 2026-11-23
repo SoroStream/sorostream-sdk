@@ -17,6 +17,7 @@ import {
   decodeBytes,
   decodeString,
 } from '../src/contractEncoders.js';
+import { InvalidI128Error } from '../src/errors.js';
 import { parseContractEvent } from '../src/contractEvents.js';
 
 const SEED = Number(process.env.FC_SEED ?? 588);
@@ -57,8 +58,8 @@ describe('contractEncoders round-trip (#588)', () => {
   });
 
   it('encodeI128 rejects out-of-range values', () => {
-    expect(() => encodeI128(I128_MAX + 1n)).toThrow(RangeError);
-    expect(() => encodeI128(I128_MIN - 1n)).toThrow(RangeError);
+    expect(() => encodeI128(I128_MAX + 1n)).toThrow(InvalidI128Error);
+    expect(() => encodeI128(I128_MIN - 1n)).toThrow(InvalidI128Error);
   });
 
   it('encodeBytes', () => {
