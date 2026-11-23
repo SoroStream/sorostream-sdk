@@ -157,7 +157,6 @@ export class MockSoroStreamClient {
         minResourceFee: 100,
       } as any;
     }
-    if (params.amount <= 0n) throw new Error('Amount must be > 0');
     if (params.durationSeconds <= 0) throw new Error('Duration must be > 0');
     const mockNow = nowSec();
     const startTimeParam =
@@ -397,6 +396,18 @@ export class MockSoroStreamClient {
     return this.topUp({ streamId, amount });
   }
 
+  /**
+   * Mock implementation of batch cancellation.
+   *
+   * Behavior is all-or-nothing and differs from a per-item result model:
+   * streams are processed in order, and the first missing or non-Active stream
+   * throws immediately. Streams processed before that point stay cancelled,
+   * and the remaining IDs are not processed. On success, a single result is
+   * returned whose `streamIds` contains every ID in the batch.
+   *
+   * Callers that need per-stream success/failure should cancel streams
+   * individually instead of relying on this mock.
+   */
   async batchCancel(streamIds: string[], _batchSize = 8): Promise<BatchCancelResult[]> {
     const results: BatchCancelResult[] = [];
     for (const id of streamIds) {
@@ -917,6 +928,14 @@ export class MockSoroStreamClient {
 
   // ── Issue #73: Stream snapshot export / import ───────────────────────────
 
+  /**
+   * Mock implementation of stream snapshot export.
+   *
+   * `vestingProjection` and `history` are always empty placeholders in the mock.
+   * They are not populated even though the mock tracks withdrawals and emits
+   * lifecycle events. A real client may fill these fields, so consumer tests
+   * should not assert on their contents against the mock.
+   */
   async exportStream(streamId: string, cliffSeconds = 0): Promise<StreamSnapshot> {
     const stream = await this.getStream(streamId);
     const claimable = await this.getClaimable(streamId);
