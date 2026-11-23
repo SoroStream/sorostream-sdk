@@ -1,6 +1,28 @@
 import { jitterDelay } from './internal.js';
-import type { StreamEvent, StreamEventFilter, StreamSubscription, WebhookConfig } from './types.js';
+import type {
+  StreamEvent,
+  StreamEventFilter,
+  StreamSubscription,
+  WebhookConfig,
+  WebhookDeliveryFailure,
+} from './types.js';
 import type { SoroStreamClient } from './SoroStreamClient.js';
+
+/**
+ * Invokes a user-supplied `onFailure` callback, swallowing any error it throws
+ * so a faulty callback cannot produce an unhandled rejection (issue #964).
+ */
+function reportFailure(
+  onFailure: ((failure: WebhookDeliveryFailure) => void) | undefined,
+  failure: WebhookDeliveryFailure,
+): void {
+  if (!onFailure) return;
+  try {
+    onFailure(failure);
+  } catch {
+    // Ignore errors from the failure callback
+  }
+}
 
 /**
  * Forwards stream lifecycle events to an external HTTP webhook URL.
@@ -65,6 +87,8 @@ export class WebhookForwarder {
   private async forward(event: StreamEvent): Promise<void> {
     const maxRetries = this.config.retries ?? 3;
     const delay = this.config.retryDelayMs ?? 1000;
+    let lastStatus: number | undefined;
+    let lastError: unknown;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
@@ -86,18 +110,32 @@ export class WebhookForwarder {
 
         if (response.ok) return;
 
+        lastStatus = response.status;
+        lastError = undefined;
+
         // Non-retryable status codes
         if (response.status >= 400 && response.status < 500 && response.status !== 429) {
           return;
         }
-      } catch {
+      } catch (err) {
         // Network error — will retry
+        lastStatus = undefined;
+        lastError = err;
       }
 
       if (attempt < maxRetries) {
         await new Promise((r) => setTimeout(r, jitterDelay(delay * 2 ** attempt)));
       }
     }
+
+    // All retries exhausted without a successful delivery (issue #964)
+    reportFailure(this.config.onFailure, {
+      url: this.config.url,
+      attempts: maxRetries + 1,
+      lastStatus,
+      lastError,
+      payload: event,
+    });
   }
 }
 
@@ -125,6 +163,11 @@ export interface WebhookEmitterConfig {
   retryDelayMs?: number;
   /** Injectable `fetch` implementation. Defaults to global `fetch`. */
   fetch?: typeof fetch;
+  /**
+   * Called when a delivery has failed after all retries are exhausted
+   * (issue #964). Errors thrown by the callback are swallowed.
+   */
+  onFailure?: (failure: WebhookDeliveryFailure) => void;
 }
 
 /** Shape of a stream-state-change payload delivered by `WebhookEmitter`. */
@@ -257,6 +300,9 @@ export class WebhookEmitter {
       extraHeaders['X-SoroStream-Signature'] = await hmacSign(secret, body);
     }
 
+    let lastStatus: number | undefined;
+    let lastError: unknown;
+
     for (let attempt = 0; attempt <= this.retries; attempt++) {
       try {
         const response = await this.fetchImpl(url, {
@@ -265,14 +311,27 @@ export class WebhookEmitter {
           body,
         });
         if (response.ok) return;
+        lastStatus = response.status;
+        lastError = undefined;
         // Non-retryable 4xx errors (except 429 Too Many Requests)
         if (response.status >= 400 && response.status < 500 && response.status !== 429) return;
-      } catch {
+      } catch (err) {
         // Network error — will retry
+        lastStatus = undefined;
+        lastError = err;
       }
       if (attempt < this.retries) {
         await new Promise((r) => setTimeout(r, jitterDelay(this.retryDelayMs * 2 ** attempt)));
       }
     }
+
+    // All retries exhausted without a successful delivery (issue #964)
+    reportFailure(this.config.onFailure, {
+      url,
+      attempts: this.retries + 1,
+      lastStatus,
+      lastError,
+      payload,
+    });
   }
 }
