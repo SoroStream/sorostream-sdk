@@ -396,6 +396,18 @@ export class MockSoroStreamClient {
     return this.topUp({ streamId, amount });
   }
 
+  /**
+   * Mock implementation of batch cancellation.
+   *
+   * Behavior is all-or-nothing and differs from a per-item result model:
+   * streams are processed in order, and the first missing or non-Active stream
+   * throws immediately. Streams processed before that point stay cancelled,
+   * and the remaining IDs are not processed. On success, a single result is
+   * returned whose `streamIds` contains every ID in the batch.
+   *
+   * Callers that need per-stream success/failure should cancel streams
+   * individually instead of relying on this mock.
+   */
   async batchCancel(streamIds: string[], _batchSize = 8): Promise<BatchCancelResult[]> {
     const results: BatchCancelResult[] = [];
     for (const id of streamIds) {
