@@ -68,6 +68,12 @@ export interface CrossTabSyncOptions {
    * global `BroadcastChannel`. Defaults to the global when available.
    */
   broadcastChannelFactory?: (name: string) => BroadcastChannel | null;
+  /**
+   * Invoked when a message could not be posted to the channel (for example a
+   * payload that is not structured-cloneable), so callers can detect and alert
+   * on dropped cross-tab events. The failed message is not retried.
+   */
+  onError?: (error: unknown, event: string) => void;
 }
 
 /** Creates a {@link BroadcastChannel} from the global when available. */
@@ -112,6 +118,7 @@ export class CrossTabSync {
   private channel: BroadcastChannel | null = null;
   private readonly originId: string;
   private readonly onMessage: (event: string, data: unknown) => void;
+  private readonly onError: ((error: unknown, event: string) => void) | undefined;
   private readonly handleMessage: (event: MessageEvent) => void;
   /**
    * Number of successfully posted messages that have not yet been given a
@@ -130,6 +137,7 @@ export class CrossTabSync {
 
   constructor(options: CrossTabSyncOptions) {
     this.onMessage = options.onMessage;
+    this.onError = options.onError;
     this.originId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     this.handleMessage = (event: MessageEvent) => {
       if (this.destroyRequested) return;
@@ -151,10 +159,16 @@ export class CrossTabSync {
     return this.channel !== null && !this.destroyRequested;
   }
 
-  /** Forwards an event to other tabs. No-op while inactive or destroyed. */
-  broadcast(event: string, data: unknown): void {
+  /**
+   * Forwards an event to other tabs. No-op while inactive or destroyed.
+   *
+   * @returns `true` if the message was queued for delivery, `false` if it was
+   *   not sent (relay inactive or destroyed, or the payload could not be
+   *   posted). A failed post is also reported via `onError` when configured.
+   */
+  broadcast(event: string, data: unknown): boolean {
     const channel = this.channel;
-    if (!channel || this.destroyRequested) return;
+    if (!channel || this.destroyRequested) return false;
     try {
       channel.postMessage({
         [PROTOCOL]: 1,
@@ -164,12 +178,14 @@ export class CrossTabSync {
         ts: Date.now(),
         seq: this.seq++,
       } satisfies CrossTabMessage);
-    } catch {
+    } catch (error) {
       // Payloads that are not structured-cloneable (e.g. wallet adapter
       // instances with methods) are skipped rather than crashing the
       // emitting call site. Nothing was queued for delivery, so the
-      // pending-broadcast count is not incremented.
-      return;
+      // pending-broadcast count is not incremented. The failure is surfaced
+      // through `onError` and the return value so callers can observe it.
+      this.onError?.(error, event);
+      return false;
     }
     // `postMessage` only *queues* a delivery task; track it so `destroy` can
     // wait until the message has had a chance to reach other tabs.
@@ -180,6 +196,7 @@ export class CrossTabSync {
     }, 0);
     const unref = (timer as unknown as { unref?: () => void }).unref;
     unref?.call(timer);
+    return true;
   }
 
   /**

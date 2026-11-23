@@ -228,6 +228,11 @@ export interface WebhookConfig {
   headers?: Record<string, string>;
   retries?: number;
   retryDelayMs?: number;
+  /**
+   * Upper bound (ms) on the delay between retry attempts. The exponential
+   * backoff is capped at this value, including jitter. Default: 30000.
+   */
+  maxRetryDelayMs?: number;
   /** Overrides the global `fetch` used to deliver the webhook (issue #199). */
   fetch?: FetchAdapter;
   /**

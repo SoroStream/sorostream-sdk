@@ -351,6 +351,11 @@ export class OfflineWriteQueue {
 
     this.isDraining = true;
     const results: QueueReplayResult[] = [];
+    // Operations that failed while offline. They are set aside rather than
+    // retried in this pass, and re-inserted afterwards in priority/sequence
+    // order, so one persistently failing operation does not block the rest of
+    // the queue (issue #962).
+    const deferred: QueuedOperation[] = [];
 
     while (this.queue.length > 0) {
       const op = this.queue.shift()!;
@@ -363,15 +368,15 @@ export class OfflineWriteQueue {
           success: false,
           error: err instanceof Error ? err.message : String(err),
         });
-        // Re-queue the failed operation if still offline. Re-insert with the
-        // same priority/sequence ordering instead of `unshift` so a retried
-        // operation can never jump ahead of higher-priority entries or of
-        // equal-priority operations enqueued while it was executing.
-        if (!this.isOnline && this.queue.length < this.options.maxQueueSize) {
-          this.insertSorted(op);
-          break;
-        }
+        if (!this.isOnline) deferred.push(op);
       }
+    }
+
+    // Re-queue deferred operations using the same priority/sequence ordering
+    // as enqueue, so a retried operation can never jump ahead of higher-priority
+    // entries or of equal-priority operations enqueued while draining.
+    for (const op of deferred) {
+      if (this.queue.length < this.options.maxQueueSize) this.insertSorted(op);
     }
 
     this.isDraining = false;

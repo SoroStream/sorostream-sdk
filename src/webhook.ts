@@ -132,7 +132,8 @@ export class WebhookForwarder {
       }
 
       if (attempt < maxRetries) {
-        await new Promise((r) => setTimeout(r, jitterDelay(delay * 2 ** attempt)));
+        const backoff = Math.min(maxDelay, jitterDelay(delay * 2 ** attempt));
+        await new Promise((r) => setTimeout(r, backoff));
       }
     }
 
@@ -169,6 +170,8 @@ export interface WebhookEmitterConfig {
   retries?: number;
   /** Initial retry delay in ms (doubles on each attempt). Default: 1000. */
   retryDelayMs?: number;
+  /** Upper bound (ms) on the delay between retry attempts, including jitter. Default: 30000. */
+  maxRetryDelayMs?: number;
   /** Injectable `fetch` implementation. Defaults to global `fetch`. */
   fetch?: typeof fetch;
   /**
@@ -227,6 +230,7 @@ export class WebhookEmitter {
   private readonly pollIntervalMs: number;
   private readonly retries: number;
   private readonly retryDelayMs: number;
+  private readonly maxRetryDelayMs: number;
   private readonly fetchImpl: typeof fetch;
   private timerId: ReturnType<typeof setInterval> | null = null;
   private readonly previousStatuses = new Map<string, string>();
@@ -239,6 +243,7 @@ export class WebhookEmitter {
     this.pollIntervalMs = config.pollIntervalMs ?? 10_000;
     this.retries = config.retries ?? 3;
     this.retryDelayMs = config.retryDelayMs ?? 1_000;
+    this.maxRetryDelayMs = config.maxRetryDelayMs ?? 30_000;
     this.fetchImpl = config.fetch ?? fetch;
   }
 
@@ -329,7 +334,11 @@ export class WebhookEmitter {
         lastError = err;
       }
       if (attempt < this.retries) {
-        await new Promise((r) => setTimeout(r, jitterDelay(this.retryDelayMs * 2 ** attempt)));
+        const backoff = Math.min(
+          this.maxRetryDelayMs,
+          jitterDelay(this.retryDelayMs * 2 ** attempt),
+        );
+        await new Promise((r) => setTimeout(r, backoff));
       }
     }
 
