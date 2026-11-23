@@ -16,6 +16,9 @@
  *   per method (issue #720). Throws `ReplayFixtureError` when a request
  *   arrives for which there is no remaining matching fixture entry.
  *
+ * Failed RPC calls are recorded too (issue #968): their entries carry an
+ * `error` field and replay by throwing an error with the same name and message.
+ *
  * Both modes return an object that satisfies `RpcTransportAdapter`, so they
  * can be passed directly to `SoroStreamClient` via the `transport` option.
  *
@@ -49,8 +52,13 @@ export interface FixtureEntry {
   method: string;
   /** JSON-serializable representation of the call arguments. */
   request: unknown;
-  /** JSON-serializable representation of the successful response. */
+  /** JSON-serializable representation of the successful response. `null` for failed calls. */
   response: unknown;
+  /**
+   * Present when the recorded call rejected instead of resolving (issue #968).
+   * In replay mode the entry throws an error with this `name` and `message`.
+   */
+  error?: { name: string; message: string };
 }
 
 /** The structure of a fixture file written / read by {@link ReplayTransport}. */
@@ -188,6 +196,11 @@ class ReplayQueue {
 
     const entry = queue.splice(idx, 1)[0]!;
     this.consumed++;
+    if (entry.error) {
+      const err = new Error(entry.error.message);
+      err.name = entry.error.name;
+      throw err;
+    }
     return deserialise<T>(entry.response);
   }
 }
@@ -277,10 +290,25 @@ export const ReplayTransport = {
     const entries: FixtureEntry[] = [];
 
     function rec<T>(method: string, request: unknown, promise: Promise<T>): Promise<T> {
-      return promise.then((response) => {
-        entries.push({ method, request: serialise(request), response: serialise(response) });
-        return response;
-      });
+      return promise.then(
+        (response) => {
+          entries.push({ method, request: serialise(request), response: serialise(response) });
+          return response;
+        },
+        (err: unknown) => {
+          // Record rejected calls too so error paths can be replayed (issue #968).
+          entries.push({
+            method,
+            request: serialise(request),
+            response: null,
+            error: {
+              name: err instanceof Error ? err.name : 'Error',
+              message: err instanceof Error ? err.message : String(err),
+            },
+          });
+          throw err;
+        },
+      );
     }
 
     const transport: RecordingRpcTransport = {

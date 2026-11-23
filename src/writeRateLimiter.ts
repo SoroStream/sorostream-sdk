@@ -91,6 +91,15 @@ export class WriteRateLimiter {
     this.shared = options.shared ?? false;
   }
 
+  /**
+   * Number of operations currently waiting in the queue for a slot. Operations
+   * within the burst allowance never count here. Compare against `queueSize`
+   * to monitor queue pressure before a RateLimitExceededError is thrown (#972).
+   */
+  get pendingCount(): number {
+    return this.waiting;
+  }
+
   /** Waits until a slot is available for the given operation, then returns. */
   async acquire(operationName: string): Promise<void> {
     // Get the appropriate bucket based on shared setting

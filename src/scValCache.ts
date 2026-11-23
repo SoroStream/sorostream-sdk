@@ -4,8 +4,17 @@ import { nativeToScVal, xdr } from '@stellar/stellar-sdk';
  * LRU cache for nativeToScVal results to avoid repeated buffer allocations
  * on hot paths (issue #616).
  *
- * ScVal objects produced by nativeToScVal are immutable XDR structures.
- * Caching them eliminates redundant serialization and reduces GC pressure.
+ * `xdr.ScVal` instances from `@stellar/stellar-sdk` are ordinary **mutable**
+ * JS objects (a union exposes `set(...)`, and values such as an address's
+ * 32-byte key are live `Buffer`s), so handing the same instance to every caller
+ * would let one caller's in-place change silently corrupt the value seen by
+ * every unrelated call site sharing the cache.
+ *
+ * The cache therefore stores each entry's **serialized XDR** (an immutable
+ * base64 string) and returns a **fresh, independent `xdr.ScVal`** on every call.
+ * What it saves is the expensive part of `nativeToScVal` (for an `address`:
+ * StrKey decoding and checksum validation), not the allocation of the result
+ * object. Callers may freely mutate what they get back.
  *
  * ## Eviction Policy
  *
@@ -73,13 +82,19 @@ const DEFAULT_MAX_SIZE = 256;
 type ScValType = 'address' | 'u64' | 'i128' | 'u32' | 'symbol' | 'string' | 'bool';
 
 export class ScValCache {
-  private readonly cache = new Map<string, xdr.ScVal>();
+  /** Key → base64 XDR. Strings are immutable, so no caller can alter an entry. */
+  private readonly cache = new Map<string, string>();
   private readonly maxSize: number;
 
   constructor(maxSize = DEFAULT_MAX_SIZE) {
     this.maxSize = maxSize;
   }
 
+  /**
+   * Returns the `xdr.ScVal` for `value` as `type`. Repeated calls return equal
+   * but **independent** instances: mutating one never affects the cache or any
+   * other caller (issue #985).
+   */
   get(value: unknown, type: ScValType): xdr.ScVal {
     const key = `${type}:${String(value)}`;
     const cached = this.cache.get(key);
@@ -87,7 +102,7 @@ export class ScValCache {
       // Move to end for LRU
       this.cache.delete(key);
       this.cache.set(key, cached);
-      return cached;
+      return xdr.ScVal.fromXDR(cached, 'base64');
     }
 
     const scVal = nativeToScVal(value, { type });
@@ -96,8 +111,17 @@ export class ScValCache {
       const first = this.cache.keys().next().value;
       if (first !== undefined) this.cache.delete(first);
     }
-    this.cache.set(key, scVal);
+    // Cache the serialized form, never the instance handed to the caller.
+    this.cache.set(key, scVal.toXDR('base64'));
     return scVal;
+  }
+
+  /**
+   * Returns whether an entry is currently cached. Read-only: it does not
+   * refresh the entry's LRU position or create it.
+   */
+  has(value: unknown, type: ScValType): boolean {
+    return this.cache.has(`${type}:${String(value)}`);
   }
 
   /**
@@ -151,20 +175,21 @@ export class ScValCache {
 const globalCache = new ScValCache();
 
 /**
- * Cached version of nativeToScVal. Returns the same xdr.ScVal instance
- * for repeated calls with identical value+type, avoiding a fresh buffer
- * allocation each time.
+ * Cached version of nativeToScVal. Repeated calls with identical value+type
+ * reuse the cached serialized form instead of redoing the conversion, and each
+ * call returns its own independent `xdr.ScVal` that the caller may mutate.
  */
 export function cachedScVal(value: unknown, type: ScValType): xdr.ScVal {
   return globalCache.get(value, type);
 }
 
-// Pre-warm boolean singletons — these never change.
-const TRUE_VAL = nativeToScVal(true, { type: 'bool' });
-const FALSE_VAL = nativeToScVal(false, { type: 'bool' });
-
+/**
+ * Returns an `xdr.ScVal` boolean. A new instance is built on every call: there
+ * is nothing to convert, and sharing one mutable singleton across the whole SDK
+ * would let a single in-place change corrupt every other caller (issue #985).
+ */
 export function cachedBool(value: boolean): xdr.ScVal {
-  return value ? TRUE_VAL : FALSE_VAL;
+  return xdr.ScVal.scvBool(value);
 }
 
 /**

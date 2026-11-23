@@ -118,12 +118,18 @@ export const bigIntScalarConfig = {
   description:
     'Arbitrary-precision integer, serialized as a string. Used for stream amounts in stroops (deposit, flowRate).',
   serialize(value: unknown): string {
+    if (typeof value === 'number' && !Number.isInteger(value)) {
+      throw new TypeError(`BigInt scalar cannot serialize non-integer number ${value}`);
+    }
     if (typeof value === 'bigint' || typeof value === 'number' || typeof value === 'string') {
       return BigInt(value).toString();
     }
     throw new TypeError(`BigInt scalar cannot serialize value of type ${typeof value}`);
   },
   parseValue(value: unknown): bigint {
+    if (typeof value === 'number' && !Number.isInteger(value)) {
+      throw new TypeError(`BigInt scalar cannot parse non-integer number ${value}`);
+    }
     if (typeof value === 'bigint' || typeof value === 'number' || typeof value === 'string') {
       return BigInt(value);
     }

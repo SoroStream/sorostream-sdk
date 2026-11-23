@@ -45,6 +45,10 @@ export interface SerializedStream {
   autoRenew: boolean;
   pausedAt?: number;
   lockUntil?: number;
+  /** Optional multi-tenant namespace (issue #274). Omitted when the stream has none. */
+  namespace?: string;
+  /** Optional on-chain tag/label for project grouping (issue #433). Omitted when the stream has none. */
+  tag?: string;
 }
 
 /**
@@ -77,6 +81,8 @@ export function serializeStream(stream: Stream): SerializedStream {
     autoRenew: stream.autoRenew,
     ...(stream.pausedAt !== undefined ? { pausedAt: stream.pausedAt } : {}),
     ...(stream.lockUntil !== undefined ? { lockUntil: stream.lockUntil } : {}),
+    ...(stream.namespace !== undefined ? { namespace: stream.namespace } : {}),
+    ...(stream.tag !== undefined ? { tag: stream.tag } : {}),
   };
 }
 
@@ -112,6 +118,8 @@ export function deserializeStream(data: SerializedStream): Stream {
     autoRenew: data.autoRenew,
     ...(data.pausedAt !== undefined ? { pausedAt: data.pausedAt } : {}),
     ...(data.lockUntil !== undefined ? { lockUntil: data.lockUntil } : {}),
+    ...(data.namespace !== undefined ? { namespace: data.namespace } : {}),
+    ...(data.tag !== undefined ? { tag: data.tag } : {}),
   };
 }
 

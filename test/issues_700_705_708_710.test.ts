@@ -278,3 +278,62 @@ describe('Issue #710: conditional template parameters by token type', () => {
     expect(params).not.toHaveProperty('tokenType');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Template duration validation — templates.custom and templates.vesting
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STREAM_BASE = {
+  recipient: RECIPIENT,
+  token: TOKEN,
+  amount: 1_000_000n,
+  autoRenew: false,
+} as const;
+
+describe('Template duration validation: templates.custom', () => {
+  it('returns correct durationSeconds for a positive days value', () => {
+    const params = templates.custom({ ...STREAM_BASE, days: 10 });
+    expect(params.durationSeconds).toBe(10 * 86_400);
+  });
+
+  it('throws RangeError for a negative days value', () => {
+    expect(() => templates.custom({ ...STREAM_BASE, days: -1 })).toThrow(RangeError);
+    expect(() => templates.custom({ ...STREAM_BASE, days: -1 })).toThrow(/days/);
+  });
+
+  it('throws RangeError for zero days', () => {
+    expect(() => templates.custom({ ...STREAM_BASE, days: 0 })).toThrow(RangeError);
+  });
+
+  it('throws RangeError for NaN days', () => {
+    expect(() => templates.custom({ ...STREAM_BASE, days: NaN })).toThrow(RangeError);
+  });
+
+  it('throws RangeError for Infinity days', () => {
+    expect(() => templates.custom({ ...STREAM_BASE, days: Infinity })).toThrow(RangeError);
+  });
+});
+
+describe('Template duration validation: templates.vesting', () => {
+  it('returns correct durationSeconds for a positive years value', () => {
+    const params = templates.vesting({ ...STREAM_BASE, years: 4 });
+    expect(params.durationSeconds).toBe(4 * 365 * 86_400);
+  });
+
+  it('throws RangeError for a negative years value', () => {
+    expect(() => templates.vesting({ ...STREAM_BASE, years: -2 })).toThrow(RangeError);
+    expect(() => templates.vesting({ ...STREAM_BASE, years: -2 })).toThrow(/years/);
+  });
+
+  it('throws RangeError for zero years', () => {
+    expect(() => templates.vesting({ ...STREAM_BASE, years: 0 })).toThrow(RangeError);
+  });
+
+  it('throws RangeError for NaN years', () => {
+    expect(() => templates.vesting({ ...STREAM_BASE, years: NaN })).toThrow(RangeError);
+  });
+
+  it('throws RangeError for Infinity years', () => {
+    expect(() => templates.vesting({ ...STREAM_BASE, years: Infinity })).toThrow(RangeError);
+  });
+});

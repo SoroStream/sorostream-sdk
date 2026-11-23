@@ -20,6 +20,7 @@ The SoroStream SDK provides three distinct rate-limiting and concurrency managem
 - **What it governs**: Generic asynchronous functions (`() => Promise<T>`).
 - **Algorithm**: FIFO queue with a strict in-flight concurrency cap (`maxConcurrent`).
 - **Behavior**: Queues tasks without rejecting until memory is exhausted. Does not inspect time windows or token rates.
+- **Cancelling queued work**: `cancelPending(reason?)` rejects every task that has not started yet (with `RateLimiterCancelledError` by default) and returns how many it rejected. Running tasks are not interrupted, and the limiter stays usable afterwards.
 
 ### B. `WriteRateLimiter` (`src/writeRateLimiter.ts`)
 - **What it governs**: Client-side submission of mutating transactions.

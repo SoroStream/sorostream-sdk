@@ -73,7 +73,19 @@ export function resolveConditionalParam<T>(
     value &&
     typeof value === 'object' &&
     !Array.isArray(value) &&
-    typeof (value as { byteLength?: unknown }).byteLength !== 'number'
+    !(
+      // Distinguish ArrayBuffer / TypedArray / Buffer-like objects from a
+      // ConditionalBranchMap. We check the constructor name rather than the
+      // presence of a numeric `byteLength` property, because a branch map may
+      // legitimately be keyed 'byteLength' with a numeric value (since
+      // TemplateTokenType is an open string type), which would cause the old
+      // heuristic to misidentify the map as buffer-like and return it
+      // unresolved (issue #907).
+      typeof ArrayBuffer !== 'undefined' &&
+      (value instanceof ArrayBuffer ||
+        (typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer) ||
+        ArrayBuffer.isView(value as object))
+    )
   ) {
     const branches = value as ConditionalBranchMap<T>;
     if (ctx.tokenType in branches && branches[ctx.tokenType] !== undefined) {
@@ -135,20 +147,32 @@ export const templates = {
 
   /**
    * Creates a fixed-term vesting stream spanning a given number of years.
-   * @param params.years - Number of years for the vesting period.
+   * @param params.years - Number of years for the vesting period. Must be > 0.
+   * @throws {RangeError} When `years` is not a positive finite number.
    */
   vesting(
     params: Omit<CreateStreamParams, 'durationSeconds'> & { years: number },
   ): CreateStreamParams {
+    if (!Number.isFinite(params.years) || params.years <= 0) {
+      throw new RangeError(
+        `templates.vesting: "years" must be a positive finite number (got ${params.years})`,
+      );
+    }
     return { ...params, durationSeconds: days(365 * params.years) };
   },
 
   /**
    * Creates a custom-duration stream for a given number of days.
+   * @throws {RangeError} When `days` is not a positive finite number.
    */
   custom(
     params: Omit<CreateStreamParams, 'durationSeconds'> & { days: number },
   ): CreateStreamParams {
+    if (!Number.isFinite(params.days) || params.days <= 0) {
+      throw new RangeError(
+        `templates.custom: "days" must be a positive finite number (got ${params.days})`,
+      );
+    }
     return { ...params, durationSeconds: days(params.days) };
   },
 

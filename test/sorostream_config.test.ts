@@ -183,3 +183,57 @@ describe('Issue #762: createClient wires config file into SoroStreamClient const
     }
   });
 });
+
+// ── Issue (contractId empty-string asymmetry documentation) ─────────────────
+
+describe('mergeSorostreamConfig – contractId empty-string fallback asymmetry', () => {
+  const FILE_CONTRACT = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
+  const FILE_RPC = 'https://file-config-rpc.stellar.org';
+
+  it('applies file contractId when runtime contractId is an empty string (env-var-unset pattern)', () => {
+    // contractId treats '' the same as undefined so that callers who write
+    //   contractId: process.env.SOROSTREAM_CONTRACT_ID
+    // still get the file default when the env var is not set.
+    const merged = mergeSorostreamConfig(
+      { contractId: FILE_CONTRACT },
+      { contractId: '' },
+    );
+    expect(merged.contractId).toBe(FILE_CONTRACT);
+  });
+
+  it('does NOT apply file rpcUrl when runtime rpcUrl is an empty string (deliberate asymmetry)', () => {
+    // rpcUrl: '' is treated as a deliberate caller choice (e.g. a custom
+    // transport adapter is in use), so the file default is NOT applied.
+    const merged = mergeSorostreamConfig(
+      { rpcUrl: FILE_RPC },
+      { rpcUrl: '' },
+    );
+    // The runtime empty string wins — the file value is NOT substituted.
+    expect(merged.rpcUrl).toBe('');
+  });
+
+  it('applies file rpcUrl when runtime rpcUrl is undefined', () => {
+    const merged = mergeSorostreamConfig(
+      { rpcUrl: FILE_RPC },
+      { rpcUrl: undefined },
+    );
+    expect(merged.rpcUrl).toBe(FILE_RPC);
+  });
+
+  it('does NOT apply file network when runtime network is undefined-equivalent string', () => {
+    // Only undefined (omitted) triggers the fallback for network; any string value wins.
+    const merged = mergeSorostreamConfig(
+      { network: 'testnet' },
+      { network: 'mainnet' as const },
+    );
+    expect(merged.network).toBe('mainnet');
+  });
+
+  it('a non-empty runtime contractId always takes precedence over file contractId', () => {
+    const merged = mergeSorostreamConfig(
+      { contractId: FILE_CONTRACT },
+      { contractId: 'CRUNTIMEWINS1234567890123456789012345678901234567890' },
+    );
+    expect(merged.contractId).toBe('CRUNTIMEWINS1234567890123456789012345678901234567890');
+  });
+});

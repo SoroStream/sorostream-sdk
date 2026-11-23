@@ -93,6 +93,13 @@ export class Cache<K, V> {
    * Removes every entry whose key matches `pattern` (issue #627).
    * String patterns support `*` wildcards (e.g. `"stream:42:*"`); keys are
    * compared via `String(key)`. A predicate may be passed for custom matching.
+   *
+   * **Limitation (issue #966):** string patterns have no escape mechanism, so
+   * every `*` is always treated as a wildcard. A key that legitimately contains
+   * a literal asterisk (e.g. `"label:*"`) cannot be matched or excluded precisely
+   * with a string pattern. Use a predicate (`(key) => key === "label:*"`) or a
+   * `RegExp` (`/^label:\*$/`) for such keys.
+   *
    * @returns The number of entries removed.
    */
   invalidatePattern(pattern: string | RegExp | ((key: K) => boolean)): number {
@@ -128,6 +135,11 @@ export class Cache<K, V> {
 
   setMaxSize(size: number): void {
     this.maxSize = size;
+    // Drop already-expired entries before evicting live ones, so a fresh entry
+    // is never sacrificed while a dead one is still occupying space (issue #967).
+    if (this.store.size > this.maxSize) {
+      this.prune();
+    }
     while (this.store.size > this.maxSize) {
       const lruKey = this.store.keys().next().value;
       if (lruKey !== undefined) {

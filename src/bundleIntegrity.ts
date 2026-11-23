@@ -17,7 +17,7 @@
  * ```
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -73,33 +73,81 @@ export function computeSha256(data: Buffer | string): string {
 // ── Manifest generation ──────────────────────────────────────────────────────
 
 /**
+ * Default filename excluded from the integrity walk.
+ *
+ * When the manifest is written back into `distDir` (the conventional pattern),
+ * the walk must skip the manifest file itself — otherwise the recorded hash
+ * becomes stale the moment the file is written to disk.  This constant is the
+ * default value of `generateIntegrityManifest`'s `excludeFile` option.
+ */
+export const DEFAULT_MANIFEST_FILENAME = 'integrity-manifest.json';
+
+/**
  * Recursively walks `distDir` and generates an {@link IntegrityManifest}
  * containing SHA-256 checksums and file sizes for every file found.
  *
  * Files are sorted alphabetically by their relative path so that the manifest
  * is deterministic across platforms.
  *
+ * ### Self-exclusion (issue #XXX)
+ * If `distDir` already contains a manifest from a previous build, naively
+ * including it in the new manifest would record a hash that becomes stale the
+ * instant the new manifest is written to disk.  `excludeFile` names the
+ * basename to skip during the walk; it defaults to
+ * `'integrity-manifest.json'` — the conventional output filename.
+ *
+ * To write the manifest to a **different** path you can either:
+ * - pass `excludeFile: ''` (empty string) to disable the exclusion, or
+ * - pass the actual target basename if it differs from the default.
+ *
  * @param distDir     - Absolute path to the directory to scan (e.g. `./dist`).
  * @param packageName - npm package name (e.g. `@sorostream/sdk`).
  * @param version     - Package semver version string (e.g. `1.2.3`).
+ * @param excludeFile - Basename of the file to exclude from the walk.
+ *                      Defaults to `'integrity-manifest.json'`.
  * @returns A populated {@link IntegrityManifest}.
  *
  * @example
  * ```ts
+ * // Write manifest into the same dist directory — the default exclusion
+ * // ensures the manifest itself is never hashed.
  * const manifest = generateIntegrityManifest('./dist', '@sorostream/sdk', '1.0.0');
  * fs.writeFileSync('./dist/integrity-manifest.json', JSON.stringify(manifest, null, 2));
+ *
+ * // Custom manifest filename — pass the same name to excludeFile.
+ * const manifest2 = generateIntegrityManifest('./dist', '@sorostream/sdk', '1.0.0', 'checksums.json');
+ * fs.writeFileSync('./dist/checksums.json', JSON.stringify(manifest2, null, 2));
  * ```
  */
 export function generateIntegrityManifest(
   distDir: string,
   packageName: string,
   version: string,
+  excludeFile: string = DEFAULT_MANIFEST_FILENAME,
 ): IntegrityManifest {
   const files: IntegrityEntry[] = [];
+  // Track real (resolved) directory paths to detect and break symlink cycles.
+  const visitedRealPaths = new Set<string>();
 
   function walk(dir: string): void {
+    let realDir: string;
+    try {
+      realDir = realpathSync(dir);
+    } catch {
+      // If we cannot resolve the real path (e.g. a dangling symlink), skip it.
+      return;
+    }
+    if (visitedRealPaths.has(realDir)) {
+      // Cycle detected — this real path was already visited. Skip it to avoid
+      // infinite recursion (stack overflow) caused by symlinked directories.
+      return;
+    }
+    visitedRealPaths.add(realDir);
+
     const entries = readdirSync(dir);
     for (const entry of entries) {
+      // Skip the manifest's own output file so a stale hash is never recorded.
+      if (excludeFile && entry === excludeFile) continue;
       const full = join(dir, entry);
       const stat = statSync(full);
       if (stat.isDirectory()) {

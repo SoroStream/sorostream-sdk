@@ -11,7 +11,7 @@ export function redactSecretKey(input: string): string {
   if (!input) return input;
   let result = input.replace(/\bS[A-Z2-7]{55}\b/g, '[REDACTED_SECRET_KEY]');
   result = result.replace(
-    /\b(secretKey|secretSeed|privateKey|mnemonic|secret|seed)\s*[:=]\s*["']?[^"'\s,]+["']?/gi,
+    /\b(secretKey|secretSeed|privateKey|mnemonic|secret|seed)\s*[:=]\s*["']?[^"'\s,{}[\]]+["']?/gi,
     '$1=[REDACTED_SECRET]',
   );
   return result;

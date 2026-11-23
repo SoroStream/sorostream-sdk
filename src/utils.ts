@@ -1954,6 +1954,8 @@ export function deserializeStreamFromJSON(json: string): import('./types.js').St
     autoRenew: Boolean(parsed['autoRenew']),
     ...(parsed['pausedAt'] != null ? { pausedAt: Number(parsed['pausedAt']) } : {}),
     ...(parsed['lockUntil'] != null ? { lockUntil: Number(parsed['lockUntil']) } : {}),
+    ...(parsed['namespace'] != null ? { namespace: String(parsed['namespace']) } : {}),
+    ...(parsed['tag'] != null ? { tag: String(parsed['tag']) } : {}),
   };
 
   return stream;

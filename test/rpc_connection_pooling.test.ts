@@ -53,14 +53,14 @@ describe('Issue #435: RPC connection pooling for improved throughput', () => {
     });
   });
 
-  it('ConnectionPool allows acquiring RPC servers for request execution', () => {
+  it('ConnectionPool allows acquiring RPC servers for request execution', async () => {
     const pool = new ConnectionPool({
       poolSize: 3,
       rpcUrl,
       contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
     });
 
-    const { server, release } = pool.acquireServer();
+    const { server, release } = await pool.acquireServer();
     expect(server).toBeDefined();
     expect(pool.getStats().active).toBe(1);
 
@@ -212,6 +212,158 @@ describe('Issue #539: atomic acquire with maxConnections', () => {
   it('defaults maxConnections to poolSize', () => {
     const pool = new ConnectionPool({ poolSize: 7, rpcUrl, contractId });
     expect(pool.maxConnections).toBe(7);
+    pool.destroy();
+  });
+});
+
+describe('Issue #435: acquireServer enforces maxConnections', () => {
+  const rpcUrl = 'https://soroban-testnet.stellar.org';
+  const contractId = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM';
+
+  it('resolves only maxConnections acquireServer calls immediately and queues the rest', async () => {
+    const pool = new ConnectionPool({ poolSize: 3, maxConnections: 3, rpcUrl, contractId });
+
+    const held: Array<{ release: () => void }> = [];
+    const order: number[] = [];
+    const acquires = Array.from({ length: 6 }, (_, i) =>
+      pool.acquireServer().then((h) => {
+        order.push(i);
+        held.push(h);
+      }),
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    // Only maxConnections (3) resolve immediately.
+    expect(order).toEqual([0, 1, 2]);
+    expect(held).toHaveLength(3);
+
+    for (const h of held) h.release();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual([0, 1, 2, 3, 4, 5]);
+
+    pool.destroy();
+  });
+
+  it('never exceeds maxConnections under concurrent acquireServer calls', async () => {
+    const pool = new ConnectionPool({ poolSize: 2, maxConnections: 2, rpcUrl, contractId });
+
+    let held = 0;
+    let maxHeld = 0;
+    const releases: Array<() => void> = [];
+
+    Array.from({ length: 6 }, () =>
+      pool.acquireServer().then((h) => {
+        held++;
+        maxHeld = Math.max(maxHeld, held);
+        releases.push(() => {
+          held--;
+          h.release();
+        });
+      }),
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(held).toBe(2);
+    expect(maxHeld).toBe(2);
+
+    for (const release of releases) release();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(maxHeld).toBe(2);
+
+    pool.destroy();
+  });
+
+  it('queues instead of over-allocating when at maxConnections', async () => {
+    const pool = new ConnectionPool({ poolSize: 1, maxConnections: 1, rpcUrl, contractId });
+
+    const first = await pool.acquireServer();
+    let secondResolved = false;
+    const second = pool.acquireServer().then((h) => {
+      secondResolved = true;
+      return h;
+    });
+
+    await Promise.resolve();
+    expect(secondResolved).toBe(false);
+
+    first.release();
+    await second;
+    expect(secondResolved).toBe(true);
+
+    pool.destroy();
+  });
+
+  it('grants queued acquireServer waiters in FIFO order on release', async () => {
+    const pool = new ConnectionPool({ poolSize: 2, maxConnections: 2, rpcUrl, contractId });
+
+    const order: number[] = [];
+    const held: Array<{ release: () => void }> = [];
+    Array.from({ length: 5 }, (_, i) =>
+      pool.acquireServer().then((h) => {
+        order.push(i);
+        held.push(h);
+      }),
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual([0, 1]);
+
+    held[0]!.release();
+    held[1]!.release();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual([0, 1, 2, 3]);
+
+    held[2]!.release();
+    held[3]!.release();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual([0, 1, 2, 3, 4]);
+
+    pool.destroy();
+  });
+
+  it('acquireServer and acquire share the same activeConnections counter', async () => {
+    const pool = new ConnectionPool({ poolSize: 2, maxConnections: 2, rpcUrl, contractId });
+
+    // Fill both slots via acquireServer.
+    const s1 = await pool.acquireServer();
+    const s2 = await pool.acquireServer();
+
+    // acquire() must now queue — both slots taken by acquireServer callers.
+    let acquireResolved = false;
+    const queued = pool.acquire().then((h) => {
+      acquireResolved = true;
+      return h;
+    });
+
+    await Promise.resolve();
+    expect(acquireResolved).toBe(false);
+
+    s1.release();
+    await queued;
+    expect(acquireResolved).toBe(true);
+
+    s2.release();
+    pool.destroy();
+  });
+
+  it('aborts a queued acquireServer caller when the signal fires', async () => {
+    const pool = new ConnectionPool({ poolSize: 1, maxConnections: 1, rpcUrl, contractId });
+
+    const first = await pool.acquireServer();
+    const ac = new AbortController();
+    const queued = pool.acquireServer({ signal: ac.signal });
+
+    ac.abort();
+    await expect(queued).rejects.toThrow(/aborted/);
+
+    first.release();
     pool.destroy();
   });
 });

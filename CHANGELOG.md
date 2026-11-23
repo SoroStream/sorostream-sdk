@@ -7,10 +7,14 @@ The format is based on Keep a Changelog and uses the contributor guidance in CON
 ## [Unreleased]
 
 ### Added
+- Add `RateLimiter.cancelPending(reason?)` and `RateLimiterCancelledError`, which reject tasks still queued in a `RateLimiter` instead of leaving their promises unsettled (#947)
 - Add streaming deserialization entry point `deserializeStreamRecords(payload)`, a generator that walks a top-level stream-history JSON array and yields records incrementally without buffering the parsed payload, for callers that only need the first N records; the existing whole-payload helpers are unchanged (#708)
 - Add token-type-conditional template parameters via `ConditionalParam`/`resolveConditionalParam` and the new `templates.minAmountStream`, resolving decimals-aware parameters at instantiation time so one template can produce different values for different token types (#710)
 
 ### Fixed
+- Fix `ScValCache`, `cachedScVal` and `cachedBool` returning the same mutable `xdr.ScVal` instance to every caller, so an in-place mutation by one caller corrupted the shared cache; each call now returns an independent instance built from the cached serialized XDR (#985)
+- Fix `serializeStream`/`deserializeStream` and `deserializeStreamFromJSON` silently dropping a stream's optional `tag` and `namespace` fields across a round-trip (#987)
+- Document why the `@sorostream/sdk/batch` entry point re-exports `ConnectionPool` (backward compatibility only; new code should import it from `core`) (#984)
 - Fix `toStroopsForToken` truncating to the token's native precision instead of rounding excess fractional digits up (#717)
 - Fix `nativeToStream` referencing an undefined `stream` variable in dead code left over from a merge, which made every stream read throw `ReferenceError` (#611)
 - Fix `createStream` validating the token contract (an RPC round-trip) before cheap offline checks like `durationSeconds`, so malformed input unnecessarily waited on a network call before failing (#542)

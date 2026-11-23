@@ -157,7 +157,6 @@ export class MockSoroStreamClient {
         minResourceFee: 100,
       } as any;
     }
-    if (params.amount <= 0n) throw new Error('Amount must be > 0');
     if (params.durationSeconds <= 0) throw new Error('Duration must be > 0');
     const mockNow = nowSec();
     const startTimeParam =
@@ -397,6 +396,18 @@ export class MockSoroStreamClient {
     return this.topUp({ streamId, amount });
   }
 
+  /**
+   * Mock implementation of batch cancellation.
+   *
+   * Behavior is all-or-nothing and differs from a per-item result model:
+   * streams are processed in order, and the first missing or non-Active stream
+   * throws immediately. Streams processed before that point stay cancelled,
+   * and the remaining IDs are not processed. On success, a single result is
+   * returned whose `streamIds` contains every ID in the batch.
+   *
+   * Callers that need per-stream success/failure should cancel streams
+   * individually instead of relying on this mock.
+   */
   async batchCancel(streamIds: string[], _batchSize = 8): Promise<BatchCancelResult[]> {
     const results: BatchCancelResult[] = [];
     for (const id of streamIds) {
@@ -423,13 +434,27 @@ export class MockSoroStreamClient {
     if (!stream) throw new Error(`Stream not found: ${params.streamId}`);
     if (stream.status !== 'Active') throw new Error('Stream is not active');
 
+    const now = nowSec();
     const streamedSoFar = safeClaimable(
       stream.flowRate,
-      BigInt(Math.max(0, nowSec() - stream.startTime)),
+      BigInt(Math.max(0, now - stream.startTime)),
       stream.deposit,
     );
     const remaining = stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
-    const newEndTime = nowSec() + Number(remaining / params.newFlowRate);
+
+    // Nothing left to stream: the stream has effectively ended, so mark it
+    // Completed (ending now) instead of leaving it Active with a past end time. (Issue #978)
+    if (remaining === 0n) {
+      this.streams.set(params.streamId, {
+        ...stream,
+        flowRate: params.newFlowRate,
+        endTime: now,
+        status: 'Completed',
+      });
+      return { txHash: `mock-tx-update-fr-${params.streamId}` };
+    }
+
+    const newEndTime = now + Number(remaining / params.newFlowRate);
 
     this.streams.set(params.streamId, {
       ...stream,
@@ -547,14 +572,16 @@ export class MockSoroStreamClient {
       throw new Error('Ratio numerator must be less than denominator');
     }
 
-    // Cancel the original stream
-    this.streams.set(params.streamId, { ...stream, status: 'Cancelled' });
-
     const now = nowSec();
     const remainingDuration = stream.endTime - Math.max(now, stream.lastWithdrawTime);
+    // Splitting a stream that is already at or past its end time has nothing
+    // to divide; reject it before the original stream is touched. (Issue #979)
+    if (remainingDuration <= 0) {
+      throw new Error('Cannot split a stream with no remaining duration');
+    }
     const remainingBalance = safeClaimable(
       stream.flowRate,
-      BigInt(Math.max(0, remainingDuration)),
+      BigInt(remainingDuration),
       stream.deposit,
     );
 
@@ -566,8 +593,13 @@ export class MockSoroStreamClient {
     const amountA = (remainingBalance * ratioA) / totalRatio;
     const amountB = (remainingBalance * ratioB) / totalRatio;
 
-    const flowRateA = (amountA / BigInt(Math.max(1, remainingDuration))) as PositiveFlowRate;
-    const flowRateB = (amountB / BigInt(Math.max(1, remainingDuration))) as PositiveFlowRate;
+    // asPositiveFlowRate enforces the PositiveFlowRate invariant at runtime
+    // rather than an unchecked cast; it throws before any state is mutated.
+    const flowRateA = asPositiveFlowRate(amountA / BigInt(remainingDuration));
+    const flowRateB = asPositiveFlowRate(amountB / BigInt(remainingDuration));
+
+    // Cancel the original stream (only after all validation has passed)
+    this.streams.set(params.streamId, { ...stream, status: 'Cancelled' });
 
     const idA = String(nextId++);
     const idB = String(nextId++);
@@ -896,6 +928,14 @@ export class MockSoroStreamClient {
 
   // ── Issue #73: Stream snapshot export / import ───────────────────────────
 
+  /**
+   * Mock implementation of stream snapshot export.
+   *
+   * `vestingProjection` and `history` are always empty placeholders in the mock.
+   * They are not populated even though the mock tracks withdrawals and emits
+   * lifecycle events. A real client may fill these fields, so consumer tests
+   * should not assert on their contents against the mock.
+   */
   async exportStream(streamId: string, cliffSeconds = 0): Promise<StreamSnapshot> {
     const stream = await this.getStream(streamId);
     const claimable = await this.getClaimable(streamId);

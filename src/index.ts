@@ -202,6 +202,7 @@ export {
   StreamAlreadyLockedError,
   TransactionFailedError,
   InvalidAddressError,
+  InvalidI128Error,
   AccountNotFoundError,
   InsufficientBalanceError,
   ZeroDurationError,
@@ -309,6 +310,7 @@ export type {
   PaginationParams,
   PaginatedStreams,
   WebhookConfig,
+  WebhookDeliveryFailure,
   WriteOptions,
   FormatUSDCOptions,
   StreamDrift,
@@ -445,7 +447,7 @@ export type { SimulationProfile, ProfileReport, ProfilerConfig } from './profile
 // It is distinct from WriteRateLimiter (token-bucket for write operations)
 // and PriorityRequestQueue (multi-lane priority queue for RPC calls).
 // See docs/rate-limiting.md for the full comparison.
-export { RateLimiter } from './rate-limiter.js';
+export { RateLimiter, RateLimiterCancelledError } from './rate-limiter.js';
 
 // ── Issue #760: Replay transport for deterministic testing ──────────────────
 export { ReplayTransport, ReplayFixtureError, ReplayFixtureParseError } from './replayTransport.js';

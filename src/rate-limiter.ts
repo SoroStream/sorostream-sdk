@@ -1,4 +1,17 @@
+import { SoroStreamError } from './errors.js';
+
 type Task<T> = () => Promise<T>;
+
+/**
+ * Rejection reason for a task that was still waiting in a {@link RateLimiter}
+ * queue when {@link RateLimiter.cancelPending} was called (issue #947).
+ */
+export class RateLimiterCancelledError extends SoroStreamError {
+  constructor(message?: string) {
+    super(message ?? 'Task was cancelled before it started');
+    this.name = 'RateLimiterCancelledError';
+  }
+}
 
 interface QueueItem {
   task: Task<unknown>;
@@ -62,6 +75,23 @@ export class RateLimiter {
       const item = this.queue.shift()!;
       this.execute(item.task).then(item.resolve).catch(item.reject);
     }
+  }
+
+  /**
+   * Rejects every task that is queued but has not started yet, so the promises
+   * returned by {@link run} settle instead of hanging forever (for example when
+   * the owner is being torn down). Tasks that are already running are not
+   * interrupted and finish normally. The limiter stays usable afterwards.
+   *
+   * @param reason - Rejection reason; defaults to a {@link RateLimiterCancelledError}.
+   * @returns The number of queued tasks that were rejected.
+   */
+  cancelPending(reason?: unknown): number {
+    const cancelled = this.queue.splice(0, this.queue.length);
+    for (const item of cancelled) {
+      item.reject(reason ?? new RateLimiterCancelledError());
+    }
+    return cancelled.length;
   }
 
   get pending(): number {
