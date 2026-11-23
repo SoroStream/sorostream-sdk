@@ -135,6 +135,11 @@ export class Cache<K, V> {
 
   setMaxSize(size: number): void {
     this.maxSize = size;
+    // Drop already-expired entries before evicting live ones, so a fresh entry
+    // is never sacrificed while a dead one is still occupying space (issue #967).
+    if (this.store.size > this.maxSize) {
+      this.prune();
+    }
     while (this.store.size > this.maxSize) {
       const lruKey = this.store.keys().next().value;
       if (lruKey !== undefined) {
