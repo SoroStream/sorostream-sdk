@@ -14,7 +14,8 @@ import { serializeStream, deserializeStream } from './serialization.js';
 import type { SerializedStream } from './serialization.js';
 
 const KEY_PREFIX = 'sorostream_stream_cache';
-const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** Default maximum age (ms) of a cached stream entry before it is considered stale. */
+export const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 interface StoredStreamEntry {
   stream: SerializedStream;
@@ -25,13 +26,29 @@ interface StoredStreamEntry {
 export class LocalStorageStreamCache {
   private readonly storage: StorageAdapter;
   private readonly maxAgeMs: number;
+  /**
+   * Contract ID used to scope storage keys. Two deployments that share the
+   * same `network` label but target different contracts can coexist in the
+   * same storage without reading or overwriting each other's entries.
+   * `undefined` preserves the pre-fix behaviour (no contractId segment) for
+   * callers that do not supply one.
+   */
+  private readonly contractId: string | undefined;
 
-  constructor(storage: StorageAdapter, maxAgeMs: number = DEFAULT_MAX_AGE_MS) {
+  constructor(
+    storage: StorageAdapter,
+    maxAgeMs: number = DEFAULT_MAX_AGE_MS,
+    contractId?: string,
+  ) {
     this.storage = storage;
     this.maxAgeMs = maxAgeMs;
+    this.contractId = contractId;
   }
 
   private key(network: string, streamId: string): string {
+    if (this.contractId !== undefined) {
+      return `${KEY_PREFIX}:${network}:${this.contractId}:${streamId}`;
+    }
     return `${KEY_PREFIX}:${network}:${streamId}`;
   }
 

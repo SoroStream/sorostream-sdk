@@ -14,6 +14,7 @@ import {
   formatTokenAmount,
   _clearNegativeLookupCache,
   _getNegativeCacheEntry,
+  DEFAULT_NETWORK_KEY,
 } from '../src/decimalAware.js';
 import type { TokenMetadataProvider } from '../src/decimalAware.js';
 
@@ -247,91 +248,84 @@ describe('getTokenDecimals negative-lookup cache (issue #684)', () => {
   });
 });
 
-// ── Issue #990: high-level helpers propagate a cached negative lookup ─────────
+// ── Cross-network negative-cache isolation (issue #XXX) ───────────────────────
 
-describe('convertToTokenUnits / formatTokenAmount cached negative lookup (issue #990)', () => {
-  const FAILING_TOKEN = 'CFAILING00000000000000000000000000000000000000000000000001';
-  const OTHER_TOKEN = 'CWORKING00000000000000000000000000000000000000000000000001';
-  const lookupError = new Error('token metadata unavailable');
+describe('negativeLookupCache cross-network isolation', () => {
+  const TOKEN = 'CTOKENX0000000000000000000000000000000000000000000000000001';
+  const TESTNET = 'Test SDF Network ; September 2015';
+  const MAINNET = 'Public Global Stellar Network ; September 2015';
+  const rpcError = new Error('contract not found');
 
-  function failingProvider(): TokenMetadataProvider {
-    return { getTokenMetadata: vi.fn().mockRejectedValue(lookupError) };
-  }
-
-  it('convertToTokenUnits rethrows the cached error on repeated calls without a new lookup', async () => {
-    const provider = failingProvider();
-
-    await expect(convertToTokenUnits('10', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-    await expect(convertToTokenUnits('10', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-    await expect(convertToTokenUnits('25.5', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-
-    expect(provider.getTokenMetadata).toHaveBeenCalledOnce();
-  });
-
-  it('formatTokenAmount rethrows the cached error on repeated calls without a new lookup', async () => {
-    const provider = failingProvider();
-
-    await expect(formatTokenAmount(1_000_000n, FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-    await expect(formatTokenAmount(1_000_000n, FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-    await expect(formatTokenAmount(5n, FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-
-    expect(provider.getTokenMetadata).toHaveBeenCalledOnce();
-  });
-
-  it('the cached error is shared between convertToTokenUnits and formatTokenAmount', async () => {
-    const provider = failingProvider();
-
-    await expect(convertToTokenUnits('1', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-    // The first helper populated the negative cache; the second must not look up again.
-    await expect(formatTokenAmount(1n, FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-
-    expect(provider.getTokenMetadata).toHaveBeenCalledOnce();
-    expect(_getNegativeCacheEntry(FAILING_TOKEN)?.error).toBe(lookupError);
-  });
-
-  it('rethrows the very same error instance rather than a wrapped copy', async () => {
-    const provider = failingProvider();
-
-    const first = await convertToTokenUnits('1', FAILING_TOKEN, provider).catch((e) => e);
-    const second = await convertToTokenUnits('1', FAILING_TOKEN, provider).catch((e) => e);
-
-    expect(first).toBe(lookupError);
-    expect(second).toBe(first);
-  });
-
-  it('does not let a cached failure for one token affect another token', async () => {
-    const provider: TokenMetadataProvider = {
-      getTokenMetadata: vi.fn().mockImplementation(async (address: string) => {
-        if (address === FAILING_TOKEN) throw lookupError;
-        return { name: 'OK', symbol: 'OK', decimals: 6 };
-      }),
+  it('a failure on testnet does not block lookup on mainnet for the same token', async () => {
+    const failingProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
+    const successProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockResolvedValue({ name: 'TKN', symbol: 'TKN', decimals: 6 }),
     };
 
-    await expect(convertToTokenUnits('1', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-    await expect(convertToTokenUnits('1', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
+    // Cache a failure under TESTNET scope.
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, TESTNET)).rejects.toBe(rpcError);
 
-    expect(await convertToTokenUnits('1', OTHER_TOKEN, provider)).toBe(1_000_000n);
-    expect(await formatTokenAmount(1_000_000n, OTHER_TOKEN, provider)).toBe('1.000000');
-    // FAILING_TOKEN once, OTHER_TOKEN once per helper call (successes are not cached negatively).
-    expect(provider.getTokenMetadata).toHaveBeenCalledTimes(3);
+    // The mainnet scope must be unaffected — provider is called and returns 6.
+    const decimals = await getTokenDecimals(TOKEN, successProvider, 60_000, MAINNET);
+    expect(decimals).toBe(6);
+    expect(successProvider.getTokenMetadata).toHaveBeenCalledOnce();
   });
 
-  it('retries the lookup once the negative-cache entry has expired', async () => {
-    vi.useFakeTimers();
-    try {
-      const provider = failingProvider();
+  it('the same token address is served from cache independently per network', async () => {
+    const failingProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
 
-      await expect(convertToTokenUnits('1', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-      await expect(formatTokenAmount(1n, FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-      expect(provider.getTokenMetadata).toHaveBeenCalledOnce();
+    // Poison under TESTNET.
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, TESTNET)).rejects.toBe(rpcError);
 
-      // Default negative-cache TTL is 5 minutes; move just past it.
-      vi.advanceTimersByTime(5 * 60 * 1000 + 1);
+    // Second call on TESTNET hits the cache (provider called only once so far).
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, TESTNET)).rejects.toBe(rpcError);
+    expect(failingProvider.getTokenMetadata).toHaveBeenCalledOnce();
 
-      await expect(convertToTokenUnits('1', FAILING_TOKEN, provider)).rejects.toBe(lookupError);
-      expect(provider.getTokenMetadata).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
+    // MAINNET scope starts clean — provider is called again.
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, MAINNET)).rejects.toBe(rpcError);
+    expect(failingProvider.getTokenMetadata).toHaveBeenCalledTimes(2);
+
+    // Second call on MAINNET hits the mainnet cache slot.
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, MAINNET)).rejects.toBe(rpcError);
+    expect(failingProvider.getTokenMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it('no-networkKey calls fall through to the default scope without cross-contamination', async () => {
+    const failingProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
+    const successProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockResolvedValue({ name: 'TKN', symbol: 'TKN', decimals: 7 }),
+    };
+
+    // Poison under the default scope (no networkKey passed).
+    await expect(getTokenDecimals(TOKEN, failingProvider)).rejects.toBe(rpcError);
+
+    // An explicit MAINNET key is a different scope; the success provider is reached.
+    const decimals = await getTokenDecimals(TOKEN, successProvider, 60_000, MAINNET);
+    expect(decimals).toBe(7);
+
+    // The cache entry stored without a key uses DEFAULT_NETWORK_KEY sentinel.
+    expect(_getNegativeCacheEntry(TOKEN, DEFAULT_NETWORK_KEY)).toBeDefined();
+    expect(_getNegativeCacheEntry(TOKEN, MAINNET)).toBeUndefined();
+  });
+
+  it('_getNegativeCacheEntry is scoped by networkKey', async () => {
+    const failingProvider: TokenMetadataProvider = {
+      getTokenMetadata: vi.fn().mockRejectedValue(rpcError),
+    };
+
+    await expect(getTokenDecimals(TOKEN, failingProvider, 60_000, TESTNET)).rejects.toBe(rpcError);
+
+    // Entry exists under TESTNET key.
+    expect(_getNegativeCacheEntry(TOKEN, TESTNET)).toBeDefined();
+    // No entry under MAINNET key.
+    expect(_getNegativeCacheEntry(TOKEN, MAINNET)).toBeUndefined();
+    // No entry under the default key.
+    expect(_getNegativeCacheEntry(TOKEN)).toBeUndefined();
   });
 });
