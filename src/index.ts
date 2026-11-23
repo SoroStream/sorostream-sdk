@@ -310,6 +310,7 @@ export type {
   PaginationParams,
   PaginatedStreams,
   WebhookConfig,
+  WebhookDeliveryFailure,
   WriteOptions,
   FormatUSDCOptions,
   StreamDrift,

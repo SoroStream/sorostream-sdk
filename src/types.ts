@@ -205,6 +205,24 @@ export interface MultisigSigner {
 
 // ── Webhook types (#22) ──────────────────────────────────────────────────────
 
+/**
+ * Describes a webhook delivery that gave up after all retries were exhausted
+ * (issue #964). Passed to the `onFailure` callback of `WebhookForwarder` and
+ * `WebhookEmitter`.
+ */
+export interface WebhookDeliveryFailure {
+  /** Endpoint URL the delivery was attempted against. */
+  url: string;
+  /** Total number of attempts made (initial attempt + retries). */
+  attempts: number;
+  /** HTTP status of the last response, or `undefined` if the last attempt threw. */
+  lastStatus?: number;
+  /** Error thrown by the last attempt (e.g. a network error), if any. */
+  lastError?: unknown;
+  /** The payload that could not be delivered (a `StreamEvent` or emitter payload). */
+  payload: unknown;
+}
+
 export interface WebhookConfig {
   url: string;
   headers?: Record<string, string>;
@@ -212,6 +230,18 @@ export interface WebhookConfig {
   retryDelayMs?: number;
   /** Overrides the global `fetch` used to deliver the webhook (issue #199). */
   fetch?: FetchAdapter;
+  /**
+   * HMAC-SHA256 secret for signing payloads (issue #965). When provided, each
+   * request includes an `X-SoroStream-Signature` header containing the hex-encoded
+   * HMAC of the serialised request body, matching `WebhookEmitterConfig.secret`.
+   */
+  secret?: string;
+  /**
+   * Called when a delivery has failed after all retries are exhausted
+   * (issue #964). Errors thrown by the callback are swallowed so they cannot
+   * break event forwarding.
+   */
+  onFailure?: (failure: WebhookDeliveryFailure) => void;
 }
 
 /** A single payment stream as returned by the contract. */
