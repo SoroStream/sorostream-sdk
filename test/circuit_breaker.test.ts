@@ -125,3 +125,106 @@ describe('CircuitBreaker (#540)', () => {
     expect(circuitBreaker['failureCount']).toBe(1);
   });
 });
+
+// ── immediateOpenOnHalfOpenFailure option ─────────────────────────────────────
+
+describe('CircuitBreaker immediateOpenOnHalfOpenFailure option', () => {
+  it('re-opens on the first probe failure when the option is true', async () => {
+    // threshold=3 so the default behaviour would keep the breaker HALF_OPEN
+    // after just one failed probe.
+    const breaker = new CircuitBreaker({
+      threshold: 3,
+      cooldownMs: 10,
+      immediateOpenOnHalfOpenFailure: true,
+    });
+
+    const fail = () => Promise.reject(new Error('boom'));
+
+    // Drive the breaker to OPEN (3 failures).
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    expect(breaker.getState()).toBe('OPEN');
+
+    // Wait for cooldown.
+    await new Promise((r) => setTimeout(r, 15));
+
+    // Single failed probe must immediately re-open.
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    expect(breaker.getState()).toBe('OPEN');
+  });
+
+  it('preserves existing threshold-based re-open behaviour when the option is false (default)', async () => {
+    // When immediateOpenOnHalfOpenFailure is false (default), the failureCount
+    // accumulated while CLOSED carries over into HALF_OPEN. Since the breaker
+    // only opens once failureCount >= threshold, the first probe failure
+    // increments it past threshold and re-opens — this is the existing
+    // behaviour the option makes explicit.
+    const breaker = new CircuitBreaker({
+      threshold: 3,
+      cooldownMs: 10,
+      immediateOpenOnHalfOpenFailure: false,
+    });
+
+    const fail = () => Promise.reject(new Error('boom'));
+
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    expect(breaker.getState()).toBe('OPEN');
+    expect(breaker['failureCount']).toBe(3);
+
+    await new Promise((r) => setTimeout(r, 15));
+
+    // failureCount carries over (3); probe failure → 4 >= 3 → OPEN.
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    expect(breaker.getState()).toBe('OPEN');
+  });
+
+  it('closes normally on a successful probe even when the option is true', async () => {
+    const breaker = new CircuitBreaker({
+      threshold: 2,
+      cooldownMs: 10,
+      immediateOpenOnHalfOpenFailure: true,
+    });
+
+    const fail = () => Promise.reject(new Error('boom'));
+    const succeed = () => Promise.resolve('ok');
+
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    expect(breaker.getState()).toBe('OPEN');
+
+    await new Promise((r) => setTimeout(r, 15));
+
+    await expect(breaker.call(succeed)).resolves.toBe('ok');
+    expect(breaker.getState()).toBe('CLOSED');
+  });
+
+  it('resets the cooldown timer on immediate re-open', async () => {
+    const breaker = new CircuitBreaker({
+      threshold: 2,
+      cooldownMs: 10,
+      immediateOpenOnHalfOpenFailure: true,
+    });
+
+    const fail = () => Promise.reject(new Error('boom'));
+    const succeed = () => Promise.resolve('ok');
+
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    expect(breaker.getState()).toBe('OPEN');
+
+    await new Promise((r) => setTimeout(r, 15));
+
+    // Probe fails → immediately OPEN.
+    await expect(breaker.call(fail)).rejects.toThrow('boom');
+    expect(breaker.getState()).toBe('OPEN');
+
+    // Cooldown just reset — a successful fn must still be blocked.
+    await expect(breaker.call(succeed)).rejects.toThrow(
+      'RPC endpoint unavailable (circuit breaker open)',
+    );
+    expect(breaker.getState()).toBe('OPEN');
+  });
+});

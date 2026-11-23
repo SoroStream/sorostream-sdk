@@ -516,3 +516,114 @@ describe('RxJS interoperability (#423)', () => {
     sub.unsubscribe();
   });
 });
+
+// ── shareLatest reset-on-refcount-zero behaviour (issue #XXX) ────────────────
+//
+// These tests document the intentional teardown semantics: when the subscriber
+// count reaches zero the producer is torn down synchronously and the cached
+// latest value is discarded.  A new subscriber must wait for the next
+// producer emission — there is no replay across a zero-refcount gap.
+
+describe('shareLatest reset-on-refcount-zero behaviour', () => {
+  it('discards the cached value when the last subscriber unsubscribes', () => {
+    let emit!: (v: number) => void;
+    const obs = shareLatest<number>((sink) => {
+      emit = (v) => sink.next(v);
+    });
+
+    const received: number[] = [];
+    const sub = obs.subscribe((v) => received.push(v));
+    emit(42);
+    expect(received).toEqual([42]);
+
+    // Unsubscribe — refcount hits zero, state resets.
+    sub.unsubscribe();
+
+    // New subscriber: no replay, must wait for a fresh emission.
+    const received2: number[] = [];
+    const sub2 = obs.subscribe((v) => received2.push(v));
+    expect(received2).toEqual([]); // 42 is gone — the cache was cleared
+
+    emit(99);
+    expect(received2).toEqual([99]);
+    sub2.unsubscribe();
+  });
+
+  it('tears the producer down synchronously when refcount hits zero', () => {
+    let teardowns = 0;
+    const obs = shareLatest<number>(() => {
+      return () => {
+        teardowns++;
+      };
+    });
+
+    const sub = obs.subscribe(() => {});
+    expect(teardowns).toBe(0);
+
+    sub.unsubscribe();
+    // Teardown is synchronous — not deferred to a microtask.
+    expect(teardowns).toBe(1);
+  });
+
+  it('simulates StrictMode double-invoke: remounting subscriber misses stale replay', () => {
+    // React StrictMode unmounts then immediately remounts every component.
+    // This test verifies that between unmount and remount the cached value is
+    // lost, so the remounted component renders nothing until the next emission.
+    let emit!: (v: number) => void;
+    let producerRuns = 0;
+    const obs = shareLatest<number>((sink) => {
+      producerRuns++;
+      emit = (v) => sink.next(v);
+    });
+
+    // Mount (first subscriber).
+    const received: number[] = [];
+    const sub = obs.subscribe((v) => received.push(v));
+    emit(10);
+    expect(received).toEqual([10]);
+
+    // Unmount — refcount zero, producer torn down, latest cleared.
+    sub.unsubscribe();
+    expect(producerRuns).toBe(1);
+
+    // Remount — fresh producer, no replay.
+    const received2: number[] = [];
+    const sub2 = obs.subscribe((v) => received2.push(v));
+    expect(received2).toEqual([]); // <-- key assertion: no stale replay
+    expect(producerRuns).toBe(2); // producer restarted
+
+    emit(20);
+    expect(received2).toEqual([20]);
+    sub2.unsubscribe();
+  });
+
+  it('a late subscriber that arrives before refcount hits zero still gets the replay', () => {
+    let emit!: (v: number) => void;
+    const obs = shareLatest<number>((sink) => {
+      emit = (v) => sink.next(v);
+    });
+
+    const a: number[] = [];
+    const subA = obs.subscribe((v) => a.push(v));
+    emit(55);
+
+    // subA is still alive — refcount is 1.  Late subscriber gets the replay.
+    const b: number[] = [];
+    const subB = obs.subscribe((v) => b.push(v));
+    expect(b).toEqual([55]); // replayed immediately
+
+    subA.unsubscribe();
+    subB.unsubscribe();
+  });
+
+  it('calls onDisconnect when the last subscriber unsubscribes', () => {
+    const onDisconnect = vi.fn();
+    const obs = shareLatest<number>(() => {}, { onDisconnect });
+
+    const sub = obs.subscribe(() => {});
+    expect(onDisconnect).not.toHaveBeenCalled();
+
+    sub.unsubscribe();
+    expect(onDisconnect).toHaveBeenCalledOnce();
+  });
+});
