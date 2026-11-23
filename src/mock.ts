@@ -423,13 +423,27 @@ export class MockSoroStreamClient {
     if (!stream) throw new Error(`Stream not found: ${params.streamId}`);
     if (stream.status !== 'Active') throw new Error('Stream is not active');
 
+    const now = nowSec();
     const streamedSoFar = safeClaimable(
       stream.flowRate,
-      BigInt(Math.max(0, nowSec() - stream.startTime)),
+      BigInt(Math.max(0, now - stream.startTime)),
       stream.deposit,
     );
     const remaining = stream.deposit > streamedSoFar ? stream.deposit - streamedSoFar : 0n;
-    const newEndTime = nowSec() + Number(remaining / params.newFlowRate);
+
+    // Nothing left to stream: the stream has effectively ended, so mark it
+    // Completed (ending now) instead of leaving it Active with a past end time. (Issue #978)
+    if (remaining === 0n) {
+      this.streams.set(params.streamId, {
+        ...stream,
+        flowRate: params.newFlowRate,
+        endTime: now,
+        status: 'Completed',
+      });
+      return { txHash: `mock-tx-update-fr-${params.streamId}` };
+    }
+
+    const newEndTime = now + Number(remaining / params.newFlowRate);
 
     this.streams.set(params.streamId, {
       ...stream,
