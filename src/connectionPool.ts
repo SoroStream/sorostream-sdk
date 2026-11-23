@@ -100,6 +100,13 @@ export class ConnectionPool {
    * Accepts an optional `AbortSignal` to automatically release the slot on abort.
    */
   acquirePoller(options?: { signal?: AbortSignal }): { poller: EventPoller; release: () => void } {
+    // Reject up front, before a slot is claimed, so a caller can never receive
+    // a poller whose slot has already been released (issue #960). Mirrors the
+    // immediate rejection of acquire() for an already-aborted signal.
+    if (options?.signal?.aborted) {
+      throw new Error('ConnectionPool.acquirePoller(): aborted before acquiring a poller');
+    }
+
     const best = this._leastLoadedSlot();
 
     if (best.subscriptions >= this.maxSubs) {
@@ -128,14 +135,10 @@ export class ConnectionPool {
 
     let abortHandler: (() => void) | undefined;
     if (options?.signal) {
-      if (options.signal.aborted) {
+      abortHandler = () => {
         release();
-      } else {
-        abortHandler = () => {
-          release();
-        };
-        options.signal.addEventListener('abort', abortHandler, { once: true });
-      }
+      };
+      options.signal.addEventListener('abort', abortHandler, { once: true });
     }
 
     return {
