@@ -95,6 +95,12 @@ interface QueuedItem {
   /** Monotonic timestamp when this item was enqueued, for wait estimation. */
   enqueuedAt: number;
   /**
+   * Monotonic submission sequence number, used to break priority ties in true
+   * submission order (issue #970). Unlike `enqueuedAt`, it is never equal for
+   * two items.
+   */
+  seq: number;
+  /**
    * Per-request priority (issue #566). Higher-priority items are drained
    * before lower-priority ones regardless of the lane they were enqueued to.
    */
@@ -127,6 +133,8 @@ export class PriorityRequestQueue {
   private readonly inFlightPerLane = new Map<string, number>();
   /** Total in-flight across all lanes. */
   private totalInFlight = 0;
+  /** Next submission sequence number to assign (issue #970). */
+  private nextSeq = 0;
 
   /** Recent task durations (ms) for wait-time estimation, capped at 20. */
   private readonly recentDurations: number[] = [];
@@ -187,6 +195,7 @@ export class PriorityRequestQueue {
         resolve: resolve as (v: unknown) => void,
         reject,
         enqueuedAt: Date.now(),
+        seq: this.nextSeq++,
         priority,
       };
       laneQueue.push(item);
@@ -279,37 +288,30 @@ export class PriorityRequestQueue {
    * Picks the next item to run when a concurrency slot opens up.
    *
    * Items are selected by per-request priority first (high before normal
-   * before low, issue #566), then by enqueue order (FIFO), then by lane
-   * order. This lets a `"high"`-priority health check jump ahead of a
-   * `"low"`-priority background poll even when they were enqueued into the
-   * same lane — the queue is not lane-strict FIFO, it is priority-ordered.
+   * before low, issue #566), then by submission order (issue #970). Ties are
+   * broken by the monotonic `seq` counter rather than `Date.now()`, which can
+   * collide within one millisecond. This lets a `"high"`-priority health check
+   * jump ahead of a `"low"`-priority background poll even when they were
+   * enqueued into the same lane — the queue is not lane-strict FIFO, it is
+   * priority-ordered.
    */
   private dequeueNext(): QueuedItem | null {
     let best: QueuedItem | null = null;
     let bestRank = Infinity;
-    let bestEnqueuedAt = Infinity;
-    let bestLaneIndex = Infinity;
+    let bestSeq = Infinity;
 
-    for (let li = 0; li < this.priorityLanes.length; li++) {
-      const lane = this.priorityLanes[li]!;
+    for (const lane of this.priorityLanes) {
       const queue = this.queues.get(lane);
       if (!queue || queue.length === 0) continue;
 
       // Scan every item in the lane — a later-enqueued high-priority item
       // must be able to jump ahead of an earlier low-priority one.
-      for (let qi = 0; qi < queue.length; qi++) {
-        const item = queue[qi]!;
+      for (const item of queue) {
         const rank = PRIORITY_RANK[item.priority];
-        if (
-          rank < bestRank ||
-          (rank === bestRank &&
-            (item.enqueuedAt < bestEnqueuedAt ||
-              (item.enqueuedAt === bestEnqueuedAt && li < bestLaneIndex)))
-        ) {
+        if (rank < bestRank || (rank === bestRank && item.seq < bestSeq)) {
           best = item;
           bestRank = rank;
-          bestEnqueuedAt = item.enqueuedAt;
-          bestLaneIndex = li;
+          bestSeq = item.seq;
         }
       }
     }
