@@ -367,6 +367,38 @@ describe('ReplayTransport.replay – sequential vs parallel (issue #544)', () =>
     expect((second as { sequence: string }).sequence).toBe('2');
   });
 
+  it('serialises different methods (getHealth then simulateTransaction) in recorded order', async () => {
+    const fixture = makeFixture([
+      { method: 'getHealth', request: {}, response: { status: 'healthy' } },
+      {
+        method: 'simulateTransaction',
+        request: { xdr: 'sim-xdr' },
+        response: { latestLedger: 100 },
+      },
+    ]);
+
+    const transport = ReplayTransport.replay(fixture);
+    const settled: string[] = [];
+    const fakeTx = { toXDR: () => 'sim-xdr' } as unknown as Parameters<
+      RpcTransportAdapter['simulateTransaction']
+    >[0];
+
+    const health = transport.getHealth().then((r) => {
+      settled.push('getHealth');
+      return r;
+    });
+    const simulation = transport.simulateTransaction(fakeTx).then((r) => {
+      settled.push('simulateTransaction');
+      return r;
+    });
+
+    const [h, s] = await Promise.all([health, simulation]);
+
+    expect((h as { status: string }).status).toBe('healthy');
+    expect((s as { latestLedger: number }).latestLedger).toBe(100);
+    expect(settled).toEqual(['getHealth', 'simulateTransaction']);
+  });
+
   it('sequential: false enables parallel replay', async () => {
     const fixture = makeFixture([
       { method: 'getHealth', request: {}, response: { status: 'healthy' } },
