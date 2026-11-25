@@ -65,6 +65,22 @@ export interface NetworkedStream {
 }
 
 /**
+ * Result shape for {@link MultiNetworkClient.findStreamAcrossNetworksDetailed}.
+ */
+export interface MultiNetworkStreamSearch {
+  /** Per-network outcome. */
+  results: Array<{
+    network: Network;
+    /** The stream, or `null` if not found on this network. */
+    stream: Stream | null;
+    /** Non-null when the per-network fetch failed (distinct from "not found"). */
+    error: Error | null;
+  }>;
+  /** Flat list of streams found across all networks (only successes). */
+  found: NetworkedStream[];
+}
+
+/**
  * Result shape for {@link MultiNetworkClient.getStreamsBySenderAllNetworks} and
  * {@link MultiNetworkClient.getStreamsByRecipientAllNetworks}.
  */
@@ -223,6 +239,14 @@ export class MultiNetworkClient {
   /**
    * Looks up `streamId` on every configured network and returns all matches
    * (the same ID may exist on multiple networks).
+   *
+   * **Limitation:** this method cannot distinguish "the stream doesn't exist
+   * on this network" from "the RPC call to this network failed" — both cases
+   * simply omit that network from the returned array. A network outage during
+   * the search looks identical to the stream genuinely not existing there. If
+   * you need to tell these apart (e.g. to retry only the networks that
+   * actually failed), use {@link findStreamAcrossNetworksDetailed} instead,
+   * which reports a per-network `error` field.
    */
   async findStreamAcrossNetworks(streamId: string): Promise<NetworkedStream[]> {
     // Read the live map at call time so runtime add/remove is honored.
@@ -236,6 +260,45 @@ export class MultiNetworkClient {
     return results
       .filter((r): r is PromiseFulfilledResult<NetworkedStream> => r.status === 'fulfilled')
       .map((r) => r.value);
+  }
+
+  /**
+   * Like {@link findStreamAcrossNetworks}, but reports a per-network outcome
+   * instead of silently dropping networks where the lookup failed — using the
+   * same `error`-field shape as {@link _fanOut} (see {@link MultiNetworkStreams}).
+   *
+   * Note this does not fully resolve the "not found" vs "RPC error"
+   * ambiguity: `SoroStreamClient.getStream` itself rejects for both a
+   * genuinely missing stream and a real transport/RPC failure, with no
+   * separate "not found" resolution path. What this method adds over
+   * {@link findStreamAcrossNetworks} is that the rejection's `Error` is
+   * preserved per network (in `results[].error`) instead of being discarded,
+   * so callers can inspect the error's message/type themselves to tell the
+   * two cases apart where the underlying client surfaces that information.
+   */
+  async findStreamAcrossNetworksDetailed(streamId: string): Promise<MultiNetworkStreamSearch> {
+    const entries = [...this.clients.entries()];
+
+    const settled = await Promise.allSettled(
+      entries.map(async ([network, client]) => ({
+        network,
+        stream: await client.getStream(streamId),
+      })),
+    );
+
+    const results = settled.map((r, i) => {
+      const network = entries[i]![0];
+      if (r.status === 'fulfilled') {
+        return { network, stream: r.value.stream, error: null };
+      }
+      return { network, stream: null, error: r.reason as Error };
+    });
+
+    const found = results
+      .filter((r): r is { network: Network; stream: Stream; error: null } => r.stream !== null)
+      .map((r) => ({ network: r.network, stream: r.stream }));
+
+    return { results, found };
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
