@@ -167,7 +167,12 @@ export class StreamIndexer {
       ? lastEvent.pagingToken || lastEvent.id || response.cursor
       : response.cursor;
     const limit = filter.limit ?? 100;
-    const hasMore = events.length >= limit;
+    // Base hasMore on the raw RPC response size, not the post-filter events
+    // array. If the server returned exactly `limit` raw events but some were
+    // filtered out above (not inSuccessfulContractCall, unparseable, or
+    // non-matching filter), the filtered array is shorter than `limit` even
+    // though more events may exist on the server past this page.
+    const hasMore = response.events.length >= limit;
 
     return {
       events,
@@ -215,6 +220,14 @@ export class StreamIndexer {
 
     switch (eventType) {
       case 'StreamCreated': {
+        // StreamCreated's contract event doesn't carry the new stream's id as
+        // a topic (the id doesn't exist yet when the topics are chosen) — it
+        // is only present in the event's decoded value payload. Withdrawn and
+        // Cancelled fire against an existing stream, so the contract puts the
+        // id in topic[1] for cheap server-side filtering. Both paths run the
+        // same scValToNative + safeIdString conversion, so they produce the
+        // same string format for the same underlying u64 id (see the
+        // StreamCreated-vs-Withdrawn/Cancelled id-format parity test).
         const streamId = rawData['id'] != null ? safeIdString(rawData['id']) : '';
         if (filter.streamId && streamId !== filter.streamId) return null;
         if (filter.sender && String(rawData['sender'] ?? '') !== filter.sender) return null;
