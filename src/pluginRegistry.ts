@@ -52,6 +52,11 @@ export class PluginRegistry implements IPluginRegistry {
    * their plugin list from the registry, so the removed plugin is skipped
    * immediately.
    *
+   * When called with a name, this removes EVERY plugin currently registered
+   * under that name, not just one — names are not guaranteed unique at
+   * registration time, and `unregister` treats a name as a bulk filter
+   * rather than a single-entry key (issue #937).
+   *
    * @param pluginOrName - The plugin instance or its registered name.
    * @returns `true` if at least one plugin was removed, `false` otherwise.
    */
@@ -75,6 +80,10 @@ export class PluginRegistry implements IPluginRegistry {
    * If a plugin's hook throws, execution stops and the error propagates,
    * preventing the downstream operation from running.
    *
+   * This fail-fast behavior is intentionally asymmetric with {@link runAfter}
+   * (issue #936): a `before` hook is often doing validation or guarding that
+   * should be able to veto the call, so its errors are not swallowed.
+   *
    * @param operation - Name of the SDK method being invoked (e.g. `"createStream"`).
    * @param context   - {@link MiddlewareContext} passed to each hook.
    */
@@ -92,6 +101,12 @@ export class PluginRegistry implements IPluginRegistry {
    * Errors thrown by individual hooks are caught and do not prevent subsequent
    * hooks from running; they are surfaced as console warnings to avoid
    * disrupting the caller's result.
+   *
+   * This is intentionally asymmetric with {@link runBefore} (issue #936):
+   * by the time `after` runs, the downstream operation has already
+   * succeeded, so an `after` hook is treated as observational/side-effecting
+   * — one plugin's failure should not corrupt the result the caller already
+   * has or block other plugins' `after` hooks from running.
    *
    * @param operation - Name of the SDK method that just completed.
    * @param context   - {@link MiddlewareContext} passed to each hook.
