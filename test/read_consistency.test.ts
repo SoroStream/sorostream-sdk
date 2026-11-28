@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { SoroStreamClient } from '../src/SoroStreamClient.js';
-import { ReadConsistency } from '../src/readConsistency.js';
+import { waitForLedger, POLL_JITTER_RATIO } from '../src/readConsistency.js';
 import { Account, Keypair, Networks, TransactionBuilder } from '@stellar/stellar-sdk';
 import type { WalletAdapter } from '../src/types.js';
 
@@ -177,12 +177,10 @@ describe('#564 read-consistency guarantee after writes', () => {
 
 describe('#722 waitForLedger polling jitter', () => {
   it('varies consecutive poll intervals within bounded jitter', async () => {
-    vi.useFakeTimers();
-    try {
+    {
       const pollIntervalMs = 1000;
-      const jitterRatio = 0.2;
-      const minInterval = pollIntervalMs * (1 - jitterRatio);
-      const maxInterval = pollIntervalMs * (1 + jitterRatio);
+      const minInterval = pollIntervalMs * (1 - POLL_JITTER_RATIO);
+      const maxInterval = pollIntervalMs * (1 + POLL_JITTER_RATIO);
 
       const targetLedger = 5;
       let currentLedger = 0;
@@ -191,25 +189,24 @@ describe('#722 waitForLedger polling jitter', () => {
         return { sequence: currentLedger };
       });
 
-      const consistency = new ReadConsistency({
-        pollIntervalMs,
-        timeoutMs: 60_000,
-        jitterRatio,
-      });
-
       const delays: number[] = [];
       const originalSetTimeout = globalThis.setTimeout;
-      const setTimeoutSpy = vi
-        .spyOn(globalThis, 'setTimeout')
-        .mockImplementation(((fn: (...args: any[]) => void, delay?: number, ...args: any[]) => {
-          if (typeof delay === 'number' && delay > 0) {
-            delays.push(delay);
-          }
-          return originalSetTimeout(fn, 0, ...args);
-        }) as typeof setTimeout);
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+        fn: (...args: any[]) => void,
+        delay?: number,
+        ...args: any[]
+      ) => {
+        if (typeof delay === 'number' && delay > 0) {
+          delays.push(delay);
+        }
+        return originalSetTimeout(fn, 0, ...args);
+      }) as typeof setTimeout);
 
       try {
-        await consistency.waitForLedger(targetLedger, { getLatestLedger } as any);
+        await waitForLedger({ getLatestLedger } as any, targetLedger, {
+          pollIntervalMs,
+          timeoutMs: 60_000,
+        });
       } finally {
         setTimeoutSpy.mockRestore();
       }
@@ -224,8 +221,6 @@ describe('#722 waitForLedger polling jitter', () => {
 
       const distinct = new Set(delays);
       expect(distinct.size).toBeGreaterThan(1);
-    } finally {
-      vi.useRealTimers();
     }
   });
 });

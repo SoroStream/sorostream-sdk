@@ -203,7 +203,9 @@ export class ConnectionPool {
         abortHandler = () => {
           const idx = this.waiters.findIndex((w) => w.grant === grant);
           if (idx >= 0) this.waiters.splice(idx, 1);
-          reject(new Error('ConnectionPool.acquireServer(): aborted while waiting for a connection'));
+          reject(
+            new Error('ConnectionPool.acquireServer(): aborted while waiting for a connection'),
+          );
         };
         signal.addEventListener('abort', abortHandler, { once: true });
       }

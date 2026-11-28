@@ -535,11 +535,13 @@ describe('RequestDeduplicator clear() + fresh dedupe() interleaving', () => {
     let calls = 0;
 
     let resolveFirst!: (v: string) => void;
-    const first = dedup.dedupe('key', () =>
-      new Promise<string>((r) => {
-        calls++;
-        resolveFirst = r;
-      }),
+    const first = dedup.dedupe(
+      'key',
+      () =>
+        new Promise<string>((r) => {
+          calls++;
+          resolveFirst = r;
+        }),
     );
 
     dedup.clear();

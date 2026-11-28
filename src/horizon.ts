@@ -8,7 +8,7 @@ import type { Network } from './types.js';
 import { isValidStellarAddress } from './utils.js';
 import { InvalidAddressError } from './errors.js';
 
-const HORIZON_URLS: Record<Network, string> = {
+export const HORIZON_URLS: Record<Network, string> = {
   mainnet: 'https://horizon.stellar.org',
   testnet: 'https://horizon-testnet.stellar.org',
   futurenet: 'https://horizon-futurenet.stellar.org',
@@ -113,10 +113,7 @@ export function assertValidHorizonUrl(horizonUrl: string): string {
  * });
  * ```
  */
-export function resolveHorizonUrl(
-  network: Network,
-  overrides?: HorizonUrlOverrides,
-): string {
+export function resolveHorizonUrl(network: Network, overrides?: HorizonUrlOverrides): string {
   const override = overrides?.[network];
   if (override === undefined) {
     return HORIZON_URLS[network];

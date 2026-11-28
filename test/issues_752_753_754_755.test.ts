@@ -49,9 +49,7 @@ describe('requireAddressWithExistenceCheck (#753)', () => {
   });
 
   it('resolves when Horizon returns 200 (account exists)', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 200 }),
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
     await expect(
       requireAddressWithExistenceCheck(VALID_ADDRESS, { horizonUrl: HORIZON }),
     ).resolves.toBe(VALID_ADDRESS);
@@ -89,9 +87,9 @@ describe('requireAddressWithExistenceCheck (#753)', () => {
   });
 
   it('strips a trailing slash from horizonUrl before building the request URL', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 200 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 200 }));
     await requireAddressWithExistenceCheck(VALID_ADDRESS, {
       horizonUrl: 'https://horizon-testnet.stellar.org/',
     });
@@ -104,7 +102,7 @@ describe('requireAddressWithExistenceCheck (#753)', () => {
 // ── #755 ─────────────────────────────────────────────────────────────────────
 
 const ALICE = 'GAXXZ5XSL2VTQPGWB3LPU5273HSJXMK7VHLZTF2XKW65QFZVA3XKULQZ';
-const BOB   = 'GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF';
+const BOB = 'GDDZFLD7ZQTSSDLWEMSD6UML2MTU4KKNCH765GZOVHAYKZNRJMWV4GMF';
 
 describe('addressBook subpath entry point (#755)', () => {
   it('InMemoryAddressBook is importable from src/address-book.ts', () => {
@@ -120,8 +118,12 @@ describe('addressBook subpath entry point (#755)', () => {
     const book = new PersistedAddressBook({
       storage: {
         getItem: (k) => store[k] ?? null,
-        setItem: (k, v) => { store[k] = v; },
-        removeItem: (k) => { delete store[k]; },
+        setItem: (k, v) => {
+          store[k] = v;
+        },
+        removeItem: (k) => {
+          delete store[k];
+        },
       },
     });
     expect(book).toBeInstanceOf(PersistedAddressBook);

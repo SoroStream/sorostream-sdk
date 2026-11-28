@@ -1,21 +1,18 @@
+import { describe, it, expect, vi } from 'vitest';
 import { PluginRegistry } from '../src/pluginRegistry';
 
 describe('PluginRegistry unregister', () => {
-  it('removes a plugin from active dispatch paths when unregistered', () => {
+  it('removes a plugin from active dispatch paths when unregistered', async () => {
     const registry = new PluginRegistry();
 
-    const beforeHandler = jest.fn();
-    const afterHandler = jest.fn();
+    const beforeHandler = vi.fn();
+    const afterHandler = vi.fn();
 
-    registry.register({
-      name: 'test-plugin',
-      runBefore: beforeHandler,
-      runAfter: afterHandler,
-    });
+    registry.register({ before: beforeHandler, after: afterHandler }, { name: 'test-plugin' });
 
     // First dispatch: handlers should be called.
-    registry.runBefore('some-event', {});
-    registry.runAfter('some-event', {});
+    await registry.runBefore('some-event', { method: 'some-event', args: [] });
+    await registry.runAfter('some-event', { method: 'some-event', args: [] }, undefined);
 
     expect(beforeHandler).toHaveBeenCalledTimes(1);
     expect(afterHandler).toHaveBeenCalledTimes(1);
@@ -25,8 +22,8 @@ describe('PluginRegistry unregister', () => {
     expect(result).toBe(true);
 
     // Second dispatch: handlers should not be called again.
-    registry.runBefore('some-event', {});
-    registry.runAfter('some-event', {});
+    await registry.runBefore('some-event', { method: 'some-event', args: [] });
+    await registry.runAfter('some-event', { method: 'some-event', args: [] }, undefined);
 
     expect(beforeHandler).toHaveBeenCalledTimes(1);
     expect(afterHandler).toHaveBeenCalledTimes(1);
@@ -35,11 +32,7 @@ describe('PluginRegistry unregister', () => {
   it('returns true for a known name and false for an unknown name', () => {
     const registry = new PluginRegistry();
 
-    registry.register({
-      name: 'known-plugin',
-      runBefore: jest.fn(),
-      runAfter: jest.fn(),
-    });
+    registry.register({ before: vi.fn(), after: vi.fn() }, { name: 'known-plugin' });
 
     expect(registry.unregister('known-plugin')).toBe(true);
     expect(registry.unregister('unknown-plugin')).toBe(false);

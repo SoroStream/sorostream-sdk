@@ -1,5 +1,7 @@
 export { VERSION, SDK_VERSION } from './version.js';
 export { SoroStreamClient, createClient } from './SoroStreamClient.js';
+export { loadSorostreamConfig, mergeSorostreamConfig } from './sorostream-config.js';
+export type { SorostreamConfig } from './sorostream-config.js';
 export type { SoroStreamClientOptions, SimulateOnlyResult, SoroStreamConfigUpdate, ConfigUpdatedEvent, CreateStreamsParams, CreateClientOptions, } from './SoroStreamClient.js';
 export type { StorageAdapter, WebSocketFactory, FetchAdapter, SoroStreamAdapters, } from './adapters.js';
 export { createDefaultRpcTransport, createRetryingRpcTransport, createPooledRpcTransport, } from './transport.js';
@@ -19,8 +21,8 @@ export { serializeStream, deserializeStream, buildUnsignedXdr } from './serializ
 export type { SerializedStream } from './serialization.js';
 export { ScValCache, cachedScVal, cachedBool, cachedScValBase64 } from './scValCache.js';
 export type { BuildUnsignedXdrParams } from './types.js';
-export { getTransactionHistory, getAddressActivity } from './horizon.js';
-export type { StreamTransaction, TransactionHistoryPage, TransactionHistoryOptions, } from './horizon.js';
+export { getTransactionHistory, getAddressActivity, resolveHorizonUrl } from './horizon.js';
+export type { StreamTransaction, TransactionHistoryPage, TransactionHistoryOptions, HorizonUrlOverrides, } from './horizon.js';
 export { CircuitBreaker } from './circuitBreaker.js';
 export { withRetry, RetryBackoff, isTransientRpcError, computeBackoffDelay } from './retry.js';
 export type { RetryOptions, BackoffStrategy } from './retry.js';
@@ -39,12 +41,12 @@ export { SoroStreamObservable, shareLatest, observableSymbol, withBackpressure, 
 export type { Observer, Subscription as ObservableSubscription, Unsubscribable, SubscriberSink, SubscribeFn, Teardown, ShareLatestOptions, BackpressureStrategy, BackpressureDropEvent, BackpressureOptions, } from './observable.js';
 export type { StreamRetryPolicy, EventPollerOptions } from './events.js';
 export type { BatchingOptions, BatchMetrics, CompressionOptions } from './types.js';
-export { createContractEncoder, encodeAddress, encodeI128, encodeBytes, encodeString, decodeAddress, decodeI128, decodeBytes, decodeString, } from './contractEncoders.js';
-export type { ContractCallEncoder } from './contractEncoders.js';
+export { createContractEncoder, encodeAddress, encodeI128, encodeBytes, encodeString, decodeAddress, decodeI128, decodeBytes, decodeString, requireAddressWithExistenceCheck, } from './contractEncoders.js';
+export type { ContractCallEncoder, AddressExistenceCheckOptions } from './contractEncoders.js';
 export { createSimplePriceFeed } from './priceFeed.js';
 export type { SimplePriceFeedOptions } from './priceFeed.js';
 export { encodeMemo, encodeMemoHash, decodeMemo } from './memo.js';
-export { SoroStreamError, InsufficientAmountError, StreamNotFoundError, StreamNotActiveError, StreamAlreadyLockedError, TransactionFailedError, InvalidAddressError, AccountNotFoundError, InsufficientBalanceError, ZeroDurationError, BulkCreatePartialError, InsufficientAllowanceError, FederationResolutionError, SoroStreamValidationError, StartTimeInPastError, NonceNotSupportedError, SoroStreamRetryExhaustedError, SoroStreamMemoError, SelfStreamError, SoroStreamTransportError, InsecureRpcUrlError, SdkNetworkError, XdrValidationError, FeeTooHighError, MalformedWalletResponseError, MetadataTooLargeError, BatchOperationLimitExceededError, FeeBumpExpiredError, } from './errors.js';
+export { SoroStreamError, InsufficientAmountError, StreamNotFoundError, StreamNotActiveError, StreamAlreadyLockedError, TransactionFailedError, InvalidAddressError, InvalidI128Error, AccountNotFoundError, InsufficientBalanceError, ZeroDurationError, BulkCreatePartialError, InsufficientAllowanceError, FederationResolutionError, SoroStreamValidationError, StartTimeInPastError, NonceNotSupportedError, SoroStreamRetryExhaustedError, SoroStreamMemoError, SelfStreamError, SoroStreamTransportError, InsecureRpcUrlError, SdkNetworkError, XdrValidationError, FeeTooHighError, MalformedWalletResponseError, MetadataTooLargeError, BatchOperationLimitExceededError, FeeBumpExpiredError, RateLimitExceededError, } from './errors.js';
 export type { XdrValidationErrorCode } from './errors.js';
 export { assertEnvelopeUnmutated } from './xdrValidation.js';
 export { checkPeerDependencies } from './peerDependencies.js';
@@ -53,7 +55,7 @@ export type { NetworkError, ContractError, ValidationError, AuthError, ErrorMatc
 export type { BulkCreateFailedSlot, RetryAttempt } from './errors.js';
 export { parseContractEvent } from './contractEvents.js';
 export type { ContractEventPayload, StreamCreatedPayload, WithdrawalPayload, CancelledStreamPayload, StreamCompletedPayload, StreamToppedUpPayload, StreamPausedPayload, StreamResumedPayload, StreamTransferredPayload, UnknownEventPayload, } from './contractEvents.js';
-export type { Stream, StreamBalance, StreamStatus, StellarAddress, PositiveFlowRate, CreateStreamParams, CreateStreamDryRunResult, CloneStreamOverrides, EventHandler, WithdrawParams, CancelStreamParams, DrainFlowParams, DrainFlowResult, ProjectCostResult, ProjectStreamCost, TopUpParams, TransferStreamParams, PauseStreamParams, ResumeStreamParams, UpdateFlowRateParams, SetOperatorParams, OperatorTopUpParams, AddDelegateParams, RevokeDelegateParams, Network, WalletAdapter, WalletAdapterSignResult, FeeEstimate, StreamCostBreakdown, SimulateStreamResult, VestingSchedulePoint, VestingScheduleResult, WatchClaimableOptions, WatchTotalClaimableOptions, BulkStreamRow, BulkCreateOptions, BulkCreateBatchResult, BulkCreateResult, BatchCancelResult, BatchWithdrawResult, BatchWithdrawPartialResult, BatchProgress, TokenAggregate, MultisigSigner, StreamEvent, StreamEventType, StreamEventFilter, StreamSubscription, PaginationParams, PaginatedStreams, WebhookConfig, WriteOptions, FormatUSDCOptions, StreamDrift, ReconcileStreamOptions, PasskeyAdapterConfig, PriceFeedAdapter, FeeBumpOptions, ContractVersion, CompatibilityResult, SplitStreamParams, SplitStreamResult, StreamTotals, StatusBreakdown, DurationStats, StreamHealthReport, RecipientAggregate, StreamSnapshot, StreamHistoryEntry, SnapshotVestingPoint, SoroStreamPlugin, MiddlewareContext, RecipientChangedEvent, OnRecipientChangedOptions, StreamActivityEntry, StreamActivityType, GetActivityLogOptions, StreamActivityFeedEntry, StreamFilterCriteria, StreamFilter, StreamSortField, SortOrder, TokenMetadata, MemoHash, HorizonTransactionRecord, ParsedMemo, StreamCreatedEventPayload, StreamWithdrawnEventPayload, StreamCancelledEventPayload, RpcErrorEventPayload, CacheInvalidatedEventPayload, SoroStreamEventMap, KmsWalletAdapterConfig, HealthCheckResult, ExportStreamHistoryOptions, OperationExplanation, BalanceDelta, SoroStreamClientConfig, CacheConfigOptions, RecipientTrustScore, RecipientTrustScoreProvider, StreamHealthStatus, StreamHealthResult, SoroStreamEmitter, } from './types.js';
+export type { Stream, StreamBalance, StreamStatus, StellarAddress, PositiveFlowRate, CreateStreamParams, CreateStreamDryRunResult, CloneStreamOverrides, EventHandler, WithdrawParams, CancelStreamParams, DrainFlowParams, DrainFlowResult, ProjectCostResult, ProjectStreamCost, TopUpParams, TransferStreamParams, PauseStreamParams, ResumeStreamParams, UpdateFlowRateParams, SetOperatorParams, OperatorTopUpParams, AddDelegateParams, RevokeDelegateParams, Network, WalletAdapter, WalletAdapterSignResult, FeeEstimate, StreamCostBreakdown, SimulateStreamResult, VestingSchedulePoint, VestingScheduleResult, WatchClaimableOptions, WatchTotalClaimableOptions, BulkStreamRow, BulkCreateOptions, BulkCreateBatchResult, BulkCreateResult, BatchCancelResult, BatchWithdrawResult, BatchWithdrawPartialResult, BatchProgress, TokenAggregate, MultisigSigner, StreamEvent, StreamEventType, StreamEventFilter, StreamSubscription, PaginationParams, PaginatedStreams, WebhookConfig, WebhookDeliveryFailure, WriteOptions, FormatUSDCOptions, StreamDrift, ReconcileStreamOptions, PasskeyAdapterConfig, PriceFeedAdapter, FeeBumpOptions, ContractVersion, CompatibilityResult, SplitStreamParams, SplitStreamResult, StreamTotals, StatusBreakdown, DurationStats, StreamHealthReport, RecipientAggregate, StreamSnapshot, StreamHistoryEntry, SnapshotVestingPoint, SoroStreamPlugin, MiddlewareContext, RecipientChangedEvent, OnRecipientChangedOptions, StreamActivityEntry, StreamActivityType, GetActivityLogOptions, StreamActivityFeedEntry, StreamFilterCriteria, StreamFilter, StreamSortField, SortOrder, TokenMetadata, MemoHash, HorizonTransactionRecord, ParsedMemo, StreamCreatedEventPayload, StreamWithdrawnEventPayload, StreamCancelledEventPayload, RpcErrorEventPayload, CacheInvalidatedEventPayload, SoroStreamEventMap, KmsWalletAdapterConfig, HealthCheckResult, ExportStreamHistoryOptions, OperationExplanation, BalanceDelta, SoroStreamClientConfig, CacheConfigOptions, RecipientTrustScore, RecipientTrustScoreProvider, StreamHealthStatus, StreamHealthResult, SoroStreamEmitter, } from './types.js';
 export { ConnectionPoolExhaustedError, RecipientValidationError, InvalidTokenContractError, } from './errors.js';
 export { SanitizingLogger, NoopLogger, ConsoleLogger, NamespacedLogger, createLogger, withModule, } from './logger.js';
 export type { Logger, LogLevel, CreateLoggerOptions } from './logger.js';
@@ -73,12 +75,12 @@ export type { PaginatedEvents, StreamEvent as IndexerStreamEvent, StreamEventTyp
 export { MultiNetworkClient, MultiNetworkConfigError, MultiNetworkNotFoundError, } from './multiNetwork.js';
 export type { NetworkConfig, NetworkedStream, MultiNetworkStreams } from './multiNetwork.js';
 export { computeSha256, generateIntegrityManifest, verifyFileIntegrity, verifyManifest, } from './bundleIntegrity.js';
-export type { IntegrityEntry, IntegrityManifest } from './bundleIntegrity.js';
+export type { IntegrityEntry, IntegrityManifest, ManifestResourceResolver, } from './bundleIntegrity.js';
 export { GasProfiler } from './profiler.js';
 export type { SimulationProfile, ProfileReport, ProfilerConfig } from './profiler.js';
 export { RateLimiter, RateLimiterCancelledError } from './rate-limiter.js';
 export { ReplayTransport, ReplayFixtureError, ReplayFixtureParseError } from './replayTransport.js';
 export type { FixtureEntry, FixtureFile, RecordTransportOptions, RecordingRpcTransport, ReplayingRpcTransport, ReplayOptions, } from './replayTransport.js';
-export { loadSorostreamConfig, mergeSorostreamConfig, } from './sorostream-config.js';
-export type { SorostreamConfig } from './sorostream-config.js';
+export { InMemoryAddressBook, PersistedAddressBook, AddressBookValidationError, AddressBookNotFoundError, } from './addressBook.js';
+export type { AddressBook, AddressBookEntry, PersistedAddressBookOptions } from './addressBook.js';
 //# sourceMappingURL=index.d.ts.map

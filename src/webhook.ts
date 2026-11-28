@@ -87,6 +87,7 @@ export class WebhookForwarder {
   private async forward(event: StreamEvent): Promise<void> {
     const maxRetries = this.config.retries ?? 3;
     const delay = this.config.retryDelayMs ?? 1000;
+    const maxDelay = this.config.maxRetryDelayMs ?? 30_000;
     const body = JSON.stringify({
       event: event.type,
       stream_id: event.streamId,

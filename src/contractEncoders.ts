@@ -68,9 +68,7 @@ export async function requireAddressWithExistenceCheck(
   // Any other non-OK status is an unexpected server error; propagate as-is
   // rather than silently treating it as "not found".
   if (!res.ok) {
-    throw new Error(
-      `Horizon returned HTTP ${res.status} while checking account ${address}`,
-    );
+    throw new Error(`Horizon returned HTTP ${res.status} while checking account ${address}`);
   }
 
   return address;

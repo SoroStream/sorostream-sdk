@@ -1,5 +1,7 @@
 export { VERSION, SDK_VERSION } from './version.js';
 export { SoroStreamClient, createClient } from './SoroStreamClient.js';
+export { loadSorostreamConfig, mergeSorostreamConfig } from './sorostream-config.js';
+export type { SorostreamConfig } from './sorostream-config.js';
 export type {
   SoroStreamClientOptions,
   SimulateOnlyResult,
@@ -467,8 +469,4 @@ export {
   AddressBookValidationError,
   AddressBookNotFoundError,
 } from './addressBook.js';
-export type {
-  AddressBook,
-  AddressBookEntry,
-  PersistedAddressBookOptions,
-} from './addressBook.js';
+export type { AddressBook, AddressBookEntry, PersistedAddressBookOptions } from './addressBook.js';

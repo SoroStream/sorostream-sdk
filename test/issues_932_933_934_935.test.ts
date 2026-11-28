@@ -69,7 +69,10 @@ function streamWithdrawnRawEvent(id: bigint) {
     ledgerClosedAt: new Date().toISOString(),
     txHash: 'hash-withdrawn',
     inSuccessfulContractCall: true,
-    topic: [nativeToScVal('StreamWithdrawn', { type: 'symbol' }), nativeToScVal(id, { type: 'u64' })],
+    topic: [
+      nativeToScVal('StreamWithdrawn', { type: 'symbol' }),
+      nativeToScVal(id, { type: 'u64' }),
+    ],
     value: nativeToScVal({ recipient: 'GRECIPIENT', amount: 100n }),
   };
 }
@@ -276,7 +279,9 @@ describe('#934 MultiNetworkClient.findStreamAcrossNetworksDetailed', () => {
 
     expect(mainnetResult?.stream).toBeNull();
     expect(mainnetResult?.error).toBeInstanceOf(Error);
-    expect((mainnetResult?.error as Error).message).toBe('RPC timeout');
+    // simulateOp's rejection is retried and wrapped (see RpcRetryExhaustedError
+    // in src/errors.ts) rather than surfaced as the bare original error.
+    expect((mainnetResult?.error as Error).message).toContain('RPC timeout');
 
     multi.destroy();
   });

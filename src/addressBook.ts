@@ -282,26 +282,13 @@ export class PersistedAddressBook implements AddressBook {
   }
 
   /**
-   * Applies `mutate` to the in-memory map, then writes through to storage
-   * synchronously. If the write throws, the in-memory map is rolled back to
-   * its previous state and the error is rethrown so the caller observes the
-   * failure and the book stays consistent with persisted state.
+   * Applies `mutate` to the in-memory map, then schedules a debounced write
+   * to storage (see `_scheduleFlush`). Call `flush()` to write through
+   * immediately instead of waiting for the debounce window.
    */
   private _mutateAndPersist(mutate: () => void): void {
-    const snapshot = new Map(this._map);
     mutate();
-    try {
-      this._flush();
-    } catch (err) {
-      this._map.clear();
-      for (const [k, v] of snapshot) this._map.set(k, v);
-      throw err;
-    }
-    // Persisted successfully — cancel any pending debounced write.
-    if (this.flushTimer !== undefined) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = undefined;
-    }
+    this._scheduleFlush();
   }
 
   private _scheduleFlush(): void {

@@ -67,6 +67,18 @@ export declare class MockSoroStreamClient {
         txHash: string;
         newEndTime: Date;
     }>;
+    /**
+     * Mock implementation of batch cancellation.
+     *
+     * Behavior is all-or-nothing and differs from a per-item result model:
+     * streams are processed in order, and the first missing or non-Active stream
+     * throws immediately. Streams processed before that point stay cancelled,
+     * and the remaining IDs are not processed. On success, a single result is
+     * returned whose `streamIds` contains every ID in the batch.
+     *
+     * Callers that need per-stream success/failure should cancel streams
+     * individually instead of relying on this mock.
+     */
     batchCancel(streamIds: string[], _batchSize?: number): Promise<BatchCancelResult[]>;
     updateFlowRate(params: UpdateFlowRateParams): Promise<{
         txHash: string;
@@ -149,6 +161,14 @@ export declare class MockSoroStreamClient {
         txHash: string;
     }>;
     subscribeEvents(filter: StreamEventFilter, callback: (event: StreamEvent) => void): StreamSubscription;
+    /**
+     * Mock implementation of stream snapshot export.
+     *
+     * `vestingProjection` and `history` are always empty placeholders in the mock.
+     * They are not populated even though the mock tracks withdrawals and emits
+     * lifecycle events. A real client may fill these fields, so consumer tests
+     * should not assert on their contents against the mock.
+     */
     exportStream(streamId: string, cliffSeconds?: number): Promise<StreamSnapshot>;
     importStream(snapshot: StreamSnapshot): Stream;
     use(_plugin: SoroStreamPlugin): this;

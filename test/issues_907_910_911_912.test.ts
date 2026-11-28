@@ -139,7 +139,7 @@ describe('Issue #907: resolveConditionalParam correctly handles a branch map key
     // This is the exact case the old heuristic broke: a plain object with a
     // numeric `byteLength` property was misidentified as buffer-like.
     const branchMap: Record<string, number> & { default?: number } = {
-      byteLength: 12,       // numeric — was the culprit
+      byteLength: 12, // numeric — was the culprit
       native: 7,
       default: 1,
     };
@@ -334,7 +334,11 @@ describe('Issue #911: loadSorostreamConfig distinguishes missing file from exist
 
   it('throws for a config file that exists but contains a SyntaxError', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sorostream-broken-'));
-    writeFileSync(join(dir, 'sorostream.config.js'), 'module.exports = { THIS IS NOT VALID JS }', 'utf-8');
+    writeFileSync(
+      join(dir, 'sorostream.config.js'),
+      'module.exports = { THIS IS NOT VALID JS }',
+      'utf-8',
+    );
     try {
       await expect(loadSorostreamConfig(dir)).rejects.toThrow(/sorostream\.config\.js/);
     } finally {
@@ -433,8 +437,8 @@ describe('Issue #912: isStorageExpired accepts a ledger override parameter match
     // Simulator is at ledger 500 (not expired by default), but passing
     // ledger=2000 as override should report expired.
     sim.setLedger(500);
-    expect(sim.isStorageExpired(id)).toBe(false);           // default: not expired
-    expect(sim.isStorageExpired(id, sim.now(), 2000)).toBe(true);  // override: expired
+    expect(sim.isStorageExpired(id)).toBe(false); // default: not expired
+    expect(sim.isStorageExpired(id, sim.now(), 2000)).toBe(true); // override: expired
     expect(sim.isStorageExpired(id, sim.now(), 1999)).toBe(false); // override: not yet
   });
 

@@ -56,9 +56,9 @@ describe('#936 PluginRegistry before/after error-handling asymmetry', () => {
     };
     registry.register(plugin);
 
-    await expect(registry.runBefore('createStream', { method: 'createStream', args: [] })).rejects.toThrow(
-      'before hook failed',
-    );
+    await expect(
+      registry.runBefore('createStream', { method: 'createStream', args: [] }),
+    ).rejects.toThrow('before hook failed');
   });
 
   it('runAfter catches a hook error, warns, and still runs later hooks', async () => {
@@ -158,9 +158,11 @@ function buildPauseTransactionWithSameEnvelope(
   prepared: ReturnType<typeof buildPauseTransaction>,
   overrides: { memo?: Memo; timebounds?: { minTime: number; maxTime: number } },
 ): string {
-  const builder = TransactionBuilder.cloneFrom(prepared);
+  const builder = TransactionBuilder.cloneFrom(
+    prepared,
+    overrides.timebounds ? { timebounds: overrides.timebounds } : {},
+  );
   if (overrides.memo) builder.addMemo(overrides.memo);
-  if (overrides.timebounds) builder.setTimebounds(overrides.timebounds.minTime, overrides.timebounds.maxTime);
   return builder.build().toXDR();
 }
 

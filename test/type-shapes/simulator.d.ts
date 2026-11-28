@@ -48,6 +48,10 @@ export declare class StreamSimulator {
     private clockOffsetSeconds;
     private currentLedgerSeq;
     private expiryCallbacks;
+    /**
+     * `endTime`s whose expiry has already fired, per stream ID. Keyed by both so
+     * a renewed stream (same ID, later `endTime`) can fire again (issue #948).
+     */
     private firedExpiry;
     private storageTtl;
     private storageTtlLedger;
@@ -62,10 +66,14 @@ export declare class StreamSimulator {
     /**
      * Advances the simulated clock by `seconds`. Any stream in `streams` whose
      * `endTime` is newly crossed fires its registered expiry callback exactly
-     * once. Optionally also advances ledger count (defaults to seconds / 5 if ledgers omitted and seconds > 0).
+     * once per distinct `endTime`. Optionally also advances ledger count (defaults to seconds / 5 if ledgers omitted and seconds > 0).
      */
     advance(seconds: number, streams?: Stream[], ledgers?: number): void;
-    /** Registers a callback fired the first time `advance` crosses the stream's `endTime`. */
+    /**
+     * Registers a callback fired the first time `advance` crosses the stream's `endTime`.
+     * If the stream is later renewed (same ID, extended `endTime`), the callback
+     * fires again when the new `endTime` is crossed.
+     */
     onExpire(streamId: string, callback: StreamExpiryCallback): void;
     /** Computes the claimable amount for a stream at the simulator's current simulated time. */
     claimableAt(stream: Stream): bigint;
@@ -91,9 +99,25 @@ export declare class StreamSimulator {
     /**
      * True when the stream's recorded storage TTL has passed — either the
      * timestamp-based TTL at the given simulated time, or the ledger-based TTL
-     * at the simulator's current ledger sequence.
+     * at the given (or current) ledger sequence.
+     *
+     * ### Parameter symmetry with {@link simulateWithdraw}
+     *
+     * `simulateWithdraw` accepts an `opts.ledger` override for the ledger-based
+     * TTL check so callers can run a point-in-time check without mutating the
+     * simulator's state. `isStorageExpired` now accepts the same optional
+     * `ledger` parameter for the same reason (issue #907).
+     *
+     * @param streamId - ID of the stream whose storage TTL is being checked.
+     * @param at - Unix timestamp (seconds) to test the timestamp-based TTL against.
+     *   Defaults to the simulator's current simulated time (`this.now()`).
+     * @param ledger - Ledger sequence to test the ledger-based TTL against.
+     *   Defaults to the simulator's current ledger sequence (`this.currentLedgerSeq`).
+     *   Pass an explicit value for atomic, point-in-time checks that must not
+     *   depend on the simulator's current state — mirrors `opts.ledger` in
+     *   {@link simulateWithdraw}.
      */
-    isStorageExpired(streamId: string, at?: number): boolean;
+    isStorageExpired(streamId: string, at?: number, ledger?: number): boolean;
     /**
      * Simulates a withdraw against the current simulated state, factoring in
      * contract storage TTL expiry: a withdraw against an expired storage entry

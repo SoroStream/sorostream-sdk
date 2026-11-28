@@ -89,10 +89,7 @@ describe('OfflineWriteQueue persistence across page reloads (#681)', () => {
     const drainedEvents: QueueDrainedEvent[] = [];
     bus2.on('queueDrained', (ev) => drainedEvents.push(ev as QueueDrainedEvent));
 
-    const q2 = new OfflineWriteQueue(
-      { ...DEFAULT_QUEUE_OPTIONS, enabled: true, storage },
-      bus2,
-    );
+    const q2 = new OfflineWriteQueue({ ...DEFAULT_QUEUE_OPTIONS, enabled: true, storage }, bus2);
     expect(q2.size).toBe(1);
 
     await q2.markOnline();

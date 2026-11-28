@@ -121,7 +121,10 @@ describe('issue #702: telemetry flushes the pending batch on page unload', () =>
     telemetry.dispose();
   });
 
-  it('flushes the pending batch when visibilitychange reports hidden', () => {
+  it('does not flush on visibilitychange, even when hidden (issue #975)', () => {
+    // The unload listener is tied only to `beforeunload`, not
+    // `visibilitychange`, so ordinary tab switching never triggers a
+    // premature flush — see the `registerUnloadHandlers` doc comment.
     stubDom('hidden');
     const telemetry = new Telemetry(true);
     const span = pendingSpan();
@@ -130,8 +133,8 @@ describe('issue #702: telemetry flushes the pending batch on page unload', () =>
 
     dispatch(docListeners, 'visibilitychange');
 
-    expect(telemetry.pendingCount).toBe(0);
-    expect(span.end).toHaveBeenCalledTimes(1);
+    expect(telemetry.pendingCount).toBe(1);
+    expect(span.end).not.toHaveBeenCalled();
     telemetry.dispose();
   });
 
@@ -165,7 +168,7 @@ describe('issue #702: telemetry flushes the pending batch on page unload', () =>
     const telemetry = new Telemetry(true, undefined, { beaconUrl });
     telemetry.endSpan(pendingSpan());
 
-    dispatch(docListeners, 'visibilitychange');
+    dispatch(winListeners, 'beforeunload');
 
     expect(sendBeacon).toHaveBeenCalledTimes(1);
     expect(sendBeacon.mock.calls[0]![0]).toBe(beaconUrl);
@@ -178,13 +181,17 @@ describe('issue #702: telemetry flushes the pending batch on page unload', () =>
     stubDom('hidden');
     const telemetry = new Telemetry(true);
     telemetry.endSpan(pendingSpan());
+    // dispose() itself flushes the queued batch immediately (issue #974), so
+    // pendingCount is already 0 at this point — queue a new span afterward to
+    // verify the (now-detached) listeners no longer trigger a flush.
     telemetry.dispose();
+    telemetry.endSpan(pendingSpan());
 
     dispatch(docListeners, 'visibilitychange');
     dispatch(winListeners, 'beforeunload');
 
     expect(telemetry.pendingCount).toBe(1);
-    expect(docListeners['visibilitychange']).toHaveLength(0);
+    expect(docListeners['visibilitychange'] ?? []).toHaveLength(0);
     expect(winListeners['beforeunload']).toHaveLength(0);
   });
 

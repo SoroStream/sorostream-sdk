@@ -245,7 +245,11 @@ describe('Issue #892 — createLogger moduleLevels delegate verbosity', () => {
     logger.child('foo').debug('module-level debug message');
 
     expect(debugSpy).toHaveBeenCalled();
-    expect(debugSpy.mock.calls.some((call) => call.some((arg) => String(arg).includes('module-level debug message')))).toBe(true);
+    expect(
+      debugSpy.mock.calls.some((call) =>
+        call.some((arg) => String(arg).includes('module-level debug message')),
+      ),
+    ).toBe(true);
   });
 
   it('still filters out debug for modules without an override', () => {
@@ -290,6 +294,6 @@ describe('Issue #893 — SanitizingLogger.child redacts namespaced children', ()
     expect(childSpy.info).toHaveBeenCalledTimes(1);
     const logged = String((childSpy.info as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
     expect(logged).not.toContain(FAKE_SECRET);
-    expect(logged).toContain('[REDACTED]');
+    expect(logged).toContain('[REDACTED_SECRET_KEY]');
   });
 });

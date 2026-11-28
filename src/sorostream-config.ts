@@ -196,8 +196,7 @@ export async function loadSorostreamConfig(cwd?: string): Promise<SorostreamConf
         // The config file exists but failed to load (e.g. SyntaxError, runtime
         // error). Warn so the developer knows it was skipped, then rethrow so
         // the caller can decide how to handle the broken config (issue #907).
-        const message =
-          err instanceof Error ? err.message : String(err);
+        const message = err instanceof Error ? err.message : String(err);
         const wrappedError = new Error(
           `Failed to load sorostream config file "${filePath}": ${message}`,
         );
@@ -253,7 +252,13 @@ export function mergeSorostreamConfig<
   if (!fileConfig) return runtimeOptions;
 
   return {
+    // Runtime options spread first — every field the caller passed (or
+    // didn't) carries through untouched by default.
+    ...runtimeOptions,
     // Apply file-config defaults only when the runtime option is absent.
+    // These overrides are spread last so they can fill in a field that was
+    // absent from `runtimeOptions` without the earlier spread re-introducing
+    // its original (absent/empty) value.
     //
     // `network`, `rpcUrl`, and `txTimeoutMs` only fall back to file config
     // when the runtime option is `undefined` (i.e. the caller omitted it
@@ -280,7 +285,5 @@ export function mergeSorostreamConfig<
     ...(fileConfig.timeoutMs !== undefined && runtimeOptions.txTimeoutMs === undefined
       ? { txTimeoutMs: fileConfig.timeoutMs }
       : {}),
-    // Runtime options spread last — always take precedence.
-    ...runtimeOptions,
   };
 }

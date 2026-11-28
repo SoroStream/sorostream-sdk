@@ -66,7 +66,11 @@ describe('WebSocketTransportAdapter.subscribeEvents — onError called exactly o
     const transport = makeTransport(3);
     const errors: unknown[] = [];
 
-    transport.subscribeEvents({ filters: [] }, () => {}, (err) => errors.push(err));
+    transport.subscribeEvents(
+      { filters: [] },
+      () => {},
+      (err) => errors.push(err),
+    );
 
     // The first connect() runs immediately (synchronously via connect()).
     // Factory throws → scheduleReconnect(err) → attempts=1 ≤ 3 → schedule delay.
@@ -87,7 +91,11 @@ describe('WebSocketTransportAdapter.subscribeEvents — onError called exactly o
     const transport = makeTransport(1);
     const errors: unknown[] = [];
 
-    transport.subscribeEvents({ filters: [] }, () => {}, (err) => errors.push(err));
+    transport.subscribeEvents(
+      { filters: [] },
+      () => {},
+      (err) => errors.push(err),
+    );
 
     // attempt 1 → attempts=1 ≤ 1 → schedule delay
     expect(errors).toHaveLength(0);
@@ -100,7 +108,11 @@ describe('WebSocketTransportAdapter.subscribeEvents — onError called exactly o
     const transport = makeTransport(5);
     const errors: unknown[] = [];
 
-    transport.subscribeEvents({ filters: [] }, () => {}, (err) => errors.push(err));
+    transport.subscribeEvents(
+      { filters: [] },
+      () => {},
+      (err) => errors.push(err),
+    );
 
     // Drive through all 5 attempt delays (100, 200, 400, 800, 1600 ms)
     for (const delay of [100, 200, 400, 800, 1600]) {

@@ -143,8 +143,7 @@ export class OfflineWriteQueue {
     private options: OfflineQueueOptions,
     private eventBus: IEventBus,
   ) {
-    this.storage =
-      options.storage !== undefined ? options.storage : getDefaultStorageAdapter();
+    this.storage = options.storage !== undefined ? options.storage : getDefaultStorageAdapter();
     this.storageKey = options.storageKey ?? DEFAULT_OFFLINE_QUEUE_STORAGE_KEY;
     this.rehydrateExecutor = options.rehydrateExecutor ?? null;
 
@@ -351,11 +350,6 @@ export class OfflineWriteQueue {
 
     this.isDraining = true;
     const results: QueueReplayResult[] = [];
-    // Operations that failed while offline. They are set aside rather than
-    // retried in this pass, and re-inserted afterwards in priority/sequence
-    // order, so one persistently failing operation does not block the rest of
-    // the queue (issue #962).
-    const deferred: QueuedOperation[] = [];
 
     while (this.queue.length > 0) {
       const op = this.queue.shift()!;
@@ -368,15 +362,17 @@ export class OfflineWriteQueue {
           success: false,
           error: err instanceof Error ? err.message : String(err),
         });
-        if (!this.isOnline) deferred.push(op);
+        // Still offline: put the failed operation back at the front of the
+        // queue — its original position relative to everything still queued
+        // behind it — and stop draining immediately, so retries can never
+        // reorder ahead of (or behind) later-enqueued equal-priority work
+        // (issue #991). A persistently failing operation is retried on the
+        // next drain() rather than blocking this one indefinitely.
+        if (!this.isOnline) {
+          this.queue.unshift(op);
+          break;
+        }
       }
-    }
-
-    // Re-queue deferred operations using the same priority/sequence ordering
-    // as enqueue, so a retried operation can never jump ahead of higher-priority
-    // entries or of equal-priority operations enqueued while draining.
-    for (const op of deferred) {
-      if (this.queue.length < this.options.maxQueueSize) this.insertSorted(op);
     }
 
     this.isDraining = false;

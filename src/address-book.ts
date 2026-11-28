@@ -26,8 +26,4 @@ export {
   AddressBookValidationError,
   AddressBookNotFoundError,
 } from './addressBook.js';
-export type {
-  AddressBook,
-  AddressBookEntry,
-  PersistedAddressBookOptions,
-} from './addressBook.js';
+export type { AddressBook, AddressBookEntry, PersistedAddressBookOptions } from './addressBook.js';

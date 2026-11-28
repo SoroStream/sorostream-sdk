@@ -35,11 +35,7 @@ export class LocalStorageStreamCache {
    */
   private readonly contractId: string | undefined;
 
-  constructor(
-    storage: StorageAdapter,
-    maxAgeMs: number = DEFAULT_MAX_AGE_MS,
-    contractId?: string,
-  ) {
+  constructor(storage: StorageAdapter, maxAgeMs: number = DEFAULT_MAX_AGE_MS, contractId?: string) {
     this.storage = storage;
     this.maxAgeMs = maxAgeMs;
     this.contractId = contractId;

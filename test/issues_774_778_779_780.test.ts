@@ -125,18 +125,23 @@ describe('Issue #774: ReplayTransport.record preserves successful entries when b
       'RPC connection dropped mid-session',
     );
 
-    // Assert that entries recorded prior to failure are preserved intact
+    // Assert that entries recorded prior to failure are preserved intact.
+    // The failing call is also recorded, with an `error` field instead of a
+    // `response`, so its error path can be replayed too (issue #968).
     const entries = recordingTransport.getEntries();
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(3);
     expect(entries[0].method).toBe('getAccount');
     expect(entries[1].method).toBe('getLatestLedger');
+    expect(entries[2].method).toBe('sendTransaction');
+    expect(entries[2].response).toBeNull();
+    expect(entries[2].error?.message).toBe('RPC connection dropped mid-session');
 
     // toJSON works cleanly on the partial log
     const jsonOutput = recordingTransport.toJSON();
     expect(jsonOutput).toContain('getAccount');
     expect(jsonOutput).toContain('getLatestLedger');
     const parsed = JSON.parse(jsonOutput);
-    expect(parsed.entries).toHaveLength(2);
+    expect(parsed.entries).toHaveLength(3);
   });
 });
 

@@ -44,7 +44,9 @@ const randomScValArb = fc.oneof(
   fc.constant(xdr.ScVal.scvVoid()),
   fc.boolean().map((b) => xdr.ScVal.scvBool(b)),
   fc.integer({ min: 0, max: 1_000_000 }).map((n) => xdr.ScVal.scvU32(n)),
-  fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }).map((n) => xdr.ScVal.scvU64(xdr.Uint64.fromString(n.toString()))),
+  fc
+    .bigInt({ min: 0n, max: 2n ** 64n - 1n })
+    .map((n) => xdr.ScVal.scvU64(xdr.Uint64.fromString(n.toString()))),
   fc.string({ maxLength: 32 }).map((s) => xdr.ScVal.scvSymbol(s)),
   fc.string({ maxLength: 64 }).map((s) => xdr.ScVal.scvString(s)),
   knownEventNameArb.map((name) => xdr.ScVal.scvSymbol(name)),
@@ -127,9 +129,27 @@ describe('fuzz: parseContractEvent never throws (#918)', () => {
   it('falls back to UnknownEventPayload when topic is missing, non-array, or value is non-XDR', () => {
     const malformedCases = [
       { ledgerClosedAt: '2025-01-01T00:00:00Z', txHash: 'abc', ledger: 1 },
-      { ledgerClosedAt: '2025-01-01T00:00:00Z', txHash: 'abc', ledger: 1, topic: null, value: 'not-xdr' },
-      { ledgerClosedAt: '2025-01-01T00:00:00Z', txHash: 'abc', ledger: 1, topic: 12345, value: { bad: true } },
-      { ledgerClosedAt: 'invalid-date', txHash: '', ledger: 0, topic: ['not-scval', 42], value: 99 },
+      {
+        ledgerClosedAt: '2025-01-01T00:00:00Z',
+        txHash: 'abc',
+        ledger: 1,
+        topic: null,
+        value: 'not-xdr',
+      },
+      {
+        ledgerClosedAt: '2025-01-01T00:00:00Z',
+        txHash: 'abc',
+        ledger: 1,
+        topic: 12345,
+        value: { bad: true },
+      },
+      {
+        ledgerClosedAt: 'invalid-date',
+        txHash: '',
+        ledger: 0,
+        topic: ['not-scval', 42],
+        value: 99,
+      },
     ];
 
     for (const raw of malformedCases) {

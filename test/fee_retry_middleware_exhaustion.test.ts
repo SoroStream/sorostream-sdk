@@ -95,9 +95,7 @@ describe('createFeeRetryMiddleware exhaustion (issue #736)', () => {
 
     // The original fee error TYPE is preserved and exposed (carries its
     // result_code), so a caller matching on the fee error still recognises it.
-    expect((finalError as Error & { result_code: string }).result_code).toBe(
-      'tx_insufficient_fee',
-    );
+    expect((finalError as Error & { result_code: string }).result_code).toBe('tx_insufficient_fee');
 
     // Exactly the configured number of retry attempts were made — no more,
     // no fewer. `onRetry` fires once per actual retry attempt.
@@ -129,9 +127,7 @@ describe('createFeeRetryMiddleware exhaustion (issue #736)', () => {
 
     expect(finalError).toBe(feeErr);
     expect(finalError).not.toBeInstanceOf(FeeRetryError);
-    expect((finalError as Error & { result_code: string }).result_code).toBe(
-      'op_insufficient_fee',
-    );
+    expect((finalError as Error & { result_code: string }).result_code).toBe('op_insufficient_fee');
     expect(retryAttempts).toBe(1);
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
@@ -146,12 +142,15 @@ describe('createFeeRetryMiddleware exhaustion (issue #736)', () => {
     const ctx = makeCtx();
     plugin.before!(ctx);
 
-    const networkError = new Error('ECONNRESET');
+    // Not a fee error, and not one of the transient-network patterns this
+    // middleware also tracks under the shared retry counter (see issue #723)
+    // — a genuinely unrelated application error.
+    const unrelatedError = new Error('Invalid stream ID');
 
-    const { finalError, retryAttempts } = await driveRetryLoop(plugin, ctx, networkError);
+    const { finalError, retryAttempts } = await driveRetryLoop(plugin, ctx, unrelatedError);
 
-    // Non-fee errors propagate unchanged with zero retry attempts.
-    expect(finalError).toBe(networkError);
+    // Non-fee, non-transient errors propagate unchanged with zero retry attempts.
+    expect(finalError).toBe(unrelatedError);
     expect(finalError).not.toBeInstanceOf(FeeRetryError);
     expect(retryAttempts).toBe(0);
     expect(onRetry).not.toHaveBeenCalled();

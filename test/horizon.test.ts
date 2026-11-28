@@ -31,7 +31,11 @@ describe('Horizon URL configuration', () => {
     try {
       await client.getAddressActivity(ACCOUNT_ID);
 
-      const requestedUrls = fetchMock.mock.calls.map(([url]) => String(url));
+      // The client also pings the RPC health endpoint on construction
+      // (unrelated to Horizon), so only inspect the Horizon-bound requests.
+      const requestedUrls = fetchMock.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.includes('/accounts/'));
       expect(requestedUrls).toEqual(
         expect.arrayContaining([
           expect.stringMatching(/^https:\/\/regional\.example\/horizon\/accounts\//),

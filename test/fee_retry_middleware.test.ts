@@ -369,20 +369,19 @@ describe('renewTimeBounds (issue #894)', () => {
       timebounds: { minTime: nowSeconds + 100, maxTime: nowSeconds + 10_000 },
     })
       .addOperation(Operation.bumpSequence({ bumpTo: '2' }))
-      .setTimeout(0)
       .build();
 
-    expect(inner.timeBounds?.minTime).toBe(nowSeconds + 100);
+    expect(Number(inner.timeBounds?.minTime)).toBe(nowSeconds + 100);
 
     const timeoutSeconds = 60;
     const rebuilt = renewTimeBounds(inner, { timeoutSeconds });
 
     // minTime is always reset to 0 rather than preserved from the original tx.
-    expect(rebuilt.timeBounds?.minTime).toBe(0);
+    expect(Number(rebuilt.timeBounds?.minTime)).toBe(0);
 
     // maxTime reflects the new timeout (now + timeoutSeconds), within a small tolerance.
     const expectedMax = Math.floor(Date.now() / 1000) + timeoutSeconds;
-    expect(rebuilt.timeBounds?.maxTime).toBeGreaterThanOrEqual(expectedMax - 5);
-    expect(rebuilt.timeBounds?.maxTime).toBeLessThanOrEqual(expectedMax + 5);
+    expect(Number(rebuilt.timeBounds?.maxTime)).toBeGreaterThanOrEqual(expectedMax - 5);
+    expect(Number(rebuilt.timeBounds?.maxTime)).toBeLessThanOrEqual(expectedMax + 5);
   });
 });

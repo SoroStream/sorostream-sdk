@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   isSoroStreamError,
   isNetworkError,
   isContractError,
   isValidationError,
   isAuthError,
+  matchError,
 } from '../src/error-guards.js';
 import {
   SoroStreamError,
@@ -138,5 +139,97 @@ describe.each(categories)('$name', ({ guard, matching, others }) => {
     expect(guard(null)).toBe(false);
     expect(guard(undefined)).toBe(false);
     expect(guard('error')).toBe(false);
+  });
+});
+
+describe('matchError', () => {
+  it('dispatches each error category to its corresponding handler', () => {
+    const network = new SoroStreamRetryExhaustedError(new Error('retry exhausted'), 3, [], null);
+    const contract = new TransactionFailedError('tx failed');
+    const validation = new InsufficientAmountError();
+    const auth = new NonceNotSupportedError();
+
+    const onNetwork = vi.fn(() => 'network');
+    const onContract = vi.fn(() => 'contract');
+    const onValidation = vi.fn(() => 'validation');
+    const onAuth = vi.fn(() => 'auth');
+    const otherwise = vi.fn(() => 'otherwise');
+
+    expect(matchError(network, { onNetwork, onContract, onValidation, onAuth, otherwise })).toBe(
+      'network',
+    );
+    expect(matchError(contract, { onNetwork, onContract, onValidation, onAuth, otherwise })).toBe(
+      'contract',
+    );
+    expect(matchError(validation, { onNetwork, onContract, onValidation, onAuth, otherwise })).toBe(
+      'validation',
+    );
+    expect(matchError(auth, { onNetwork, onContract, onValidation, onAuth, otherwise })).toBe(
+      'auth',
+    );
+
+    expect(onNetwork).toHaveBeenCalledTimes(1);
+    expect(onContract).toHaveBeenCalledTimes(1);
+    expect(onValidation).toHaveBeenCalledTimes(1);
+    expect(onAuth).toHaveBeenCalledTimes(1);
+    expect(otherwise).not.toHaveBeenCalled();
+  });
+
+  it('dispatches in fixed order onNetwork → onContract → onValidation → onAuth → otherwise', () => {
+    const err = new SoroStreamRetryExhaustedError(new Error('retry exhausted'), 3, [], null);
+
+    const onNetwork = vi.fn(() => 'network');
+    const onContract = vi.fn(() => 'contract');
+    const onValidation = vi.fn(() => 'validation');
+    const onAuth = vi.fn(() => 'auth');
+    const otherwise = vi.fn(() => 'otherwise');
+
+    const result = matchError(err, { onNetwork, onContract, onValidation, onAuth, otherwise });
+
+    expect(result).toBe('network');
+    expect(onNetwork).toHaveBeenCalledTimes(1);
+    expect(onNetwork).toHaveBeenCalledWith(err);
+    expect(onContract).not.toHaveBeenCalled();
+    expect(onValidation).not.toHaveBeenCalled();
+    expect(onAuth).not.toHaveBeenCalled();
+    expect(otherwise).not.toHaveBeenCalled();
+  });
+
+  it('falls back to otherwise when no category matches', () => {
+    const err = new Error('plain error');
+    const otherwise = vi.fn(() => 'otherwise');
+
+    expect(matchError(err, { otherwise })).toBe('otherwise');
+    expect(otherwise).toHaveBeenCalledWith(err);
+  });
+
+  it('returns undefined when no handler matches and otherwise is omitted', () => {
+    const err = new Error('plain error');
+
+    expect(matchError(err, {})).toBeUndefined();
+    expect(
+      matchError(err, {
+        onNetwork: () => 'network',
+        onContract: () => 'contract',
+        onValidation: () => 'validation',
+        onAuth: () => 'auth',
+      }),
+    ).toBeUndefined();
+  });
+
+  it('supports the documented early-exit example with omitted handlers', () => {
+    const onNetwork = vi.fn(() => 'network');
+    const onValidation = vi.fn(() => 'validation');
+
+    const network = new SoroStreamRetryExhaustedError(new Error('retry exhausted'), 3, [], null);
+    const validation = new InsufficientAmountError();
+    const unmatched = new TransactionFailedError('tx failed');
+
+    expect(matchError(network, { onNetwork, onValidation })).toBe('network');
+    expect(matchError(validation, { onNetwork, onValidation })).toBe('validation');
+    expect(matchError(unmatched, { onNetwork, onValidation })).toBeUndefined();
+
+    expect(onNetwork).toHaveBeenCalledTimes(1);
+    expect(onValidation).toHaveBeenCalledTimes(1);
   });
 });

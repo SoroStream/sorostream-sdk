@@ -17,8 +17,7 @@ const token = Keypair.random().publicKey();
 function scMap(entries: Record<string, xdr.ScVal>): xdr.ScVal {
   return xdr.ScVal.scvMap(
     Object.entries(entries).map(
-      ([key, val]) =>
-        new xdr.ScMapEntry({ key: nativeToScVal(key, { type: 'symbol' }), val }),
+      ([key, val]) => new xdr.ScMapEntry({ key: nativeToScVal(key, { type: 'symbol' }), val }),
     ),
   );
 }
@@ -31,10 +30,7 @@ function makeRawEvent(
 ): rpc.Api.EventResponse {
   return {
     type: 'contract',
-    topic: [
-      nativeToScVal(eventName, { type: 'symbol' }),
-      nativeToScVal(streamId, { type: 'u64' }),
-    ],
+    topic: [nativeToScVal(eventName, { type: 'symbol' }), nativeToScVal(streamId, { type: 'u64' })],
     value: scMap(data),
     txHash: TX_HASH,
     ledger: LEDGER,
@@ -197,5 +193,48 @@ describe('parseContractEvent — known SoroStream event types', () => {
       ledger: LEDGER,
       timestamp: LEDGER_TIMESTAMP_MS,
     });
+  });
+});
+
+describe('parseContractEvent — unrecognised events', () => {
+  function makeUnknownEvent(topic: xdr.ScVal[], value: xdr.ScVal): rpc.Api.EventResponse {
+    return {
+      type: 'contract',
+      topic,
+      value,
+      txHash: 'deadbeef',
+      ledger: 42,
+      ledgerClosedAt: '2024-01-01T00:00:00Z',
+      contractId: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM',
+      id: '1-1',
+      pagingToken: '1-1',
+      inSuccessfulContractCall: true,
+    } as unknown as rpc.Api.EventResponse;
+  }
+
+  it('returns UnknownEventPayload for an unrecognised topic[0] type', () => {
+    const raw = makeUnknownEvent(
+      [nativeToScVal('SomeUnknownEvent', { type: 'symbol' })],
+      nativeToScVal({ foo: 'bar' }),
+    );
+
+    const payload = parseContractEvent(raw);
+
+    expect(payload.type).toBe('UnknownEvent');
+    if (payload.type !== 'UnknownEvent') throw new Error('unreachable');
+    expect(payload.rawType).toBe('SomeUnknownEvent');
+    expect(payload.rawData).toEqual({ foo: 'bar' });
+    expect(payload.txHash).toBe('deadbeef');
+    expect(payload.ledger).toBe(42);
+  });
+
+  it('returns UnknownEventPayload with rawType null when topics are empty', () => {
+    const raw = makeUnknownEvent([], nativeToScVal({ foo: 'bar' }));
+
+    const payload = parseContractEvent(raw);
+
+    expect(payload.type).toBe('UnknownEvent');
+    if (payload.type !== 'UnknownEvent') throw new Error('unreachable');
+    expect(payload.rawType).toBeNull();
   });
 });
