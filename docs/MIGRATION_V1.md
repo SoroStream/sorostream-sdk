@@ -4,7 +4,7 @@ This guide helps you upgrade from any `0.x` release of `@sorostream/sdk` to the 
 v1.0.0 stabilises the public API, hardens security defaults, and introduces several new entry points. Follow
 the checklist below and work through each breaking-change section that applies to your code.
 
-> **Related:** If you are upgrading from v0.0.x to v0.1.0 first, see the [v0.0.x → v0.1.0 guide](../MIGRATION.md).
+> **Related:** If you are upgrading from v0.0.x to v0.1.0 first, see the [v0.0.x → v0.1.0 guide](./MIGRATION.md).
 
 ---
 

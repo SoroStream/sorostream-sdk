@@ -40,7 +40,7 @@ export interface RpcTransportGetEventsRequest {
  * it. Custom transports only need to implement the methods below; there is no
  * base class to extend.
  *
- * See CUSTOM_TRANSPORT.md for the full guide, lifecycle, and error handling
+ * See docs/CUSTOM_TRANSPORT.md for the full guide, lifecycle, and error handling
  * contract.
  */
 export interface RpcTransportAdapter {

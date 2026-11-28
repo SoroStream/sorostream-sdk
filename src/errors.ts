@@ -198,7 +198,7 @@ export class SoroStreamMemoError extends SoroStreamError {
  * an auth failure, …) before letting it propagate out of an adapter method.
  * Not required — an adapter may throw any `Error` — but using it gives
  * `withRetry`'s failure logs and `SoroStreamRetryExhaustedError.originalError`
- * a consistent shape. See CUSTOM_TRANSPORT.md.
+ * a consistent shape. See docs/CUSTOM_TRANSPORT.md.
  */
 export class SoroStreamTransportError extends SoroStreamError {
   /** The lower-level error that caused this transport failure, if any. */

@@ -323,7 +323,7 @@ export interface SoroStreamClientOptions {
   /**
    * Optional custom transport for all Soroban RPC calls. Defaults to a
    * thin wrapper around `@stellar/stellar-sdk`'s `rpc.Server` pointed at
-   * `rpcUrl` (or the network default). See CUSTOM_TRANSPORT.md.
+   * `rpcUrl` (or the network default). See docs/CUSTOM_TRANSPORT.md.
    */
   transport?: RpcTransportAdapter;
   /** Optional circuit-breaker configuration for RPC calls. */
@@ -6154,7 +6154,7 @@ export class SoroStreamClient<TEventData = Record<string, unknown>> {
    * `teardown()` hook. Only meaningful for a custom `transport` that holds
    * open resources (sockets, timers, …) — the default transport has nothing
    * to release. Safe to call even if no custom transport was configured.
-   * See CUSTOM_TRANSPORT.md.
+   * See docs/CUSTOM_TRANSPORT.md.
    */
   async disconnect(): Promise<void> {
     await this.server.teardown?.();

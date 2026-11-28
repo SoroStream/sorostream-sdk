@@ -7,7 +7,7 @@ import { createDefaultRpcTransport } from '../src/transport.js';
 const repoRoot = resolve(__dirname, '..');
 
 describe('CUSTOM_TRANSPORT.md', () => {
-  const doc = readFileSync(resolve(repoRoot, 'CUSTOM_TRANSPORT.md'), 'utf8');
+  const doc = readFileSync(resolve(repoRoot, 'docs/CUSTOM_TRANSPORT.md'), 'utf8');
 
   it('documents the RpcTransportAdapter interface with TypeScript types', () => {
     expect(doc).toContain('interface RpcTransportAdapter');
